@@ -1,0 +1,24 @@
+{
+  "name": "dynamodb-toolkit",
+  "version": "1.0.0",
+  "description": "Helpers for AWS DynamoDB to build efficient web applications",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/uhop/dynamodb-toolkit.git"
+  },
+  "keywords": [
+    "aws",
+    "dynamodb",
+    "database"
+  ],
+  "author": "Eugene Lazutkin <eugene.lazutkin@gmail.com> (http://lazutkin.com)",
+  "license": "BSD-3-Clause",
+  "bugs": {
+    "url": "https://github.com/uhop/dynamodb-toolkit/issues"
+  },
+  "homepage": "https://github.com/uhop/dynamodb-toolkit#readme"
+}

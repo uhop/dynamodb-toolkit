@@ -1,0 +1,8 @@
+node_modules/
+build/
+report/
+coverage/
+.AppleDouble
+.DS_Store
+dist/
+.serverless
