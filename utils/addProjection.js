@@ -2,7 +2,7 @@
 
 // form a project expression for DynamoDB
 
-const addProjection = (params, fields, dict, skipSelect) => {
+const addProjection = (params, fields, projectionFieldMap, skipSelect) => {
   if (!fields) return params;
   if (typeof fields == 'string') {
     fields = Object.keys(
@@ -10,7 +10,7 @@ const addProjection = (params, fields, dict, skipSelect) => {
         .split(',')
         .map(f => f.trim())
         .filter(f => f)
-        .reduce((acc, f) => ((acc[dict[f] || f] = 1), acc), {})
+        .reduce((acc, f) => ((acc[projectionFieldMap[f] || f] = 1), acc), {})
     );
   }
   const projectionMap = fields.reduce((acc, value, index) => ((acc['#pr' + index] = value), acc), {});

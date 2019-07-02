@@ -78,7 +78,7 @@ const prepareFlatUpdate = (patch, params = {}, separator = '.') => {
     acc.push(path.join('.') + ' = ' + valueAlias);
     return acc;
   }, []);
-  const removeActions = patch._delete
+  const removeActions = patch._delete && patch._delete.SS
     ? patch._delete.SS.reduce((acc, key) => {
         const path = key.split(separator).map(key => {
           if (isInteger.test(key)) return key;
