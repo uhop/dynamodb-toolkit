@@ -6,6 +6,7 @@ const prepareUpdate = require('./utils/prepareUpdate');
 const paginateList = require('./utils/paginateList');
 const deleteList = require('./utils/deleteList');
 const copyList = require('./utils/copyList');
+const readList = require('./utils/readList');
 const writeList = require('./utils/writeList');
 const fieldsToMap = require('./utils/fieldsToMap');
 
@@ -25,16 +26,22 @@ class Adapter {
 
   // user-defined methods
 
-  // makeKey(item) {...} should be provided
-  prepare(item) {
+  prepare(item, isPatch) {
     // prepare to write it to a database
     // add some technical fields if required
     return item;
   }
+
   revive(item, fieldMap) {
     // reconstitute a database object
     // remove some technical fields if required
     return item;
+  }
+
+  // utilities
+
+  restrictKey(item) {
+    return this.keyFields.reduce((acc, key) => ((acc[key] = item[key]), acc), {});
   }
 
   // general API
@@ -42,14 +49,14 @@ class Adapter {
   async getByKey(key, fields, params) {
     params = params ? Object.assign({}, params) : {};
     params.TableName = this.table;
-    params.Key = convertTo(key);
+    params.Key = this.restrictKey(convertTo(this.prepare(key), this.specialTypes));
     fields && addProjection(params, fields, this.projectionFieldMap, true);
     const data = await this.client.getItem(params).promise();
     return data.Item ? this.revive(convertFrom(data.Item), fieldsToMap(fields)) : undefined;
   }
 
   async get(item, fields, params) {
-    return this.getByKey(this.makeKey(item), fields, params);
+    return this.getByKey(item, fields, params);
   }
 
   async post(item, params) {
@@ -66,7 +73,7 @@ class Adapter {
     return this.client.putItem(params).promise();
   }
 
-  async put(item, params, force) {
+  async put(item, force, params) {
     params = params ? Object.assign({}, params) : {};
     params.TableName = this.table;
     if (!force) {
@@ -85,7 +92,7 @@ class Adapter {
   async patchByKey(key, item, deep, params) {
     params = params ? Object.assign({}, params) : {};
     params.TableName = this.table;
-    params.Key = convertTo(key);
+    params.Key = this.restrictKey(convertTo(this.prepare(key), this.specialTypes));
     if (params.ConditionExpression) {
       params.ConditionExpression = `attribute_exists(#k) AND (${params.ConditionExpression})`;
     } else {
@@ -93,31 +100,39 @@ class Adapter {
     }
     params.ExpressionAttributeNames = Object.assign({}, params.ExpressionAttributeNames) || {};
     params.ExpressionAttributeNames['#k'] = this.keyFields[0];
-    item = convertTo(this.prepare(item, true), this.specialTypes);
-    this.keyFields.forEach(field => delete item[field]);
-    params = deep ? prepareUpdate(item, params) : prepareUpdate.flat(item, params);
+    const dbItem = convertTo(this.prepare(item, true), this.specialTypes);
+    this.keyFields.forEach(field => delete dbItem[field]);
+    if (deep) {
+      params = prepareUpdate(dbItem, params);
+    } else {
+      const deleteProps = item.__delete;
+      if (dbItem.__delete) {
+        delete dbItem.__delete;
+      }
+      params = prepareUpdate.flat(dbItem, deleteProps, params);
+    }
     return params.UpdateExpression ? this.client.updateItem(params).promise() : null;
   }
 
   async patch(item, deep, params) {
-    return this.patchByKey(this.makeKey(item), item, deep, params);
+    return this.patchByKey(item, item, deep, params);
   }
 
   async deleteByKey(key, params) {
     params = params ? Object.assign({}, params) : {};
     params.TableName = this.table;
-    params.Key = convertTo(key);
+    params.Key = this.restrictKey(convertTo(this.prepare(key), this.specialTypes));
     return this.client.deleteItem(params).promise();
   }
 
   async delete(item, params) {
-    return this.deleteByKey(this.makeKey(item), params);
+    return this.deleteByKey(item, params);
   }
 
-  async cloneByKey(key, mapFn, params, force) {
+  async cloneByKey(key, mapFn, force, params) {
     params = params ? Object.assign({}, params) : {};
     params.TableName = this.table;
-    params.Key = convertTo(key);
+    params.Key = this.restrictKey(convertTo(this.prepare(key), this.specialTypes));
     const data = await this.client.getItem(params).promise();
     if (!data.Item) return false;
     delete params.Key;
@@ -135,27 +150,35 @@ class Adapter {
     return true;
   }
 
-  async clone(item, mapFn, params, force) {
-    return this.cloneByKey(this.makeKey(item), mapFn, params, force);
+  async clone(item, mapFn, force, params) {
+    return this.cloneByKey(item, mapFn, force, params);
   }
 
   // mass operations
 
-  async getAllByParams(params, action, options, fields) {
+  async getAllByParams(params, options, fields) {
     params = Object.assign({}, params);
     params.TableName = this.table;
     fields && addProjection(params, fields, this.projectionFieldMap, true);
-    const result = await paginateList(this.client, action, params, options),
+    const result = await paginateList(this.client, params, options),
       fieldMap = fieldsToMap(fields);
     result.data = result.data.map(item => this.revive(convertFrom(item), fieldMap));
     return result;
+  }
+
+  async getAllByKeys(keys, fields, params) {
+    params = Object.assign({}, params);
+    fields && addProjection(params, fields, this.projectionFieldMap, true);
+    const items = await readList(this.client, this.table, keys.map(key => this.restrictKey(convertTo(this.prepare(key), this.specialTypes))), params),
+      fieldMap = fieldsToMap(fields);
+    return items.map(item => this.revive(convertFrom(item), fieldMap));
   }
 
   async putAll(items) {
     return writeList(this.client, this.table, items, item => convertTo(this.prepare(item), this.specialTypes));
   }
 
-  async deleteAllByParams(params, action) {
+  async deleteAllByParams(params) {
     params = Object.assign({}, params);
     params.TableName = this.table;
     params.ExpressionAttributeNames = params.ExpressionAttributeNames ? Object.assign({}, params.ExpressionAttributeNames) : {};
@@ -166,13 +189,13 @@ class Adapter {
     });
     params.ProjectionExpression = keys.join(',');
     params.Select = 'SPECIFIC_ATTRIBUTES';
-    return deleteList(this.client, action, params);
+    return deleteList(this.client, params);
   }
 
-  async cloneAllByParams(params, action, mapFn) {
+  async cloneAllByParams(params, mapFn) {
     params = Object.assign({}, params);
     params.TableName = this.table;
-    return copyList(this.client, action, params, item => convertTo(this.prepare(mapFn(this.revive(convertFrom(item)))), this.specialTypes));
+    return copyList(this.client, params, item => convertTo(this.prepare(mapFn(this.revive(convertFrom(item)))), this.specialTypes));
   }
 }
 

@@ -3,8 +3,9 @@
 const getTotal = require('./getTotal');
 const cleanParams = require('./cleanParams');
 
-const paginateList = async (client, action, params, options, needTotal = true, minLimit = 10, maxLimit = 100) => {
+const paginateList = async (client, params, options, needTotal = true, minLimit = 10, maxLimit = 100) => {
   options = options || {};
+  const action = params.KeyConditionExpression ? 'query' : 'scan';
   let result = [],
     total = 0,
     offset = 0,

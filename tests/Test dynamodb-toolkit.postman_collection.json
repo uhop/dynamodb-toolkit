@@ -21,6 +21,34 @@
 			"response": []
 		},
 		{
+			"name": "Get planets by name",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/-get-by-names?names=Hoth,Endor,Bespin&fields=name,diameter,climate,terrain",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"-get-by-names"
+					],
+					"query": [
+						{
+							"key": "names",
+							"value": "Hoth,Endor,Bespin"
+						},
+						{
+							"key": "fields",
+							"value": "name,diameter,climate,terrain"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
 			"name": "Get a list of planets sorted",
 			"request": {
 				"method": "GET",
@@ -286,7 +314,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n  \"terrain\": \"mountain\",\n  \"config.a\": \"one\",\n  \"_delete\": [\"config.b\"]\n}"
+					"raw": "{\n  \"terrain\": \"mountain\",\n  \"config.a\": \"one\",\n  \"__delete\": [\"config.b\"]\n}"
 				},
 				"url": {
 					"raw": "localhost:3000/AAA%20Fake",

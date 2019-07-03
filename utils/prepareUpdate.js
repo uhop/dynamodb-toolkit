@@ -56,14 +56,13 @@ const prepareUpdate = (patch, params = {}) => {
 
 const isInteger = /^\d+$/;
 
-const prepareFlatUpdate = (patch, params = {}, separator = '.') => {
+const prepareFlatUpdate = (patch, deleteProps, params = {}, separator = '.') => {
   const names = params.ExpressionAttributeNames || {},
     values = params.ExpressionAttributeValues || {},
     uniqueNames = {};
   let keyCounter = 0,
     valueCounter = 0;
   const setActions = Object.keys(patch).reduce((acc, key) => {
-    if (key === '_delete') return acc;
     const path = key.split(separator).map(key => {
       if (isInteger.test(key)) return key;
       let alias = uniqueNames['#' + key];
@@ -78,8 +77,8 @@ const prepareFlatUpdate = (patch, params = {}, separator = '.') => {
     acc.push(path.join('.') + ' = ' + valueAlias);
     return acc;
   }, []);
-  const removeActions = patch._delete && patch._delete.SS
-    ? patch._delete.SS.reduce((acc, key) => {
+  const removeActions = deleteProps
+    ? deleteProps.reduce((acc, key) => {
         const path = key.split(separator).map(key => {
           if (isInteger.test(key)) return key;
           let alias = uniqueNames['#' + key];

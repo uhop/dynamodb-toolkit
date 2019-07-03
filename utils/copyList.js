@@ -11,23 +11,27 @@ const writeKeyList = async (client, tableName, items) => {
       [tableName]: items.map(item => ({PutRequest: {Item: item}}))
     }
   };
-  await batchWrite(client, params);
+  return batchWrite(client, params);
 };
 
-const copyList = async (client, action, params, mapFn) => {
+const copyList = async (client, params, mapFn) => {
   // prepare parameters
+  const action = params.KeyConditionExpression ? 'query' : 'scan';
   params = Object.assign({}, params);
   params.Limit = 25;
 
   // iterate over parameters copying records
+  let processed = 0;
   for (;;) {
     const data = await client[action](params).promise();
     if (data.Items && data.Items.length) {
+      processed += data.Items.length;
       await writeKeyList(client, params.TableName, data.Items.map(mapFn));
     }
     if (!data.LastEvaluatedKey) break;
     params.ExclusiveStartKey = data.LastEvaluatedKey;
   }
+  return processed;
 };
 
 module.exports = copyList;

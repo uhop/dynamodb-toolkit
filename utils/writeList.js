@@ -11,7 +11,7 @@ const writeKeyList = async (client, tableName, items) => {
       [tableName]: items.map(item => ({PutRequest: {Item: item}}))
     }
   };
-  await batchWrite(client, params);
+  return batchWrite(client, params);
 };
 
 const writeList = async (client, tableName, items, mapFn) => {

@@ -59,7 +59,7 @@ class KoaAdapter {
     const item = this.augmentFromContext(ctx.request.body, ctx);
     await this.validItem(item);
     await this.canBeModified(item);
-    await this.adapter.put(item);
+    await this.adapter.put(item, isTrue(ctx.query, 'force'));
     ctx.status = 204;
   }
 

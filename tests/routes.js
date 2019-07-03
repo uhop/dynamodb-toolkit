@@ -18,9 +18,6 @@ const adapter = new KoaAdapter(
     table: 'test',
     keyFields: ['name'],
     searchable: {name: 1, climate: 1, terrain: 1},
-    makeKey(item) {
-      return {name: item.name};
-    },
     prepare(item) {
       const data = Object.keys(item).reduce((acc, key) => {
         if (key.charAt(0) !== '-') {
@@ -58,14 +55,12 @@ const adapter = new KoaAdapter(
       return item;
     },
     async getAll(ctx) {
-      let params = {},
-        action = 'scan';
+      let params = {};
       if (ctx.query.sort) {
         let sortName = ctx.query.sort,
           descending = ctx.query.sort.charAt(0) == '-';
         if (descending) {
           sortName = ctx.query.sort.substr(1);
-          action = 'query';
           params.ScanIndexForward = false;
           params.KeyConditionExpression = '#t = :t';
           params.ExpressionAttributeNames = {'#t': '-t'};
@@ -74,22 +69,33 @@ const adapter = new KoaAdapter(
         params.IndexName = this.sortableIndices[sortName];
       }
       params = this.massParams(ctx, params);
-      ctx.body = await this.adapter.getAllByParams(params, action, {offset: ctx.query.offset, limit: ctx.query.limit}, ctx.query.fields);
+      ctx.body = await this.adapter.getAllByParams(params, {offset: ctx.query.offset, limit: ctx.query.limit}, ctx.query.fields);
     },
     async deleteAll(ctx) {
       const params = this.massParams(ctx);
-      await this.adapter.deleteAllByParams(params, 'scan');
-      ctx.status = 204;
+      ctx.body = {processed: await this.adapter.deleteAllByParams(params)};
     },
     async cloneAll(ctx) {
       const params = this.massParams(ctx);
-      await this.adapter.cloneAllByParams(params, 'scan', item => ({...item, name: item.name + ' COPY'}));
-      ctx.status = 204;
+      ctx.body = {processed: await this.adapter.cloneAllByParams(params, item => ({...item, name: item.name + ' COPY'}))};
     },
     async load(ctx) {
       const data = JSON.parse(await fs.promises.readFile(path.join(__dirname, 'data.json')));
       await this.adapter.putAll(data);
       ctx.status = 204;
+    },
+    async getByNames(ctx) {
+      if (!ctx.query.names) throw new Error('Query parameter "names" was expected. Should be a comma-separated list of planet names.');
+      const params = this.massParams(ctx);
+      ctx.body = await this.adapter.getAllByKeys(
+        ctx.query.names
+          .split(',')
+          .map(name => name.trim())
+          .filter(name => name)
+          .map(name => ({name})),
+        ctx.query.fields,
+        params
+      );
     }
   }
 );
@@ -102,6 +108,7 @@ router
   .put('/-load', async ctx => adapter.load(ctx))
   .put('/-delete-all', async ctx => adapter.deleteAll(ctx))
   .put('/-clone-all', async ctx => adapter.cloneAll(ctx))
+  .get('/-get-by-names', async ctx => adapter.getByNames(ctx))
 
   // item operations
   .post('/', async ctx => adapter.post(ctx))
