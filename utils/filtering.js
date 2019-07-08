@@ -1,6 +1,6 @@
 'use strict';
 
-const filtering = (filter, fieldMap, searchable, params = {}) => {
+const filtering = (filter, fieldMap, searchable, prefix = '-search-', params = {}) => {
   if (!filter) return params;
 
   let searchKeys = Object.keys(searchable);
@@ -18,7 +18,7 @@ const filtering = (filter, fieldMap, searchable, params = {}) => {
   }
 
   params.ExpressionAttributeNames = searchKeys.reduce(
-    (acc, value, index) => ((acc['#sr' + index] = '-search-' + value), acc),
+    (acc, value, index) => ((acc['#sr' + index] = prefix + value), acc),
     params.ExpressionAttributeNames ? Object.assign({}, params.ExpressionAttributeNames) : {}
   );
 
