@@ -64,7 +64,8 @@ AWS.config.update({region: 'us-east-1'});
 const client = new AWS.DynamoDB();
 
 // Example with different credentials:
-// const credentials = new AWS.SharedIniFileCredentials({profile: 'production'});
+// const credentials = new AWS.SharedIniFileCredentials(
+//   {profile: 'production'});
 // const client = new AWS.DynamoDB({credentials: credentials});
 ```
 
@@ -82,7 +83,8 @@ const adapter = new Adapter({
     const data = Object.keys(item).reduce((acc, key) => {
       if (key.charAt(0) !== '-') {
         acc[key] = item[key];
-        if (this.searchable[key] === 1) acc['-search-' + key] = (item[key] + '').toLowerCase();
+        if (this.searchable[key] === 1)
+          acc['-search-' + key] = (item[key] + '').toLowerCase();
       }
       return acc;
     }, {});
@@ -153,16 +155,19 @@ const koaAdapter = new KoaAdapter(
         item => ({...item, name: item.name + ' COPY'}))};
     },
     async load(ctx) {
-      const data = JSON.parse(await fs.promises.readFile(path.join(__dirname, 'data.json')));
+      const data = JSON.parse(await fs.promises.readFile(
+        path.join(__dirname, 'data.json')));
       await this.adapter.putAll(data);
       ctx.status = 204;
     },
     async getByNames(ctx) {
-      if (!ctx.query.names) throw new Error('Query parameter "names" was expected. ' +
+      if (!ctx.query.names) throw new Error(
+        'Query parameter "names" was expected. ' +
         'Should be a comma-separated list of planet names.');
       const params = this.massParams(ctx),
-        key = ctx.query.names
-          .split(',').map(name => name.trim()).filter(name => name).map(name => ({name}));
+        keys = ctx.query.names
+          .split(',').map(name => name.trim())
+          .filter(name => name).map(name => ({name}));
       ctx.body = await this.adapter.getAllByKeys(keys, ctx.query.fields, params);
     }
   }
