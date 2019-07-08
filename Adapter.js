@@ -32,16 +32,20 @@ class Adapter {
     return item;
   }
 
+  prepareKey(item, index) {
+    // prepare a key for a database
+    // add some technical fields if required
+    item = this.prepare(item);
+    return this.keyFields.reduce((acc, key) => {
+      if (item.hasOwnProperty(key)) acc[key] = item[key];
+      return acc;
+    }, {});
+  }
+
   revive(item, fieldMap) {
     // reconstitute a database object
     // remove some technical fields if required
     return item;
-  }
-
-  // utilities
-
-  restrictKey(item) {
-    return this.keyFields.reduce((acc, key) => ((acc[key] = item[key]), acc), {});
   }
 
   // general API
@@ -49,7 +53,7 @@ class Adapter {
   async getByKey(key, fields, params) {
     params = params ? Object.assign({}, params) : {};
     params.TableName = this.table;
-    params.Key = this.restrictKey(convertTo(this.prepare(key), this.specialTypes));
+    params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
     const data = await this.client.getItem(params).promise();
     return data.Item ? this.revive(convertFrom(data.Item), fieldsToMap(fields)) : undefined;
@@ -92,7 +96,7 @@ class Adapter {
   async patchByKey(key, item, deep, params) {
     params = params ? Object.assign({}, params) : {};
     params.TableName = this.table;
-    params.Key = this.restrictKey(convertTo(this.prepare(key), this.specialTypes));
+    params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
     if (params.ConditionExpression) {
       params.ConditionExpression = `attribute_exists(#k) AND (${params.ConditionExpression})`;
     } else {
@@ -121,7 +125,7 @@ class Adapter {
   async deleteByKey(key, params) {
     params = params ? Object.assign({}, params) : {};
     params.TableName = this.table;
-    params.Key = this.restrictKey(convertTo(this.prepare(key), this.specialTypes));
+    params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
     return this.client.deleteItem(params).promise();
   }
 
@@ -132,7 +136,7 @@ class Adapter {
   async cloneByKey(key, mapFn, force, params) {
     params = params ? Object.assign({}, params) : {};
     params.TableName = this.table;
-    params.Key = this.restrictKey(convertTo(this.prepare(key), this.specialTypes));
+    params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
     const data = await this.client.getItem(params).promise();
     if (!data.Item) return false;
     delete params.Key;
@@ -169,7 +173,7 @@ class Adapter {
   async getAllByKeys(keys, fields, params) {
     params = Object.assign({}, params);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
-    const items = await readList(this.client, this.table, keys.map(key => this.restrictKey(convertTo(this.prepare(key), this.specialTypes))), params),
+    const items = await readList(this.client, this.table, keys.map(key => convertTo(this.prepareKey(key, params.IndexName), this.specialTypes)), params),
       fieldMap = fieldsToMap(fields);
     return items.map(item => this.revive(convertFrom(item), fieldMap));
   }
