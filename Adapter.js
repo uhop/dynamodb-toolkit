@@ -14,7 +14,7 @@ class Adapter {
   constructor(options) {
     // defaults
     this.keyFields = [];
-    this.specialTypes = {_delete: 'SS'};
+    this.specialTypes = {};
     this.projectionFieldMap = {};
     // overlay
     Object.assign(this, options);
@@ -26,7 +26,7 @@ class Adapter {
 
   // user-defined methods
 
-  prepare(item, isPatch) {
+  prepare(item, isPatch, deep) {
     // prepare to write it to a database
     // add some technical fields if required
     return item;
@@ -48,6 +48,10 @@ class Adapter {
     return item;
   }
 
+  // searchable: {name: 1, description: 1},
+  // searchablePrefix: '',
+
+
   // general API
 
   async getByKey(key, fields, params) {
@@ -63,8 +67,8 @@ class Adapter {
     return this.getByKey(item, fields, params);
   }
 
-  async post(item, params) {
-    params = params ? Object.assign({}, params) : {};
+  async post(item) {
+    const params = {};
     params.TableName = this.table;
     if (params.ConditionExpression) {
       params.ConditionExpression = `attribute_not_exists(#k) AND (${params.ConditionExpression})`;
@@ -104,7 +108,7 @@ class Adapter {
     }
     params.ExpressionAttributeNames = Object.assign({}, params.ExpressionAttributeNames) || {};
     params.ExpressionAttributeNames['#k'] = this.keyFields[0];
-    const dbItem = convertTo(this.prepare(item, true), this.specialTypes);
+    const dbItem = convertTo(this.prepare(item, true, deep), this.specialTypes);
     this.keyFields.forEach(field => delete dbItem[field]);
     if (deep) {
       params = prepareUpdate(dbItem, params);

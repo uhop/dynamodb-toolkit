@@ -4,7 +4,7 @@
 [![devDependencies][dev-deps-image]][dev-deps-url]
 [![NPM version][npm-image]][npm-url]
 
-No-dependencies micro-library for [AWS DynamoDB](https://aws.amazon.com/dynamodb/) to build small efficient RESTful APIs.
+No-dependencies micro-library for [AWS DynamoDB](https://aws.amazon.com/dynamodb/) to build small efficient RESTful APIs and high-performance command-line utilities.
 
 Helps with:
 
@@ -13,7 +13,7 @@ Helps with:
 * Supports vagaries of mass read/write/delete operations correctly handling throughput-related errors using the recommended exponential back-off algorithm.
 * Implements efficiently on the server:
   * **Paging** (in offset/limit terms) and **sorting** on an index (both ascending and descending).
-  * **Subsetting** (read operations can return a subset required of fields instead of the whole shebang which can be huge especially for mass read operations &mdash; think lists and tables).
+  * **Subsetting** AKA **projection** (read operations can return a subset required of fields instead of the whole shebang which can be huge especially for mass read operations &mdash; think lists and tables).
   * **Searching** AKA **filtering** (filters results using looking for a substring in a predefined set of fields).
   * **Patching** (only necessary fields are transferred to be updated/deleted).
   * **Cloning** (making updated copies in a database).
@@ -23,7 +23,7 @@ Supports out-of-the-box the following operations:
 
 * Standard REST:
   * `get(key [, fields [, params]])` AKA `getByKey(key [, fields [, params]])`
-  * `post(item [, params])`
+  * `post(item)`
   * `put(item [, force [, params]])`
   * `delete(key [, params])` AKA `deleteByKey(key [, params])`
 * Special operations:
@@ -53,7 +53,7 @@ const Router = require('koa-router');
 
 const AWS = require('aws-sdk');
 
-const Adapter = require('dynamodb-toolkit/Adapter');
+const Adapter = require('dynamodb-toolkit');
 const KoaAdapter = require('dynamodb-toolkit/helpers/KoaAdapter');
 ```
 
@@ -209,6 +209,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.1.1 *Bugfix: added the missing index file.*
 - 1.1.0 *Made a search prefix a parameter.*
 - 1.0.0 *The initial public release*
 
