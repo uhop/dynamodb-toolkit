@@ -207,7 +207,8 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
-- 1.0.0 &mdash; *The initial public release*
+- 1.1.0 *Made a search prefix a parameter.*
+- 1.0.0 *The initial public release*
 
 # License
 
