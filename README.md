@@ -12,11 +12,11 @@ Helps with:
 * Working with multiple databases at the same time potentially using different credentials.
 * Supports vagaries of mass read/write/delete operations correctly handling throughput-related errors using the recommended exponential back-off algorithm.
 * Implements efficiently on the server:
-  * Paging (in offset/limit terms) and sorting on an index (both ascending and descending).
-  * Subsetting (read operations can return a subset required of fields instead of the whole shebang which can be huge especially for mass read operations &mdash; think lists and tables).
-  * Searching AKA filtering (filters results using looking for a substring in a predefined set of fields).
-  * Patching (only necessary fields are transferred to be updated/deleted).
-  * Cloning (making updated copies in a database).
+  * **Paging** (in offset/limit terms) and **sorting** on an index (both ascending and descending).
+  * **Subsetting** (read operations can return a subset required of fields instead of the whole shebang which can be huge especially for mass read operations &mdash; think lists and tables).
+  * **Searching** AKA **filtering** (filters results using looking for a substring in a predefined set of fields).
+  * **Patching** (only necessary fields are transferred to be updated/deleted).
+  * **Cloning** (making updated copies in a database).
 * Flexible, thoroughly asynchronous.
 
 Supports out-of-the-box the following operations:
@@ -41,7 +41,7 @@ sends responses encoded as JSON with proper HTTP status codes, and prepares para
 
 # Example
 
-This is annotated [tests/routes.js](https://github.com/uhop/dynamodb-toolkit/blob/master/tests/routes.js):
+This is the annotated [tests/routes.js](https://github.com/uhop/dynamodb-toolkit/blob/master/tests/routes.js):
 
 ## Include dependencies
 
@@ -102,7 +102,8 @@ const adapter = new Adapter({
 });
 ```
 
-We mostly defined how to transform our object to something we keep in a database and back. By default these operations just return their `item` parameter so we don't need to specify them if we don't want any transformations.
+We mostly defined how to transform our object to something we keep in a database and back.
+By default these operations just return their `item` parameter so we don't need to specify them if we don't want any transformations.
 
 ## Define a Koa adapter
 
@@ -121,20 +122,26 @@ const koaAdapter = new KoaAdapter(
     // define mass operations driven by query parameters
     async getAll(ctx) {
       let params = {};
-      if (ctx.query.sort) { // if we sort
+      if (ctx.query.sort) { // do we need to sort?
         let sortName = ctx.query.sort,
           descending = ctx.query.sort.charAt(0) == '-';
         if (descending) {
           sortName = ctx.query.sort.substr(1);
-          params.ScanIndexForward = false;
-          params.KeyConditionExpression = '#t = :t';
-          params.ExpressionAttributeNames = {'#t': '-t'};
-          params.ExpressionAttributeValues = {':t': {N: '1'}};
         }
-        params.IndexName = this.sortableIndices[sortName];
+        const index = this.sortableIndices[sortName];
+        if (index) { // do we have a valid index?
+          if (descending) {
+            params.ScanIndexForward = false;
+            params.KeyConditionExpression = '#t = :t';
+            params.ExpressionAttributeNames = {'#t': '-t'};
+            params.ExpressionAttributeValues = {':t': {N: '1'}};
+          }
+          params.IndexName = index;
+        }
       }
       params = this.massParams(ctx, params);
-      ctx.body = await this.adapter.getAllByParams(params, {offset: ctx.query.offset, limit: ctx.query.limit}, ctx.query.fields);
+      ctx.body = await this.adapter.getAllByParams(params,
+        {offset: ctx.query.offset, limit: ctx.query.limit}, ctx.query.fields);
     },
     async deleteAll(ctx) {
       const params = this.massParams(ctx);
@@ -142,7 +149,8 @@ const koaAdapter = new KoaAdapter(
     },
     async cloneAll(ctx) {
       const params = this.massParams(ctx);
-      ctx.body = {processed: await this.adapter.cloneAllByParams(params, item => ({...item, name: item.name + ' COPY'}))};
+      ctx.body = {processed: await this.adapter.cloneAllByParams(params,
+        item => ({...item, name: item.name + ' COPY'}))};
     },
     async load(ctx) {
       const data = JSON.parse(await fs.promises.readFile(path.join(__dirname, 'data.json')));
@@ -150,17 +158,12 @@ const koaAdapter = new KoaAdapter(
       ctx.status = 204;
     },
     async getByNames(ctx) {
-      if (!ctx.query.names) throw new Error('Query parameter "names" was expected. Should be a comma-separated list of planet names.');
-      const params = this.massParams(ctx);
-      ctx.body = await this.adapter.getAllByKeys(
-        ctx.query.names
-          .split(',')
-          .map(name => name.trim())
-          .filter(name => name)
-          .map(name => ({name})),
-        ctx.query.fields,
-        params
-      );
+      if (!ctx.query.names) throw new Error('Query parameter "names" was expected. ' +
+        'Should be a comma-separated list of planet names.');
+      const params = this.massParams(ctx),
+        key = ctx.query.names
+          .split(',').map(name => name.trim()).filter(name => name).map(name => ({name}));
+      ctx.body = await this.adapter.getAllByKeys(keys, ctx.query.fields, params);
     }
   }
 );
