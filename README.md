@@ -143,7 +143,8 @@ const koaAdapter = new KoaAdapter(
       }
       params = this.massParams(ctx, params);
       ctx.body = await this.adapter.getAllByParams(params,
-        {offset: ctx.query.offset, limit: ctx.query.limit}, ctx.query.fields);
+        {offset: ctx.query.offset, limit: ctx.query.limit},
+        ctx.query.fields);
     },
     async deleteAll(ctx) {
       const params = this.massParams(ctx);
@@ -168,7 +169,8 @@ const koaAdapter = new KoaAdapter(
         keys = ctx.query.names
           .split(',').map(name => name.trim())
           .filter(name => name).map(name => ({name}));
-      ctx.body = await this.adapter.getAllByKeys(keys, ctx.query.fields, params);
+      ctx.body = await this.adapter.getAllByKeys(keys, ctx.query.fields,
+        params);
     }
   }
 );
