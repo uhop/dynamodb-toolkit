@@ -7,7 +7,6 @@ const fieldsToMap = require('../utils/fieldsToMap');
 class KoaAdapter {
   constructor(adapter, overlay) {
     this.adapter = adapter;
-    this.searchable = [];
     Object.assign(this, overlay);
   }
 
@@ -16,8 +15,6 @@ class KoaAdapter {
   }
 
   // user-provided
-
-  // searchable: ['name', 'description'],
 
   augmentFromContext(item, ctx) {
     // this function can override keys taking them from the context (params, query)
@@ -80,7 +77,7 @@ class KoaAdapter {
   massParams(ctx, params) {
     params = Object.assign({}, params);
     isConsistent(ctx.query) && (params.ConsistentRead = true);
-    return filtering(ctx.query.filter, fieldsToMap(ctx.query.fields), this.adapter.searchable, params);
+    return filtering(ctx.query.filter, fieldsToMap(ctx.query.fields), this.searchable || this.adapter.searchable, params);
   }
 }
 
