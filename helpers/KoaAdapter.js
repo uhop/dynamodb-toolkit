@@ -7,6 +7,9 @@ const fieldsToMap = require('../utils/fieldsToMap');
 class KoaAdapter {
   constructor(adapter, overlay) {
     this.adapter = adapter;
+    if (!this.adapter.searchablePrefix) {
+      this.searchablePrefix = '-search-';
+    }
     Object.assign(this, overlay);
   }
 
@@ -15,6 +18,9 @@ class KoaAdapter {
   }
 
   // user-provided
+
+  // searchable: {name: 1, description: 1},
+  // searchablePrefix: '',
 
   augmentFromContext(item, ctx) {
     // this function can override keys taking them from the context (params, query)
@@ -77,7 +83,13 @@ class KoaAdapter {
   massParams(ctx, params) {
     params = Object.assign({}, params);
     isConsistent(ctx.query) && (params.ConsistentRead = true);
-    return filtering(ctx.query.filter, fieldsToMap(ctx.query.fields), this.searchable || this.adapter.searchable, params);
+    return filtering(
+      ctx.query.filter,
+      fieldsToMap(ctx.query.fields),
+      this.searchable || this.adapter.searchable,
+      this.searchablePrefix || this.adapter.searchablePrefix,
+      params
+    );
   }
 }
 
