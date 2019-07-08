@@ -61,12 +61,17 @@ const adapter = new KoaAdapter(
           descending = ctx.query.sort.charAt(0) == '-';
         if (descending) {
           sortName = ctx.query.sort.substr(1);
-          params.ScanIndexForward = false;
-          params.KeyConditionExpression = '#t = :t';
-          params.ExpressionAttributeNames = {'#t': '-t'};
-          params.ExpressionAttributeValues = {':t': {N: '1'}};
         }
-        params.IndexName = this.sortableIndices[sortName];
+        const index = this.sortableIndices[sortName];
+        if (index) {
+          if (descending) {
+            params.ScanIndexForward = false;
+            params.KeyConditionExpression = '#t = :t';
+            params.ExpressionAttributeNames = {'#t': '-t'};
+            params.ExpressionAttributeValues = {':t': {N: '1'}};
+          }
+          params.IndexName = index;
+        }
       }
       params = this.massParams(ctx, params);
       ctx.body = await this.adapter.getAllByParams(params, {offset: ctx.query.offset, limit: ctx.query.limit}, ctx.query.fields);
