@@ -1,15 +1,11 @@
 'use strict';
 
+const Adapter = require('../Adapter');
 const {isTrue, isConsistent} = require('./isTrue');
-const filtering = require('../utils/filtering');
-const fieldsToMap = require('../utils/fieldsToMap');
 
 class KoaAdapter {
   constructor(adapter, overlay) {
-    this.adapter = adapter;
-    if (!this.adapter.searchablePrefix) {
-      this.searchablePrefix = '-search-';
-    }
+    this.adapter = adapter instanceof Adapter ? adapter : new Adapter(adapter);
     Object.assign(this, overlay);
   }
 
@@ -18,9 +14,6 @@ class KoaAdapter {
   }
 
   // user-provided
-
-  // searchable: {name: 1, description: 1},
-  // searchablePrefix: '',
 
   augmentFromContext(item, ctx) {
     // this function can override keys taking them from the context (params, query)
@@ -81,15 +74,11 @@ class KoaAdapter {
   // mass operations
 
   massParams(ctx, params) {
-    params = Object.assign({}, params);
-    isConsistent(ctx.query) && (params.ConsistentRead = true);
-    return filtering(
-      ctx.query.filter,
-      fieldsToMap(ctx.query.fields),
-      this.searchable || this.adapter.searchable,
-      this.searchablePrefix || this.adapter.searchablePrefix,
-      params
-    );
+    return this.adapter.massParams({
+      consistent: isConsistent(ctx.query),
+      filter: ctx.query.filter,
+      fields: ctx.query.fields
+    }, params);
   }
 }
 

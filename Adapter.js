@@ -9,6 +9,7 @@ const copyList = require('./utils/copyList');
 const readList = require('./utils/readList');
 const writeList = require('./utils/writeList');
 const fieldsToMap = require('./utils/fieldsToMap');
+const filtering = require('./utils/filtering');
 
 class Adapter {
   constructor(options) {
@@ -16,6 +17,8 @@ class Adapter {
     this.keyFields = [];
     this.specialTypes = {};
     this.projectionFieldMap = {};
+    this.searchable = {};
+    this.searchablePrefix = '-search-';
     // overlay
     Object.assign(this, options);
   }
@@ -47,10 +50,6 @@ class Adapter {
     // remove some technical fields if required
     return item;
   }
-
-  // searchable: {name: 1, description: 1},
-  // searchablePrefix: '',
-
 
   // general API
 
@@ -163,6 +162,12 @@ class Adapter {
   }
 
   // mass operations
+
+  massParams(options, params) {
+    params = Object.assign({}, params);
+    options.consistent && (params.ConsistentRead = true);
+    return filtering(options.filter, fieldsToMap(options.fields), this.searchable, this.searchablePrefix, params);
+  }
 
   async getAllByParams(params, options, fields) {
     params = Object.assign({}, params);
