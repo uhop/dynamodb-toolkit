@@ -20,7 +20,7 @@ class KoaAdapter {
     return item;
   }
 
-  async validItem(item) {
+  async validItem(item, isPatch, deep) {
     // this function should throw an exception if an item is incorrect for some reason
   }
 
@@ -57,9 +57,11 @@ class KoaAdapter {
   }
 
   async patch(ctx) {
-    const item = this.augmentFromContext(ctx.request.body, ctx);
+    const item = this.augmentFromContext(ctx.request.body, ctx),
+      deep = isTrue(ctx.query, 'deep');
+    await this.validItem(item, true, deep);
     await this.canBeModified(item);
-    await this.adapter.patch(item, isTrue(ctx.query, 'deep'));
+    await this.adapter.patch(item, deep);
     ctx.status = 204;
   }
 
@@ -70,13 +72,14 @@ class KoaAdapter {
 
   // mass operations
 
-  makeParams(ctx, params) {
+  makeParams(ctx, project, params) {
     return this.adapter.makeParams(
       {
         consistent: isConsistent(ctx.query),
         filter: ctx.query.filter,
         fields: ctx.query.fields
       },
+      project,
       params
     );
   }
