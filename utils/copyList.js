@@ -3,6 +3,8 @@
 // iteratively copy a list of items by keys
 
 const batchWrite = require('./batchWrite');
+const cleanParams = require('./cleanParams');
+const cloneParams = require('./cloneParams');
 
 const writeKeyList = async (client, tableName, items) => {
   if (!items.length) return;
@@ -17,7 +19,7 @@ const writeKeyList = async (client, tableName, items) => {
 const copyList = async (client, params, mapFn) => {
   // prepare parameters
   const action = params.KeyConditionExpression ? 'query' : 'scan';
-  params = Object.assign({}, params);
+  params = cleanParams(cloneParams(params));
   params.Limit = 25;
 
   // iterate over parameters copying records

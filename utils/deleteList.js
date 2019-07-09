@@ -3,6 +3,8 @@
 // iteratively delete a list of items by keys
 
 const batchWrite = require('./batchWrite');
+const cleanParams = require('./cleanParams');
+const cloneParams = require('./cloneParams');
 
 const deleteKeyList = async (client, tableName, keyList) => {
   if (!keyList.length) return;
@@ -17,7 +19,7 @@ const deleteKeyList = async (client, tableName, keyList) => {
 const deleteList = async (client, params) => {
   // prepare parameters
   const action = params.KeyConditionExpression ? 'query' : 'scan';
-  params = Object.assign({}, params);
+  params = cleanParams(cloneParams(params));
   params.Limit = 25;
 
   // iterate over parameters deleting records
