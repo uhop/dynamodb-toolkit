@@ -23,18 +23,18 @@ const collectValues = o => {
 // TODO: add ADD and DELETE for arrays
 
 const prepareUpdate = (patch, params = {}) => {
-  const setNames = {},
-    uniqueNames = {},
-    values = params.ExpressionAttributeValues || {};
-  let keyCounter = 0,
-    valueCounter = 0;
+  const names = params.ExpressionAttributeNames || {},
+    values = params.ExpressionAttributeValues || {},
+    uniqueNames = {};
+  let keyCounter = Object.keys(names).length,
+    valueCounter = Object.keys(values).length;
   const setActions = collectValues(patch).reduce((acc, item) => {
     const path = item.path.map(key => {
       if (typeof key == 'number') return key;
       let alias = uniqueNames['#' + key];
       if (!alias) {
         alias = uniqueNames['#' + key] = '#ups' + keyCounter++;
-        setNames[alias] = key;
+        names[alias] = key;
       }
       return alias;
     });
@@ -43,14 +43,16 @@ const prepareUpdate = (patch, params = {}) => {
     acc.push(path.join('.') + ' = ' + valueAlias);
     return acc;
   }, []);
-  if (!setActions.length) return params;
-  if (params.ExpressionAttributeNames) {
-    Object.assign(params.ExpressionAttributeNames, setNames);
-  } else {
-    params.ExpressionAttributeNames = setNames;
+  Object.keys(names).length && (params.ExpressionAttributeNames = names);
+  if (setActions.length) {
+    params.ExpressionAttributeValues = values;
+    if (params.UpdateExpression) {
+      params.UpdateExpression += ' ';
+    } else {
+      params.UpdateExpression = '';
+    }
+    params.UpdateExpression += 'SET ' + setActions.join(', ');
   }
-  params.ExpressionAttributeValues = values;
-  params.UpdateExpression = 'SET ' + setActions.join(', ');
   return params;
 };
 
@@ -60,8 +62,8 @@ const prepareFlatUpdate = (patch, deleteProps, params = {}, separator = '.') => 
   const names = params.ExpressionAttributeNames || {},
     values = params.ExpressionAttributeValues || {},
     uniqueNames = {};
-  let keyCounter = 0,
-    valueCounter = 0;
+  let keyCounter = Object.keys(names).length,
+    valueCounter = Object.keys(values).length;
   const setActions = Object.keys(patch).reduce((acc, key) => {
     const path = key.split(separator).map(key => {
       if (isInteger.test(key)) return key;

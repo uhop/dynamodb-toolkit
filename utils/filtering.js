@@ -10,7 +10,8 @@ const filtering = (filter, fieldMap, searchable, prefix = '-search-', params = {
 
   if (!searchKeys.length) return params;
 
-  const filterExpr = searchKeys.map((_, index) => 'contains(#sr' + index + ', :filter)').join(' OR ');
+  const offset = params.ExpressionAttributeNames ? Object.keys(params.ExpressionAttributeNames).length : 0,
+    filterExpr = searchKeys.map((_, index) => 'contains(#sr' + (offset + index) + ', :flt' + offset + ')').join(' OR ');
   if (params.FilterExpression) {
     params.FilterExpression = '(' + params.FilterExpression + ') AND (' + filterExpr + ')';
   } else {
@@ -18,12 +19,12 @@ const filtering = (filter, fieldMap, searchable, prefix = '-search-', params = {
   }
 
   params.ExpressionAttributeNames = searchKeys.reduce(
-    (acc, value, index) => ((acc['#sr' + index] = prefix + value), acc),
+    (acc, value, index) => ((acc['#sr' + (offset + index)] = prefix + value), acc),
     params.ExpressionAttributeNames ? Object.assign({}, params.ExpressionAttributeNames) : {}
   );
 
   params.ExpressionAttributeValues = params.ExpressionAttributeValues || {};
-  params.ExpressionAttributeValues[':filter'] = {S: (filter + '').toLowerCase()};
+  params.ExpressionAttributeValues[':flt' + offset] = {S: (filter + '').toLowerCase()};
 
   return params;
 };
