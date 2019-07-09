@@ -73,7 +73,7 @@ const koaAdapter = new KoaAdapter(adapter, {
         params.IndexName = index;
       }
     }
-    params = this.makeParams(ctx, params);
+    params = this.makeParams(ctx, false, params);
     ctx.body = await this.adapter.getAllByParams(params, {offset: ctx.query.offset, limit: ctx.query.limit}, ctx.query.fields);
   },
   async deleteAll(ctx) {
