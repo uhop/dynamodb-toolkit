@@ -217,6 +217,11 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 [The 3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause)
 
+# Acknowledgements
+
+The test JSON file containing planets of the Star Wars universe is extracted from [SWAPI](https://swapi.co/) and used under BSD license.
+
+
 [npm-image]:       https://img.shields.io/npm/v/dynamodb-toolkit.svg
 [npm-url]:         https://npmjs.org/package/dynamodb-toolkit
 [deps-image]:      https://img.shields.io/david/uhop/dynamodb-toolkit.svg
