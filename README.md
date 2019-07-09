@@ -110,70 +110,69 @@ By default these operations just return their `item` parameter so we don't need 
 ## Define a Koa adapter
 
 ```js
-const koaAdapter = new KoaAdapter(
-  adapter,
-  {
-    sortableIndices: {name: '-t-name-index'},
-    augmentFromContext(item, ctx) {
-      if (ctx.params.planet) {
-        // override a key field from URL parameters
-        item.name = ctx.params.planet;
-      }
-      return item;
-    },
-    // define mass operations driven by query parameters
-    async getAll(ctx) {
-      let params = {};
-      if (ctx.query.sort) { // do we need to sort?
-        let sortName = ctx.query.sort,
-          descending = ctx.query.sort.charAt(0) == '-';
-        if (descending) {
-          sortName = ctx.query.sort.substr(1);
-        }
-        const index = this.sortableIndices[sortName];
-        if (index) { // do we have a valid index?
-          if (descending) {
-            params.ScanIndexForward = false;
-            params.KeyConditionExpression = '#t = :t';
-            params.ExpressionAttributeNames = {'#t': '-t'};
-            params.ExpressionAttributeValues = {':t': {N: '1'}};
-          }
-          params.IndexName = index;
-        }
-      }
-      params = this.massParams(ctx, params);
-      ctx.body = await this.adapter.getAllByParams(params,
-        {offset: ctx.query.offset, limit: ctx.query.limit},
-        ctx.query.fields);
-    },
-    async deleteAll(ctx) {
-      const params = this.massParams(ctx);
-      ctx.body = {processed: await this.adapter.deleteAllByParams(params)};
-    },
-    async cloneAll(ctx) {
-      const params = this.massParams(ctx);
-      ctx.body = {processed: await this.adapter.cloneAllByParams(params,
-        item => ({...item, name: item.name + ' COPY'}))};
-    },
-    async load(ctx) {
-      const data = JSON.parse(await fs.promises.readFile(
-        path.join(__dirname, 'data.json')));
-      await this.adapter.putAll(data);
-      ctx.status = 204;
-    },
-    async getByNames(ctx) {
-      if (!ctx.query.names) throw new Error(
-        'Query parameter "names" was expected. ' +
-        'Should be a comma-separated list of planet names.');
-      const params = this.massParams(ctx),
-        keys = ctx.query.names
-          .split(',').map(name => name.trim())
-          .filter(name => name).map(name => ({name}));
-      ctx.body = await this.adapter.getAllByKeys(keys, ctx.query.fields,
-        params);
+const koaAdapter = new KoaAdapter(adapter, {
+  sortableIndices: {name: '-t-name-index'},
+  augmentFromContext(item, ctx) {
+    if (ctx.params.planet) {
+      item.name = ctx.params.planet;
     }
+    return item;
+  },
+  async getAll(ctx) {
+    let params = {};
+    if (ctx.query.sort) {
+      let sortName = ctx.query.sort,
+        descending = ctx.query.sort.charAt(0) == '-';
+      if (descending) {
+        sortName = ctx.query.sort.substr(1);
+      }
+      const index = this.sortableIndices[sortName];
+      if (index) {
+        if (descending) {
+          params.ScanIndexForward = false;
+          params.KeyConditionExpression = '#t = :t';
+          params.ExpressionAttributeNames = {'#t': '-t'};
+          params.ExpressionAttributeValues = {':t': {N: '1'}};
+        }
+        params.IndexName = index;
+      }
+    }
+    params = this.makeParams(ctx, false, params);
+    ctx.body = await this.adapter.getAllByParams(params,
+      {offset: ctx.query.offset, limit: ctx.query.limit},
+        ctx.query.fields);
+  },
+  async deleteAll(ctx) {
+    const params = this.makeParams(ctx);
+    ctx.body = {processed: await this.adapter.deleteAllByParams(params)};
+  },
+  async cloneAll(ctx) {
+    const params = this.makeParams(ctx);
+    ctx.body = {processed: await this.adapter.cloneAllByParams(params,
+      item => ({...item, name: item.name + ' COPY'}))};
+  },
+  async load(ctx) {
+    const data = JSON.parse(await fs.promises.readFile(
+      path.join(__dirname, 'data.json')));
+    await this.adapter.putAll(data);
+    ctx.body = {processed: data.length};
+  },
+  async getByNames(ctx) {
+    if (!ctx.query.names) throw new Error(
+      'Query parameter "names" was expected. ' +
+      'Should be a comma-separated list of planet names.');
+    const params = this.makeParams(ctx);
+    ctx.body = await this.adapter.getAllByKeys(
+      ctx.query.names
+        .split(',')
+        .map(name => name.trim())
+        .filter(name => name)
+        .map(name => ({name})),
+      ctx.query.fields,
+      params
+    );
   }
-);
+});
 ```
 
 Most operations were trivial. Some operations takes more than a couple of lines for the flexibility sake.
@@ -209,6 +208,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.2.0 *Major refactoring of internals. Some API changes.*
 - 1.1.1 *Bugfix: added the missing index file.*
 - 1.1.0 *Made a search prefix a parameter.*
 - 1.0.0 *The initial public release*
