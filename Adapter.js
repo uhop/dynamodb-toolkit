@@ -10,6 +10,8 @@ const readList = require('./utils/readList');
 const writeList = require('./utils/writeList');
 const fieldsToMap = require('./utils/fieldsToMap');
 const filtering = require('./utils/filtering');
+const cleanParams = require('./utils/cleanParams');
+const cloneParams = require('./utils/cloneParams');
 
 class Adapter {
   constructor(options) {
@@ -54,12 +56,11 @@ class Adapter {
   // general API
 
   async getByKey(key, fields, params) {
-    params = params ? Object.assign({}, params) : {};
-    params.TableName = this.table;
+    params = this.cloneParams(params);
     params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
     const fieldMap = fieldsToMap(fields);
     fieldMap && addProjection(params, fieldMap, this.projectionFieldMap, true);
-    const data = await this.client.getItem(params).promise();
+    const data = await this.client.getItem(cleanParams(params)).promise();
     return data.Item ? this.revive(convertFrom(data.Item), fieldMap) : undefined;
   }
 
@@ -68,46 +69,40 @@ class Adapter {
   }
 
   async post(item) {
-    const params = {};
-    params.TableName = this.table;
-    if (params.ConditionExpression) {
-      params.ConditionExpression = `attribute_not_exists(#k) AND (${params.ConditionExpression})`;
-    } else {
-      params.ConditionExpression = 'attribute_not_exists(#k)';
-    }
-    params.ExpressionAttributeNames = Object.assign({}, params.ExpressionAttributeNames) || {};
-    params.ExpressionAttributeNames['#k'] = this.keyFields[0];
-    params.Item = convertTo(this.prepare(item), this.specialTypes);
-    return this.client.putItem(params).promise();
+    const params = {
+      TableName: this.table,
+      ConditionExpression: 'attribute_not_exists(#k)',
+      ExpressionAttributeNames: {'#k': this.keyFields[0]},
+      Item: convertTo(this.prepare(item), this.specialTypes)
+    };
+    return this.client.putItem(cleanParams(params)).promise();
   }
 
   async put(item, force, params) {
-    params = params ? Object.assign({}, params) : {};
-    params.TableName = this.table;
+    params = this.cloneParams(params);
     if (!force) {
+      const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length;
       if (params.ConditionExpression) {
-        params.ConditionExpression = `attribute_exists(#k) AND (${params.ConditionExpression})`;
+        params.ConditionExpression = `attribute_exists(${keyName}) AND (${params.ConditionExpression})`;
       } else {
-        params.ConditionExpression = 'attribute_exists(#k)';
+        params.ConditionExpression = `attribute_exists(${keyName})`;
       }
-      params.ExpressionAttributeNames = Object.assign({}, params.ExpressionAttributeNames) || {};
-      params.ExpressionAttributeNames['#k'] = this.keyFields[0];
+      params.ExpressionAttributeNames[keyName] = this.keyFields[0];
     }
     params.Item = convertTo(this.prepare(item), this.specialTypes);
-    return this.client.putItem(params).promise();
+    return this.client.putItem(cleanParams(params)).promise();
   }
 
   async patchByKey(key, item, deep, params) {
-    params = params ? Object.assign({}, params) : {};
-    params.TableName = this.table;
+    params = this.cloneParams(params);
     params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
+    const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length;
     if (params.ConditionExpression) {
-      params.ConditionExpression = `attribute_exists(#k) AND (${params.ConditionExpression})`;
+      params.ConditionExpression = `attribute_exists(${keyName}) AND (${params.ConditionExpression})`;
     } else {
-      params.ConditionExpression = 'attribute_exists(#k)';
+      params.ConditionExpression = `attribute_exists(${keyName})`;
     }
-    params.ExpressionAttributeNames = Object.assign({}, params.ExpressionAttributeNames) || {};
-    params.ExpressionAttributeNames['#k'] = this.keyFields[0];
+    params.ExpressionAttributeNames[keyName] = this.keyFields[0];
     const dbItem = convertTo(this.prepare(item, true, deep), this.specialTypes);
     this.keyFields.forEach(field => delete dbItem[field]);
     if (deep) {
@@ -119,7 +114,7 @@ class Adapter {
       }
       params = prepareUpdate.flat(dbItem, deleteProps, params);
     }
-    return params.UpdateExpression ? this.client.updateItem(params).promise() : null;
+    return params.UpdateExpression ? this.client.updateItem(cleanParams(params)).promise() : null;
   }
 
   async patch(item, deep, params) {
@@ -127,10 +122,9 @@ class Adapter {
   }
 
   async deleteByKey(key, params) {
-    params = params ? Object.assign({}, params) : {};
-    params.TableName = this.table;
+    params = this.cloneParams(params);
     params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
-    return this.client.deleteItem(params).promise();
+    return this.client.deleteItem(cleanParams(params)).promise();
   }
 
   async delete(item, params) {
@@ -138,22 +132,22 @@ class Adapter {
   }
 
   async cloneByKey(key, mapFn, force, params) {
-    params = params ? Object.assign({}, params) : {};
-    params.TableName = this.table;
+    params = this.cloneParams(params);
     params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
-    const data = await this.client.getItem(params).promise();
+    const data = await this.client.getItem(cleanParams(params)).promise();
     if (!data.Item) return false;
     delete params.Key;
-    params.Item = convertTo(this.prepare(mapFn(this.revive(convertFrom(data.Item)))), this.specialTypes);
     if (!force) {
+      params.ExpressionAttributeNames = params.ExpressionAttributeNames || {};
+      const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length;
       if (params.ConditionExpression) {
-        params.ConditionExpression = `attribute_exists(#k) AND (${params.ConditionExpression})`;
+        params.ConditionExpression = `attribute_exists(${keyName}) AND (${params.ConditionExpression})`;
       } else {
-        params.ConditionExpression = 'attribute_exists(#k)';
+        params.ConditionExpression = `attribute_exists(${keyName})`;
       }
-      params.ExpressionAttributeNames = Object.assign({}, params.ExpressionAttributeNames) || {};
-      params.ExpressionAttributeNames['#k'] = this.keyFields[0];
+      params.ExpressionAttributeNames[keyName] = this.keyFields[0];
     }
+    params.Item = convertTo(this.prepare(mapFn(this.revive(convertFrom(data.Item)))), this.specialTypes);
     await this.client.putItem(params).promise();
     return true;
   }
@@ -165,26 +159,24 @@ class Adapter {
   // mass operations
 
   makeParams(options, project, params) {
-    params = Object.assign({}, params);
-    params.TableName = this.table;
+    params = this.cloneParams(params);
     options.consistent && (params.ConsistentRead = true);
     const fieldMap = fieldsToMap(options.fields);
-    project && fieldMap && addProjection(params, fieldMap, this.projectionFieldMap, true);
+    project && fieldMap && addProjection(params, fieldMap, this.projectionFieldMap);
     return filtering(options.filter, fieldMap, this.searchable, this.searchablePrefix, params);
   }
 
   async getAllByParams(params, options, fields) {
-    params = Object.assign({}, params);
-    params.TableName = this.table;
+    params = this.cloneParams(params);
     const fieldMap = fieldsToMap(fields);
-    fieldMap && addProjection(params, fieldMap, this.projectionFieldMap, true);
+    fieldMap && addProjection(params, fieldMap, this.projectionFieldMap);
     const result = await paginateList(this.client, params, options);
     result.data = result.data.map(item => this.revive(convertFrom(item), fieldMap));
     return result;
   }
 
   async getAllByKeys(keys, fields, params) {
-    params = Object.assign({}, params);
+    params = this.cloneParams(params);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
     const items = await readList(this.client, this.table, keys.map(key => convertTo(this.prepareKey(key, params.IndexName), this.specialTypes)), params);
     return items.map(item => this.revive(convertFrom(item), fieldsToMap(fields)));
@@ -195,23 +187,22 @@ class Adapter {
   }
 
   async deleteAllByParams(params) {
-    params = Object.assign({}, params);
-    params.TableName = this.table;
-    params.ExpressionAttributeNames = params.ExpressionAttributeNames ? Object.assign({}, params.ExpressionAttributeNames) : {};
-    const keys = this.keyFields.map((key, index) => {
-      const keyName = '#k' + index;
-      params.ExpressionAttributeNames[keyName] = key;
-      return keyName;
-    });
-    params.ProjectionExpression = keys.join(',');
-    params.Select = 'SPECIFIC_ATTRIBUTES';
+    params = this.cloneParams(params);
+    addProjection(params, this.keyFields.join(','));
     return deleteList(this.client, params);
   }
 
   async cloneAllByParams(params, mapFn) {
-    params = Object.assign({}, params);
-    params.TableName = this.table;
+    params = this.cloneParams(params);
     return copyList(this.client, params, item => convertTo(this.prepare(mapFn(this.revive(convertFrom(item)))), this.specialTypes));
+  }
+
+  // utilities
+
+  cloneParams(params) {
+    params = cloneParams(params);
+    params.TableName = this.table;
+    return params;
   }
 }
 
