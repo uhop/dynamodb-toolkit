@@ -57,9 +57,10 @@ class Adapter {
     params = params ? Object.assign({}, params) : {};
     params.TableName = this.table;
     params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
-    fields && addProjection(params, fields, this.projectionFieldMap, true);
+    const fieldMap = fieldsToMap(fields);
+    fieldMap && addProjection(params, fieldMap, this.projectionFieldMap, true);
     const data = await this.client.getItem(params).promise();
-    return data.Item ? this.revive(convertFrom(data.Item), fieldsToMap(fields)) : undefined;
+    return data.Item ? this.revive(convertFrom(data.Item), fieldMap) : undefined;
   }
 
   async get(item, fields, params) {
@@ -163,18 +164,21 @@ class Adapter {
 
   // mass operations
 
-  massParams(options, params) {
+  makeParams(options, project, params) {
     params = Object.assign({}, params);
+    params.TableName = this.table;
     options.consistent && (params.ConsistentRead = true);
-    return filtering(options.filter, fieldsToMap(options.fields), this.searchable, this.searchablePrefix, params);
+    const fieldMap = fieldsToMap(options.fields);
+    project && fieldMap && addProjection(params, fieldMap, this.projectionFieldMap, true);
+    return filtering(options.filter, fieldMap, this.searchable, this.searchablePrefix, params);
   }
 
   async getAllByParams(params, options, fields) {
     params = Object.assign({}, params);
     params.TableName = this.table;
-    fields && addProjection(params, fields, this.projectionFieldMap, true);
-    const result = await paginateList(this.client, params, options),
-      fieldMap = fieldsToMap(fields);
+    const fieldMap = fieldsToMap(fields);
+    fieldMap && addProjection(params, fieldMap, this.projectionFieldMap, true);
+    const result = await paginateList(this.client, params, options);
     result.data = result.data.map(item => this.revive(convertFrom(item), fieldMap));
     return result;
   }
@@ -182,9 +186,8 @@ class Adapter {
   async getAllByKeys(keys, fields, params) {
     params = Object.assign({}, params);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
-    const items = await readList(this.client, this.table, keys.map(key => convertTo(this.prepareKey(key, params.IndexName), this.specialTypes)), params),
-      fieldMap = fieldsToMap(fields);
-    return items.map(item => this.revive(convertFrom(item), fieldMap));
+    const items = await readList(this.client, this.table, keys.map(key => convertTo(this.prepareKey(key, params.IndexName), this.specialTypes)), params);
+    return items.map(item => this.revive(convertFrom(item), fieldsToMap(fields)));
   }
 
   async putAll(items) {

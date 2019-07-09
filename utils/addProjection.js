@@ -1,18 +1,12 @@
 'use strict';
 
+const fieldsToMap = require('./fieldsToMap');
+
 // form a project expression for DynamoDB
 
 const addProjection = (params, fields, projectionFieldMap, skipSelect) => {
   if (!fields) return params;
-  if (typeof fields == 'string') {
-    fields = Object.keys(
-      fields
-        .split(',')
-        .map(f => f.trim())
-        .filter(f => f)
-        .reduce((acc, f) => ((acc[projectionFieldMap[f] || f] = 1), acc), {})
-    );
-  }
+  fields = fieldsToMap(fields, projectionFieldMap);
   const projectionMap = fields.reduce((acc, value, index) => ((acc['#pr' + index] = value), acc), {});
   const names = Object.keys(projectionMap);
   if (params.ExpressionAttributeNames) {

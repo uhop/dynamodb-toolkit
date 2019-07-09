@@ -73,25 +73,25 @@ const koaAdapter = new KoaAdapter(adapter, {
         params.IndexName = index;
       }
     }
-    params = this.massParams(ctx, params);
+    params = this.makeParams(ctx, params);
     ctx.body = await this.adapter.getAllByParams(params, {offset: ctx.query.offset, limit: ctx.query.limit}, ctx.query.fields);
   },
   async deleteAll(ctx) {
-    const params = this.massParams(ctx);
+    const params = this.makeParams(ctx);
     ctx.body = {processed: await this.adapter.deleteAllByParams(params)};
   },
   async cloneAll(ctx) {
-    const params = this.massParams(ctx);
+    const params = this.makeParams(ctx);
     ctx.body = {processed: await this.adapter.cloneAllByParams(params, item => ({...item, name: item.name + ' COPY'}))};
   },
   async load(ctx) {
     const data = JSON.parse(await fs.promises.readFile(path.join(__dirname, 'data.json')));
     await this.adapter.putAll(data);
-    ctx.status = 204;
+    ctx.body = {processed: data.length};
   },
   async getByNames(ctx) {
     if (!ctx.query.names) throw new Error('Query parameter "names" was expected. Should be a comma-separated list of planet names.');
-    const params = this.massParams(ctx);
+    const params = this.makeParams(ctx);
     ctx.body = await this.adapter.getAllByKeys(
       ctx.query.names
         .split(',')

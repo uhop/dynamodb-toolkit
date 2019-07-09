@@ -31,11 +31,8 @@ class KoaAdapter {
   // main operations
 
   async get(ctx) {
-    const params = {};
-    if (isConsistent(ctx.query)) {
-      params.ConsistentRead = true;
-    }
-    const item = await this.adapter.get(this.augmentFromContext({}, ctx), ctx.query.fields, params);
+    const params = this.adapter.makeParams({consistent: isConsistent(ctx.query)}),
+      item = await this.adapter.get(this.augmentFromContext({}, ctx), ctx.query.fields, params);
     if (typeof item !== 'undefined') {
       ctx.body = item;
     } else {
@@ -73,12 +70,15 @@ class KoaAdapter {
 
   // mass operations
 
-  massParams(ctx, params) {
-    return this.adapter.massParams({
-      consistent: isConsistent(ctx.query),
-      filter: ctx.query.filter,
-      fields: ctx.query.fields
-    }, params);
+  makeParams(ctx, params) {
+    return this.adapter.makeParams(
+      {
+        consistent: isConsistent(ctx.query),
+        filter: ctx.query.filter,
+        fields: ctx.query.fields
+      },
+      params
+    );
   }
 }
 
