@@ -70,6 +70,11 @@ class KoaAdapter {
     ctx.status = 204;
   }
 
+  async clone(ctx) {
+    const done = await this.adapter.clone(this.augmentFromContext(ctx.request.body || {}, ctx), item => ({...item, name: item.name + ' COPY'}));
+    ctx.status = done ? 204 : 404;
+  }
+
   // mass operations
 
   makeParams(ctx, project, params) {
