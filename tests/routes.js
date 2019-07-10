@@ -119,6 +119,7 @@ router
   .get('/:planet', async ctx => koaAdapter.get(ctx))
   .put('/:planet', async ctx => koaAdapter.put(ctx))
   .patch('/:planet', async ctx => koaAdapter.patch(ctx))
-  .delete('/:planet', async ctx => koaAdapter.delete(ctx));
+  .delete('/:planet', async ctx => koaAdapter.delete(ctx))
+  .put('/:planet/-clone', async ctx => koaAdapter.clone(ctx));
 
 module.exports = router;
