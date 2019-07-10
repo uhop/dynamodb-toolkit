@@ -109,9 +109,7 @@ class Adapter {
       params = prepareUpdate(dbItem, params);
     } else {
       const deleteProps = item.__delete;
-      if (dbItem.__delete) {
-        delete dbItem.__delete;
-      }
+      delete dbItem.__delete;
       params = prepareUpdate.flat(dbItem, deleteProps, params);
     }
     return params.UpdateExpression ? this.client.updateItem(cleanParams(params)).promise() : null;
@@ -141,9 +139,9 @@ class Adapter {
       params.ExpressionAttributeNames = params.ExpressionAttributeNames || {};
       const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length;
       if (params.ConditionExpression) {
-        params.ConditionExpression = `attribute_exists(${keyName}) AND (${params.ConditionExpression})`;
+        params.ConditionExpression = `attribute_not_exists(${keyName}) AND (${params.ConditionExpression})`;
       } else {
-        params.ConditionExpression = `attribute_exists(${keyName})`;
+        params.ConditionExpression = `attribute_not_exists(${keyName})`;
       }
       params.ExpressionAttributeNames[keyName] = this.keyFields[0];
     }
