@@ -57,11 +57,11 @@ class Adapter {
 
   async getByKey(key, fields, params) {
     params = this.cloneParams(params);
-    params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
+    params.Key = this.toDynamoKey(key, params.IndexName);
     const fieldMap = fieldsToMap(fields);
     fieldMap && addProjection(params, fieldMap, this.projectionFieldMap, true);
     const data = await this.client.getItem(cleanParams(params)).promise();
-    return data.Item ? this.revive(convertFrom(data.Item), fieldMap) : undefined;
+    return data.Item ? this.fromDynamo(data.Item, fieldMap) : undefined;
   }
 
   async get(item, fields, params) {
@@ -73,7 +73,7 @@ class Adapter {
       TableName: this.table,
       ConditionExpression: 'attribute_not_exists(#k)',
       ExpressionAttributeNames: {'#k': this.keyFields[0]},
-      Item: convertTo(this.prepare(item), this.specialTypes)
+      Item: this.toDynamo(item)
     };
     return this.client.putItem(cleanParams(params)).promise();
   }
@@ -89,13 +89,13 @@ class Adapter {
       }
       params.ExpressionAttributeNames[keyName] = this.keyFields[0];
     }
-    params.Item = convertTo(this.prepare(item), this.specialTypes);
+    params.Item = this.toDynamo(item);
     return this.client.putItem(cleanParams(params)).promise();
   }
 
   async patchByKey(key, item, deep, params) {
     params = this.cloneParams(params);
-    params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
+    params.Key = this.toDynamoKey(key, params.IndexName);
     const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length;
     if (params.ConditionExpression) {
       params.ConditionExpression = `attribute_exists(${keyName}) AND (${params.ConditionExpression})`;
@@ -121,7 +121,7 @@ class Adapter {
 
   async deleteByKey(key, params) {
     params = this.cloneParams(params);
-    params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
+    params.Key = this.toDynamoKey(key, params.IndexName);
     return this.client.deleteItem(cleanParams(params)).promise();
   }
 
@@ -131,7 +131,7 @@ class Adapter {
 
   async cloneByKey(key, mapFn, force, params) {
     params = this.cloneParams(params);
-    params.Key = convertTo(this.prepareKey(key, params.IndexName), this.specialTypes);
+    params.Key = this.toDynamoKey(key, params.IndexName);
     const data = await this.client.getItem(cleanParams(params)).promise();
     if (!data.Item) return false;
     delete params.Key;
@@ -145,7 +145,7 @@ class Adapter {
       }
       params.ExpressionAttributeNames[keyName] = this.keyFields[0];
     }
-    params.Item = convertTo(this.prepare(mapFn(this.revive(convertFrom(data.Item)))), this.specialTypes);
+    params.Item = this.toDynamo(mapFn(this.revive(convertFrom(data.Item))));
     await this.client.putItem(params).promise();
     return true;
   }
@@ -169,19 +169,19 @@ class Adapter {
     const fieldMap = fieldsToMap(fields);
     fieldMap && addProjection(params, fieldMap, this.projectionFieldMap);
     const result = await paginateList(this.client, params, options);
-    result.data = result.data.map(item => this.revive(convertFrom(item), fieldMap));
+    result.data = result.data.map(item => this.fromDynamo(item, fieldMap));
     return result;
   }
 
   async getAllByKeys(keys, fields, params) {
     params = this.cloneParams(params);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
-    const items = await readList(this.client, this.table, keys.map(key => convertTo(this.prepareKey(key, params.IndexName), this.specialTypes)), params);
-    return items.map(item => this.revive(convertFrom(item), fieldsToMap(fields)));
+    const items = await readList(this.client, this.table, keys.map(key => this.toDynamoKey(key, params.IndexName)), params);
+    return items.map(item => this.fromDynamo(item, fieldsToMap(fields)));
   }
 
   async putAll(items) {
-    return writeList(this.client, this.table, items, item => convertTo(this.prepare(item), this.specialTypes));
+    return writeList(this.client, this.table, items, item => this.toDynamo(item));
   }
 
   async deleteAllByParams(params) {
@@ -192,7 +192,7 @@ class Adapter {
 
   async cloneAllByParams(params, mapFn) {
     params = this.cloneParams(params);
-    return copyList(this.client, params, item => convertTo(this.prepare(mapFn(this.revive(convertFrom(item)))), this.specialTypes));
+    return copyList(this.client, params, item => this.toDynamo(mapFn(this.fromDynamo(item))));
   }
 
   // utilities
@@ -201,6 +201,18 @@ class Adapter {
     params = cloneParams(params);
     params.TableName = this.table;
     return params;
+  }
+
+  fromDynamo(item, fieldMap) {
+    return this.revive(convertFrom(item), fieldMap);
+  }
+
+  toDynamo(item) {
+    return convertTo(this.prepare(item), this.specialTypes);
+  }
+
+  toDynamoKey(item, index) {
+    return convertTo(this.prepareKey(item, index), this.specialTypes);
   }
 }
 
