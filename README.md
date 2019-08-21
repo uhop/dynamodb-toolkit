@@ -208,6 +208,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.4.1 *Added ability to return `undefined` for mapping functions.*
 - 1.4.0 *Added helper methods: `toDynamo()`, `toDynamoKey()`, `fromDynamo()`.*
 - 1.3.0 *`clone()` added to `KoaAdapter`. A related bug was fixed.*
 - 1.2.0 *Major refactoring of internals. Some API changes.*
