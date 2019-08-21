@@ -23,14 +23,15 @@ const convertValueFromDynamoDB = value => {
 const convertFrom = item => Object.keys(item).reduce((acc, key) => ((acc[key] = convertValueFromDynamoDB(item[key])), acc), {});
 
 const convertValueToDynamoDB = value => {
-  if (typeof value == 'string') {
-    return value ? {S: value} : {NULL: true};
-  }
-  if (typeof value == 'number') {
-    return {N: '' + value};
-  }
-  if (typeof value == 'boolean') {
-    return {BOOL: value};
+  switch (typeof value) {
+    case 'string':
+      return value ? {S: value} : {NULL: true};
+    case 'number':
+      return {N: '' + value};
+    case 'boolean':
+      return {BOOL: value};
+    case 'undefined':
+      return; // undefined
   }
   if (value instanceof Array) {
     return {L: value.map(convertValueToDynamoDB)};
@@ -50,21 +51,28 @@ const convertValueToDynamoDB = value => {
   return v ? {S: v} : {NULL: true};
 };
 
-const convertTo = (item, useType = {}) =>
-  Object.keys(item).reduce((acc, key) => {
-    switch (useType[key]) {
-      case 'SS':
-        acc[key] = {SS: item[key]};
-        break;
-      case 'NS':
-        acc[key] = {NS: item[key].map(value => '' + value)};
-        break;
-      default:
-        acc[key] = convertValueToDynamoDB(item[key]);
-        break;
-    }
-    return acc;
-  }, {});
+const convertTo = (item, useType = {}) => {
+  if (item && typeof item == 'object' && !(item instanceof Array)) {
+    return Object.keys(item).reduce((acc, key) => {
+      switch (useType[key]) {
+        case 'SS':
+          acc[key] = {SS: item[key]};
+          break;
+        case 'NS':
+          acc[key] = {NS: item[key].map(value => '' + value)};
+          break;
+        default:
+          const value = convertValueToDynamoDB(item[key]);
+          if (value) {
+            acc[key] = value;
+          }
+          break;
+      }
+      return acc;
+    }, {});
+  }
+  return convertValueToDynamoDB(item);
+};
 
 module.exports.convertValueFromDynamoDB = convertValueFromDynamoDB;
 module.exports.convertValueToDynamoDB = convertValueToDynamoDB;

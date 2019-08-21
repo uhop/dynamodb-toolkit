@@ -7,6 +7,7 @@ const cleanParams = require('./cleanParams');
 const cloneParams = require('./cloneParams');
 
 const writeKeyList = async (client, tableName, items) => {
+  items = items.filter(item => item);
   if (!items.length) return;
   const params = {
     RequestItems: {

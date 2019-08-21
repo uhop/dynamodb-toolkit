@@ -5,6 +5,7 @@
 const batchWrite = require('./batchWrite');
 
 const writeKeyList = async (client, tableName, items) => {
+  items = items.filter(item => item);
   if (!items.length) return;
   const params = {
     RequestItems: {
