@@ -21,7 +21,7 @@ const addProjection = (params, fields, projectionFieldMap, skipSelect) => {
   } else {
     params.ProjectionExpression = names;
   }
-  !skipSelect && (params.Select = 'SPECIFIC_ATTRIBUTES');
+  !skipSelect && params.ProjectionExpression && (params.Select = 'SPECIFIC_ATTRIBUTES');
   return params;
 };
 
