@@ -17,22 +17,14 @@ class KoaAdapter {
 
   augmentFromContext(item, ctx) {
     // this function can override keys taking them from the context (params, query)
-    return item;
-  }
-
-  async validItem(item, isPatch, deep) {
-    // this function should throw an exception if an item is incorrect for some reason
-  }
-
-  async canBeModified(item) {
-    // this function should throw an exception if an item cannot be modified
+    return Object.assign(item, ctx.params);
   }
 
   // main operations
 
   async get(ctx) {
     const params = this.adapter.makeParams({consistent: isConsistent(ctx.query)}),
-      item = await this.adapter.get(this.augmentFromContext({}, ctx), ctx.query.fields, params);
+      item = await this.adapter.getByKey(this.augmentFromContext({}, ctx), ctx.query.fields, params);
     if (typeof item !== 'undefined') {
       ctx.body = item;
     } else {
@@ -42,51 +34,56 @@ class KoaAdapter {
 
   async post(ctx) {
     const item = this.augmentFromContext(ctx.request.body, ctx);
-    await this.validItem(item);
-    await this.canBeModified(item);
     await this.adapter.post(item);
     ctx.status = 204;
   }
 
   async put(ctx) {
     const item = this.augmentFromContext(ctx.request.body, ctx);
-    await this.validItem(item);
-    await this.canBeModified(item);
     await this.adapter.put(item, isTrue(ctx.query, 'force'));
     ctx.status = 204;
   }
 
   async patch(ctx) {
-    const item = this.augmentFromContext(ctx.request.body, ctx),
-      deep = isTrue(ctx.query, 'deep');
-    await this.validItem(item, true, deep);
-    await this.canBeModified(item);
-    await this.adapter.patch(item, deep);
+    const item = this.augmentFromContext(ctx.request.body, ctx);
+    await this.adapter.patch(item, isTrue(ctx.query, 'deep'));
     ctx.status = 204;
   }
 
   async delete(ctx) {
-    await this.adapter.delete(this.augmentFromContext({}, ctx));
+    await this.adapter.deleteByKey(this.augmentFromContext({}, ctx));
     ctx.status = 204;
   }
 
   async clone(ctx) {
-    const done = await this.adapter.clone(this.augmentFromContext(ctx.request.body || {}, ctx), item => ({...item, name: item.name + ' COPY'}));
+    const done = await this.adapter.cloneByKey(this.augmentFromContext({}, ctx), item => ({...item, name: item.name + ' COPY'}));
     ctx.status = done ? 204 : 404;
   }
 
   // mass operations
 
+  makeOptions(ctx) {
+    return {
+      consistent: isConsistent(ctx.query),
+      filter: ctx.query.filter,
+      fields: ctx.query.fields
+    };
+  }
+
   makeParams(ctx, project, params) {
-    return this.adapter.makeParams(
-      {
-        consistent: isConsistent(ctx.query),
-        filter: ctx.query.filter,
-        fields: ctx.query.fields
-      },
-      project,
-      params
-    );
+    return this.adapter.makeParams(this.makeOptions(ctx), project, params);
+  }
+
+  async getAll(ctx) {
+    ctx.body = await this.adapter.getAll(this.makeOptions(ctx), Object.assign({}, ctx.params));
+  }
+
+  async deleteAll(ctx) {
+    ctx.body = {processed: await this.adapter.deleteAll(this.makeOptions(ctx), Object.assign({}, ctx.params))};
+  }
+
+  async doCloneAll(ctx, mapFn) {
+    ctx.body = {processed: await this.adapter.cloneAll(this.makeOptions(ctx), mapFn, Object.assign({}, ctx.params))};
   }
 }
 
