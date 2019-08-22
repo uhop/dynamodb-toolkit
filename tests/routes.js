@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 const Router = require('koa-router');
 
@@ -81,7 +82,8 @@ const koaAdapter = new KoaAdapter(adapter, {
     return this.doCloneAll(ctx, item => ({...item, name: item.name + ' COPY'}));
   },
   async load(ctx) {
-    const data = JSON.parse(await fs.promises.readFile(path.join(__dirname, 'data.json')));
+    // const data = JSON.parse(await fs.promises.readFile(path.join(__dirname, 'data.json')));
+    const data = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, 'data.json.gz'))));
     await this.adapter.putAll(data);
     ctx.body = {processed: data.length};
   },
