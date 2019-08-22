@@ -47,10 +47,20 @@ class Adapter {
     }, {});
   }
 
+  prepareListParams(item, index) {
+    // prepare params to list objects in a database
+    // add some technical fields if required
+    return {};
+  }
+
   revive(item, fieldMap) {
     // reconstitute a database object
     // remove some technical fields if required
     return item;
+  }
+
+  async validateItem(item, isPatch, deep) {
+    // this function should throw an exception if an item is incorrect for some reason
   }
 
   // general API
@@ -69,6 +79,7 @@ class Adapter {
   }
 
   async post(item) {
+    await this.validateItem(item);
     const params = {
       TableName: this.table,
       ConditionExpression: 'attribute_not_exists(#k)',
@@ -79,6 +90,7 @@ class Adapter {
   }
 
   async put(item, force, params) {
+    await this.validateItem(item);
     params = this.cloneParams(params);
     if (!force) {
       const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length;
@@ -94,6 +106,7 @@ class Adapter {
   }
 
   async patchByKey(key, item, deep, params) {
+    await this.validateItem(item, true, deep);
     params = this.cloneParams(params);
     params.Key = this.toDynamoKey(key, params.IndexName);
     const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length;
@@ -156,19 +169,19 @@ class Adapter {
 
   // mass operations
 
-  makeParams(options, project, params) {
+  makeParams(options, project, params, skipSelect) {
     params = this.cloneParams(params);
     options.consistent && (params.ConsistentRead = true);
+    options.descending && (params.ScanIndexForward = false);
     const fieldMap = fieldsToMap(options.fields);
-    project && fieldMap && addProjection(params, fieldMap, this.projectionFieldMap);
+    project && fieldMap && addProjection(params, fieldMap, this.projectionFieldMap, skipSelect);
     return filtering(options.filter, fieldMap, this.searchable, this.searchablePrefix, params);
   }
 
   async getAllByParams(params, options, fields) {
     params = this.cloneParams(params);
-    const fieldMap = fieldsToMap(fields);
-    fieldMap && addProjection(params, fieldMap, this.projectionFieldMap);
     const result = await paginateList(this.client, params, options);
+    const fieldMap = fieldsToMap(fields);
     result.data = result.data.map(item => this.fromDynamo(item, fieldMap));
     return result;
   }
@@ -178,6 +191,11 @@ class Adapter {
     fields && addProjection(params, fields, this.projectionFieldMap, true);
     const items = await readList(this.client, this.table, keys.map(key => this.toDynamoKey(key, params.IndexName)), params);
     return items.map(item => this.fromDynamo(item, fieldsToMap(fields)));
+  }
+
+  async getAll(options, item, index) {
+    const params = this.makeParams(options, true, this.prepareListParams(item, index));
+    return this.getAllByParams(params, options, options && options.fields);
   }
 
   async putAll(items) {
@@ -190,9 +208,19 @@ class Adapter {
     return deleteList(this.client, params);
   }
 
+  async deleteAll(options, item, index) {
+    const params = this.makeParams(options, false, this.prepareListParams(item, index));
+    return this.deleteAllByParams(params);
+  }
+
   async cloneAllByParams(params, mapFn) {
     params = this.cloneParams(params);
     return copyList(this.client, params, item => this.toDynamo(mapFn(this.fromDynamo(item))));
+  }
+
+  async cloneAll(options, mapFn, item, index) {
+    const params = this.makeParams(options, false, this.prepareListParams(item, index));
+    return this.cloneAllByParams(params, mapFn);
   }
 
   // utilities
