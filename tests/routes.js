@@ -28,6 +28,16 @@ const adapter = new Adapter({
     data['-t'] = 1;
     return data;
   },
+  prepareListParams(_, index) {
+    return index
+      ? {
+          IndexName: index,
+          KeyConditionExpression: '#t = :t',
+          ExpressionAttributeNames: {'#t': '-t'},
+          ExpressionAttributeValues: {':t': {N: '1'}}
+        }
+      : {};
+  },
   revive(item, fieldMap) {
     if (fieldMap) {
       return Object.keys(item).reduce((acc, key) => {
@@ -55,34 +65,20 @@ const koaAdapter = new KoaAdapter(adapter, {
     return item;
   },
   async getAll(ctx) {
-    let params = {};
+    let index, descending;
     if (ctx.query.sort) {
-      let sortName = ctx.query.sort,
-        descending = ctx.query.sort.charAt(0) == '-';
-      if (descending) {
-        sortName = ctx.query.sort.substr(1);
-      }
-      const index = this.sortableIndices[sortName];
-      if (index) {
-        if (descending) {
-          params.ScanIndexForward = false;
-          params.KeyConditionExpression = '#t = :t';
-          params.ExpressionAttributeNames = {'#t': '-t'};
-          params.ExpressionAttributeValues = {':t': {N: '1'}};
-        }
-        params.IndexName = index;
-      }
+      let sortName = ctx.query.sort;
+      descending = ctx.query.sort.charAt(0) == '-';
+      descending && (sortName = ctx.query.sort.substr(1));
+      index = this.sortableIndices[sortName];
     }
-    params = this.makeParams(ctx, false, params);
-    ctx.body = await this.adapter.getAllByParams(params, {offset: ctx.query.offset, limit: ctx.query.limit}, ctx.query.fields);
+    const options = this.makeOptions(ctx);
+    descending && (options.descending = true);
+    ctx.body = await this.adapter.getAll(options, null, index);
   },
-  async deleteAll(ctx) {
-    const params = this.makeParams(ctx);
-    ctx.body = {processed: await this.adapter.deleteAllByParams(params)};
-  },
+  // use standard deleteAll()
   async cloneAll(ctx) {
-    const params = this.makeParams(ctx);
-    ctx.body = {processed: await this.adapter.cloneAllByParams(params, item => ({...item, name: item.name + ' COPY'}))};
+    return this.doCloneAll(ctx, item => ({...item, name: item.name + ' COPY'}));
   },
   async load(ctx) {
     const data = JSON.parse(await fs.promises.readFile(path.join(__dirname, 'data.json')));
