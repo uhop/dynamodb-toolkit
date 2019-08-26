@@ -208,6 +208,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.6.1 *Return of `clone()` and `cloneAll()` as default methods.*
 - 1.6.0 *Added `doClone()`.*
 - 1.5.0 *Refactored, simplified, added more canned list-based operations.*
 - 1.4.1 *Added ability to return `undefined` for mapping functions.*
