@@ -60,7 +60,7 @@ class Adapter {
   }
 
   async validateItem(item, isPatch, deep) {
-    // this function should throw an exception if an item is incorrect for some reason
+    // this function should throw an exception if an item cannot be written to DB
   }
 
   // general API
@@ -125,7 +125,8 @@ class Adapter {
       delete dbItem.__delete;
       params = prepareUpdate.flat(dbItem, deleteProps, params);
     }
-    return params.UpdateExpression ? this.client.updateItem(cleanParams(params)).promise() : null;
+    params = cleanParams(params);
+    return params.UpdateExpression ? this.client.updateItem(params).promise() : null;
   }
 
   async patch(item, deep, params) {
