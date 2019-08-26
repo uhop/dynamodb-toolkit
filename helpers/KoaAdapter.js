@@ -55,8 +55,8 @@ class KoaAdapter {
     ctx.status = 204;
   }
 
-  async clone(ctx) {
-    const done = await this.adapter.cloneByKey(this.augmentFromContext({}, ctx), item => ({...item, name: item.name + ' COPY'}));
+  async doClone(ctx, mapFn) {
+    const done = await this.adapter.cloneByKey(this.augmentFromContext({}, ctx), mapFn, isTrue(ctx.query, 'force'));
     ctx.status = done ? 204 : 404;
   }
 
@@ -66,7 +66,9 @@ class KoaAdapter {
     return {
       consistent: isConsistent(ctx.query),
       filter: ctx.query.filter,
-      fields: ctx.query.fields
+      fields: ctx.query.fields,
+      offset: ctx.query.offset,
+      limit:  ctx.query.limit
     };
   }
 
