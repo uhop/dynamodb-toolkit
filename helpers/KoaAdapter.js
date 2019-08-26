@@ -3,6 +3,8 @@
 const Adapter = require('../Adapter');
 const {isTrue, isConsistent} = require('./isTrue');
 
+const cloneFn = ctx => item => Object.assign({}, item, ctx.request.body);
+
 class KoaAdapter {
   constructor(adapter, overlay) {
     this.adapter = adapter instanceof Adapter ? adapter : new Adapter(adapter);
@@ -60,6 +62,10 @@ class KoaAdapter {
     ctx.status = done ? 204 : 404;
   }
 
+  async clone(ctx) {
+    return this.doClone(ctx, cloneFn(ctx));
+  }
+
   // mass operations
 
   makeOptions(ctx) {
@@ -68,7 +74,7 @@ class KoaAdapter {
       filter: ctx.query.filter,
       fields: ctx.query.fields,
       offset: ctx.query.offset,
-      limit:  ctx.query.limit
+      limit: ctx.query.limit
     };
   }
 
@@ -86,6 +92,10 @@ class KoaAdapter {
 
   async doCloneAll(ctx, mapFn) {
     ctx.body = {processed: await this.adapter.cloneAll(this.makeOptions(ctx), mapFn, Object.assign({}, ctx.params))};
+  }
+
+  async cloneAll(ctx) {
+    return this.doCloneAll(ctx, cloneFn(ctx));
   }
 }
 
