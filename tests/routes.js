@@ -18,7 +18,13 @@ const adapter = new Adapter({
   table: 'test',
   keyFields: ['name'],
   searchable: {name: 1, climate: 1, terrain: 1},
-  prepare(item) {
+  prepare(item, isPatch) {
+    if (isPatch) {
+      return Object.keys(item).reduce((acc, key) => {
+        if (key.charAt(0) !== '-') acc[key] = item[key];
+        return acc;
+      }, {});
+    }
     const data = Object.keys(item).reduce((acc, key) => {
       if (key.charAt(0) !== '-') {
         acc[key] = item[key];
@@ -28,6 +34,14 @@ const adapter = new Adapter({
     }, {});
     data['-t'] = 1;
     return data;
+  },
+  prepareKey(item, index) {
+    const key = {name: item.name};
+    if (index) {
+      key.IndexName = index;
+      key['-t'] = 1;
+    }
+    return key;
   },
   prepareListParams(_, index) {
     return index
@@ -64,6 +78,9 @@ const koaAdapter = new KoaAdapter(adapter, {
       item.name = ctx.params.planet;
     }
     return item;
+  },
+  async clone(ctx) {
+    return this.doClone(ctx, item => ({...item, name: item.name + ' COPY'}));
   },
   async getAll(ctx) {
     let index, descending;
