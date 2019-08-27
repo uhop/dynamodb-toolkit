@@ -53,6 +53,11 @@ class Adapter {
     return {};
   }
 
+  updateParams(params, options) {
+    // this function can update params by adding a writing condition
+    return params;
+  }
+
   revive(item, fieldMap) {
     // reconstitute a database object
     // remove some technical fields if required
@@ -60,7 +65,7 @@ class Adapter {
   }
 
   async validateItem(item, isPatch, deep) {
-    // this function should throw an exception if an item cannot be written to DB
+    // this function should throw an exception if an item should not be written to DB
   }
 
   // general API
@@ -102,7 +107,9 @@ class Adapter {
       params.ExpressionAttributeNames[keyName] = this.keyFields[0];
     }
     params.Item = this.toDynamo(item);
-    return this.client.putItem(cleanParams(params)).promise();
+    params = this.updateParams(params, {name: 'put', force});
+    params = cleanParams(params);
+    return this.client.putItem(params).promise();
   }
 
   async patchByKey(key, item, deep, params) {
@@ -125,6 +132,7 @@ class Adapter {
       delete dbItem.__delete;
       params = prepareUpdate.flat(dbItem, deleteProps, params);
     }
+    params = this.updateParams(params, {name: 'patch', deep});
     params = cleanParams(params);
     return params.UpdateExpression ? this.client.updateItem(params).promise() : null;
   }
@@ -136,7 +144,9 @@ class Adapter {
   async deleteByKey(key, params) {
     params = this.cloneParams(params);
     params.Key = this.toDynamoKey(key, params.IndexName);
-    return this.client.deleteItem(cleanParams(params)).promise();
+    params = this.updateParams(params, {name: 'delete'});
+    params = cleanParams(params);
+    return this.client.deleteItem(params).promise();
   }
 
   async delete(item, params) {
