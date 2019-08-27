@@ -83,15 +83,15 @@ class KoaAdapter {
   }
 
   async getAll(ctx) {
-    ctx.body = await this.adapter.getAll(this.makeOptions(ctx), Object.assign({}, ctx.params));
+    ctx.body = await this.adapter.getAll(this.makeOptions(ctx), this.augmentFromContext({}, ctx));
   }
 
   async deleteAll(ctx) {
-    ctx.body = {processed: await this.adapter.deleteAll(this.makeOptions(ctx), Object.assign({}, ctx.params))};
+    ctx.body = {processed: await this.adapter.deleteAll(this.makeOptions(ctx), this.augmentFromContext({}, ctx))};
   }
 
   async doCloneAll(ctx, mapFn) {
-    ctx.body = {processed: await this.adapter.cloneAll(this.makeOptions(ctx), mapFn, Object.assign({}, ctx.params))};
+    ctx.body = {processed: await this.adapter.cloneAll(this.makeOptions(ctx), mapFn, this.augmentFromContext({}, ctx))};
   }
 
   async cloneAll(ctx) {
