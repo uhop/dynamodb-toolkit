@@ -91,7 +91,7 @@ const koaAdapter = new KoaAdapter(adapter, {
     return item;
   },
   async clone(ctx) {
-    return this.doClone(ctx, item => ({...item, name: item.name + ' COPY'}));
+    return this.doClone(ctx, cloneFn);
   },
   async getAll(ctx) {
     let index, descending;
