@@ -197,7 +197,7 @@ class Adapter {
     return result;
   }
 
-  async getAllByKeys(keys, fields, params) {
+  async getByKeys(keys, fields, params) {
     params = this.cloneParams(params);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
     const items = await readList(this.client, this.table, keys.map(key => this.toDynamoKey(key, params.IndexName)), params);
@@ -219,6 +219,10 @@ class Adapter {
     return deleteList(this.client, params);
   }
 
+  async deleteByKeys(keys) {
+    return await deleteList.byKeys(this.client, this.table, keys.map(key => this.toDynamoKey(key)));
+  }
+
   async deleteAll(options, item, index) {
     const params = this.makeParams(options, false, this.prepareListParams(item, index));
     return this.deleteAllByParams(params);
@@ -227,6 +231,10 @@ class Adapter {
   async cloneAllByParams(params, mapFn) {
     params = this.cloneParams(params);
     return copyList(this.client, params, item => this.toDynamo(mapFn(this.fromDynamo(item))));
+  }
+
+  async cloneByKeys(keys, mapFn) {
+    return await copyList.byKeys(this.client, this.table, keys.map(key => this.toDynamoKey(key)), item => this.toDynamo(mapFn(this.fromDynamo(item))));
   }
 
   async cloneAll(options, mapFn, item, index) {
