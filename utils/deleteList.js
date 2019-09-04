@@ -36,4 +36,15 @@ const deleteList = async (client, params) => {
   return processed;
 };
 
+deleteList.byKeys = async (client, tableName, keys) => {
+  if (keys.length > 25) {
+    for (let offset = 0; offset < keys.length; offset += 25) {
+      await deleteKeyList(client, tableName, keys.slice(offset, offset + 25));
+    }
+  } else {
+    await deleteKeyList(client, tableName, keys);
+  }
+  return keys.length;
+};
+
 module.exports = deleteList;
