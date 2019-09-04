@@ -71,6 +71,17 @@ const adapter = new Adapter({
   }
 });
 
+const namesToKeys = ctx => {
+  if (!ctx.query.names) throw new Error('Query parameter "names" was expected. Should be a comma-separated list of planet names.');
+  return ctx.query.names
+    .split(',')
+    .map(name => name.trim())
+    .filter(name => name)
+    .map(name => ({name}));
+};
+
+const cloneFn = item => ({...item, name: item.name + ' COPY'});
+
 const koaAdapter = new KoaAdapter(adapter, {
   sortableIndices: {name: '-t-name-index'},
   augmentFromContext(item, ctx) {
@@ -96,7 +107,7 @@ const koaAdapter = new KoaAdapter(adapter, {
   },
   // use standard deleteAll()
   async cloneAll(ctx) {
-    return this.doCloneAll(ctx, item => ({...item, name: item.name + ' COPY'}));
+    return this.doCloneAll(ctx, cloneFn);
   },
   async load(ctx) {
     // const data = JSON.parse(await fs.promises.readFile(path.join(__dirname, 'data.json')));
@@ -104,18 +115,16 @@ const koaAdapter = new KoaAdapter(adapter, {
     await this.adapter.putAll(data);
     ctx.body = {processed: data.length};
   },
+  // by-names operations
   async getByNames(ctx) {
-    if (!ctx.query.names) throw new Error('Query parameter "names" was expected. Should be a comma-separated list of planet names.');
     const params = this.makeParams(ctx);
-    ctx.body = await this.adapter.getAllByKeys(
-      ctx.query.names
-        .split(',')
-        .map(name => name.trim())
-        .filter(name => name)
-        .map(name => ({name})),
-      ctx.query.fields,
-      params
-    );
+    ctx.body = await this.adapter.getByKeys(namesToKeys(ctx), ctx.query.fields, params);
+  },
+  async deleteByNames(ctx) {
+    ctx.body = {processed: await this.adapter.deleteByKeys(namesToKeys(ctx))};
+  },
+  async cloneByNames(ctx) {
+    ctx.body = {processed: await this.adapter.cloneByKeys(namesToKeys(ctx), cloneFn)};
   }
 });
 
@@ -124,10 +133,12 @@ const router = new Router();
 router
   // mass operations
   .get('/', async ctx => koaAdapter.getAll(ctx))
+  .delete('/', async ctx => koaAdapter.deleteAll(ctx))
   .put('/-load', async ctx => koaAdapter.load(ctx))
-  .put('/-delete-all', async ctx => koaAdapter.deleteAll(ctx))
-  .put('/-clone-all', async ctx => koaAdapter.cloneAll(ctx))
-  .get('/-get-by-names', async ctx => koaAdapter.getByNames(ctx))
+  .put('/-clone', async ctx => koaAdapter.cloneAll(ctx))
+  .put('/-clone-by-names', async ctx => koaAdapter.cloneByNames(ctx))
+  .get('/-by-names', async ctx => koaAdapter.getByNames(ctx))
+  .delete('/-by-names', async ctx => koaAdapter.deleteByNames(ctx))
 
   // item operations
   .post('/', async ctx => koaAdapter.post(ctx))
