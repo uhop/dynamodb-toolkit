@@ -31,10 +31,21 @@ Supports out-of-the-box the following operations:
   * `clone(item, mapFn [, deep [, params]])` AKA `cloneByKey(key, mapFn [, force [, params]])`
 * Mass operation building blocks:
   * `getAllByParams(params, options [, fields])`
-  * `getAllByKeys(keys [, fields [, params]])`
+  * `getByKeys(keys [, fields [, params]])`
+  * `getAll(options, item [, index])`
   * `putAll(items)`
   * `deleteAllByParams(params)`
+  * `deleteByKeys(keys)`
+  * `deleteAll(options, item [, index])`
   * `cloneAllByParams(params, mapFn)`
+  * `cloneByKeys(keys, mapFn)`
+  * `cloneAll(options, mapFn, item [, index])`
+* Utilities:
+  * `makeParams(options, project, params, skipSelect)` &mdash; prepares a DynamoDB `params`.
+  * `cloneParams(params)` &mdash; a shallow copy of `params` with forcing a table name.
+  * `fromDynamo(item, fieldMap)` &mdash; imports data from the DynamoDB format.
+  * `toDynamo(item)` &mdash; exports data to the DynamoDB format.
+  * `toDynamoKey(item, index)` &mdash; exports a key to the DynamoDB format for a given index.
 
 The library provides a helper for [Koa](https://koajs.com/) to write HTTP REST servers. It takes care of query parameters, extracts POST/PUT JSON bodies,
 sends responses encoded as JSON with proper HTTP status codes, and prepares parameters for mass operations.
@@ -48,6 +59,7 @@ This is the annotated [tests/routes.js](https://github.com/uhop/dynamodb-toolkit
 ```js
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 const Router = require('koa-router');
 
@@ -100,6 +112,27 @@ const adapter = new Adapter({
       }
       return acc;
     }, {});
+  },
+  prepareKey(item, index) {
+    // make a key for our database
+    const key = {name: item.name};
+    if (index) {
+      // our index requires an artificial field
+      key.IndexName = index;
+      key['-t'] = 1;
+    }
+    return key;
+  },
+  prepareListParams(_, index) {
+    // prepare params for a list of items
+    return index
+      ? {
+          IndexName: index,
+          KeyConditionExpression: '#t = :t',
+          ExpressionAttributeNames: {'#t': '-t'},
+          ExpressionAttributeValues: {':t': {N: '1'}}
+        }
+      : {};
   }
 });
 ```
@@ -107,70 +140,67 @@ const adapter = new Adapter({
 We mostly defined how to transform our object to something we keep in a database and back.
 By default these operations just return their `item` parameter so we don't need to specify them if we don't want any transformations.
 
+## Define Koa helpers
+
+```js
+// takes names from the query and constructs keys
+const namesToKeys = ctx => {
+  if (!ctx.query.names) throw new Error('Query parameter "names" was expected.');
+  return ctx.query.names
+    .split(',')
+    .map(name => name.trim())
+    .filter(name => name)
+    .map(name => ({name}));
+};
+
+// simple custom clone function, which updates a name
+const cloneFn = item => ({...item, name: item.name + ' COPY'});
+```
+
 ## Define a Koa adapter
 
 ```js
 const koaAdapter = new KoaAdapter(adapter, {
-  sortableIndices: {name: '-t-name-index'},
+  sortableIndices: {name: '-t-name-index'}, // sorting by name uses this index
   augmentFromContext(item, ctx) {
     if (ctx.params.planet) {
       item.name = ctx.params.planet;
     }
     return item;
   },
-  async getAll(ctx) {
-    let params = {};
-    if (ctx.query.sort) {
-      let sortName = ctx.query.sort,
-        descending = ctx.query.sort.charAt(0) == '-';
-      if (descending) {
-        sortName = ctx.query.sort.substr(1);
-      }
-      const index = this.sortableIndices[sortName];
-      if (index) {
-        if (descending) {
-          params.ScanIndexForward = false;
-          params.KeyConditionExpression = '#t = :t';
-          params.ExpressionAttributeNames = {'#t': '-t'};
-          params.ExpressionAttributeValues = {':t': {N: '1'}};
-        }
-        params.IndexName = index;
-      }
-    }
-    params = this.makeParams(ctx, false, params);
-    ctx.body = await this.adapter.getAllByParams(params,
-      {offset: ctx.query.offset, limit: ctx.query.limit},
-        ctx.query.fields);
+  async clone(ctx) {
+    return this.doClone(ctx, cloneFn);
   },
-  async deleteAll(ctx) {
-    const params = this.makeParams(ctx);
-    ctx.body = {processed: await this.adapter.deleteAllByParams(params)};
+  async getAll(ctx) {
+    let index, descending;
+    if (ctx.query.sort) {
+      let sortName = ctx.query.sort;
+      descending = ctx.query.sort.charAt(0) == '-';
+      descending && (sortName = ctx.query.sort.substr(1));
+      index = this.sortableIndices[sortName];
+    }
+    const options = this.makeOptions(ctx);
+    descending && (options.descending = true);
+    ctx.body = await this.adapter.getAll(options, null, index);
   },
   async cloneAll(ctx) {
-    const params = this.makeParams(ctx);
-    ctx.body = {processed: await this.adapter.cloneAllByParams(params,
-      item => ({...item, name: item.name + ' COPY'}))};
+    return this.doCloneAll(ctx, cloneFn);
   },
   async load(ctx) {
-    const data = JSON.parse(await fs.promises.readFile(
-      path.join(__dirname, 'data.json')));
+    const data = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, 'data.json.gz'))));
     await this.adapter.putAll(data);
     ctx.body = {processed: data.length};
   },
+  // by-names operations
   async getByNames(ctx) {
-    if (!ctx.query.names) throw new Error(
-      'Query parameter "names" was expected. ' +
-      'Should be a comma-separated list of planet names.');
     const params = this.makeParams(ctx);
-    ctx.body = await this.adapter.getAllByKeys(
-      ctx.query.names
-        .split(',')
-        .map(name => name.trim())
-        .filter(name => name)
-        .map(name => ({name})),
-      ctx.query.fields,
-      params
-    );
+    ctx.body = await this.adapter.getByKeys(namesToKeys(ctx), ctx.query.fields, params);
+  },
+  async deleteByNames(ctx) {
+    ctx.body = {processed: await this.adapter.deleteByKeys(namesToKeys(ctx))};
+  },
+  async cloneByNames(ctx) {
+    ctx.body = {processed: await this.adapter.cloneByKeys(namesToKeys(ctx), cloneFn)};
   }
 });
 ```
@@ -185,17 +215,20 @@ const router = new Router();
 router
   // mass operations
   .get('/', async ctx => koaAdapter.getAll(ctx))
+  .delete('/', async ctx => koaAdapter.deleteAll(ctx))
   .put('/-load', async ctx => koaAdapter.load(ctx))
-  .put('/-delete-all', async ctx => koaAdapter.deleteAll(ctx))
-  .put('/-clone-all', async ctx => koaAdapter.cloneAll(ctx))
-  .get('/-get-by-names', async ctx => koaAdapter.getByNames(ctx))
+  .put('/-clone', async ctx => koaAdapter.cloneAll(ctx))
+  .put('/-clone-by-names', async ctx => koaAdapter.cloneByNames(ctx))
+  .get('/-by-names', async ctx => koaAdapter.getByNames(ctx))
+  .delete('/-by-names', async ctx => koaAdapter.deleteByNames(ctx))
 
   // item operations
   .post('/', async ctx => koaAdapter.post(ctx))
   .get('/:planet', async ctx => koaAdapter.get(ctx))
   .put('/:planet', async ctx => koaAdapter.put(ctx))
   .patch('/:planet', async ctx => koaAdapter.patch(ctx))
-  .delete('/:planet', async ctx => koaAdapter.delete(ctx));
+  .delete('/:planet', async ctx => koaAdapter.delete(ctx))
+  .put('/:planet/-clone', async ctx => koaAdapter.clone(ctx));
 
 module.exports = router;
 ```
@@ -208,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.7.0 *Added `deleteByNames()` and `cloneByNames()`, renamed `getAllByKeys()` to `getByKeys()`.*
 - 1.6.3 *Added `updateParams()` to add writing conditions.*
 - 1.6.2 *Bugfix in `KoaAdapter`'s mass methods: augmenting instead of copying.*
 - 1.6.1 *Return of `clone()` and `cloneAll()` as default methods.*
