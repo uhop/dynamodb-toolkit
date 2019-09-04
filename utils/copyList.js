@@ -5,6 +5,7 @@
 const batchWrite = require('./batchWrite');
 const cleanParams = require('./cleanParams');
 const cloneParams = require('./cloneParams');
+const readList = require('./readList');
 
 const writeKeyList = async (client, tableName, items) => {
   items = items.filter(item => item);
@@ -33,6 +34,22 @@ const copyList = async (client, params, mapFn) => {
     }
     if (!data.LastEvaluatedKey) break;
     params.ExclusiveStartKey = data.LastEvaluatedKey;
+  }
+  return processed;
+};
+
+copyList.byKeys = async (client, tableName, keys, mapFn) => {
+  let processed = 0;
+  if (keys.length > 25) {
+    for (let offset = 0; offset < keys.length; offset += 25) {
+      const items = await readList(client, tableName, keys.slice(offset, offset + 25));
+      processed += items.length;
+      await writeKeyList(client, tableName, items.map(mapFn));
+    }
+  } else {
+    const items = await readList(client, tableName, keys);
+    processed += items.length;
+    await writeKeyList(client, tableName, items.map(mapFn));
   }
   return processed;
 };
