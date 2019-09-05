@@ -109,7 +109,6 @@ const koaAdapter = new KoaAdapter(adapter, {
     return this.doCloneAll(ctx, cloneFn);
   },
   async load(ctx) {
-    // const data = JSON.parse(await fs.promises.readFile(path.join(__dirname, 'data.json')));
     const data = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, 'data.json.gz'))));
     await this.adapter.putAll(data);
     ctx.body = {processed: data.length};
