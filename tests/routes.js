@@ -19,12 +19,6 @@ const adapter = new Adapter({
   keyFields: ['name'],
   searchable: {name: 1, climate: 1, terrain: 1},
   prepare(item, isPatch) {
-    if (isPatch) {
-      return Object.keys(item).reduce((acc, key) => {
-        if (key.charAt(0) !== '-') acc[key] = item[key];
-        return acc;
-      }, {});
-    }
     const data = Object.keys(item).reduce((acc, key) => {
       if (key.charAt(0) !== '-') {
         acc[key] = item[key];
@@ -32,7 +26,9 @@ const adapter = new Adapter({
       }
       return acc;
     }, {});
-    data['-t'] = 1;
+    if (!isPatch) {
+      data['-t'] = 1;
+    }
     return data;
   },
   prepareKey(item, index) {
