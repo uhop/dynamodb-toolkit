@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.7.1 *Minor performance tweaks, bugfixes in the test case.*
 - 1.7.0 *Added `deleteByNames()` and `cloneByNames()`, renamed `getAllByKeys()` to `getByKeys()`.*
 - 1.6.3 *Added `updateParams()` to add writing conditions.*
 - 1.6.2 *Bugfix in `KoaAdapter`'s mass methods: augmenting instead of copying.*
