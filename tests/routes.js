@@ -26,7 +26,9 @@ const adapter = new Adapter({
       }
       return acc;
     }, {});
-    if (!isPatch) {
+    if (isPatch) {
+      delete data.name; // removes the key field
+    } else {
       data['-t'] = 1;
     }
     return data;
