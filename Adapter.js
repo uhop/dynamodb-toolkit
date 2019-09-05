@@ -201,7 +201,8 @@ class Adapter {
     params = this.cloneParams(params);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
     const items = await readList(this.client, this.table, keys.map(key => this.toDynamoKey(key, params.IndexName)), params);
-    return items.map(item => this.fromDynamo(item, fieldsToMap(fields)));
+    const fieldMap = fieldsToMap(fields);
+    return items.map(item => this.fromDynamo(item, fieldMap));
   }
 
   async getAll(options, item, index) {
