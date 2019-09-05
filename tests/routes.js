@@ -8,6 +8,7 @@ const AWS = require('aws-sdk');
 
 const Adapter = require('../Adapter');
 const KoaAdapter = require('../helpers/KoaAdapter');
+const {isConsistent} = require('../helpers/isTrue');
 
 AWS.config.update({region: 'us-east-1'});
 
@@ -115,7 +116,7 @@ const koaAdapter = new KoaAdapter(adapter, {
   },
   // by-names operations
   async getByNames(ctx) {
-    const params = this.makeParams(ctx);
+    const params = isConsistent(ctx.query) ? {ConsistentRead: true} : null;
     ctx.body = await this.adapter.getByKeys(namesToKeys(ctx), ctx.query.fields, params);
   },
   async deleteByNames(ctx) {
