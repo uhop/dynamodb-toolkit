@@ -20,20 +20,19 @@ const writeKeyList = async (client, tableName, items) => {
 
 const copyList = async (client, params, mapFn) => {
   // prepare parameters
-  const action = params.KeyConditionExpression ? 'query' : 'scan';
   params = cleanParams(cloneParams(params));
   params.Limit = 25;
 
   // iterate over parameters copying records
   let processed = 0;
-  for (;;) {
-    const data = await client[action](params).promise();
-    if (data.Items && data.Items.length) {
-      processed += data.Items.length;
-      await writeKeyList(client, params.TableName, data.Items.map(mapFn));
-    }
-    if (!data.LastEvaluatedKey) break;
-    params.ExclusiveStartKey = data.LastEvaluatedKey;
+  for(;;) {
+    params = await readList(client, params, async data => {
+      if (data.Items.length) {
+        processed += data.Items.length;
+        await writeKeyList(client, params.TableName, data.Items.map(mapFn));
+      }
+    });
+    if (!params) break;
   }
   return processed;
 };
@@ -42,12 +41,12 @@ copyList.byKeys = async (client, tableName, keys, mapFn) => {
   let processed = 0;
   if (keys.length > 25) {
     for (let offset = 0; offset < keys.length; offset += 25) {
-      const items = await readList(client, tableName, keys.slice(offset, offset + 25));
+      const items = await readList.byKeys(client, tableName, keys.slice(offset, offset + 25));
       processed += items.length;
       await writeKeyList(client, tableName, items.map(mapFn));
     }
   } else {
-    const items = await readList(client, tableName, keys);
+    const items = await readList.byKeys(client, tableName, keys);
     processed += items.length;
     await writeKeyList(client, tableName, items.map(mapFn));
   }

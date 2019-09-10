@@ -4,6 +4,7 @@
 
 const batchGet = require('./batchGet');
 const cleanParams = require('./cleanParams');
+const cloneParams = require('./cloneParams');
 
 const readKeyList = async (client, tableName, keys, generalParams) => {
   if (!keys.length) return {};
@@ -27,7 +28,33 @@ const readKeyList = async (client, tableName, keys, generalParams) => {
   return batchGet(client, params);
 };
 
-const readList = async (client, tableName, keys, generalParams) => {
+const readList = async (client, params, fn) => {
+  // prepare parameters
+  const action = params.KeyConditionExpression ? 'query' : 'scan';
+  params = cleanParams(cloneParams(params));
+  if (!params.hasOwnProperty('Limit')) params.Limit = 100;
+  const data = await client[action](params).promise();
+  await fn(data);
+  if (data.LastEvaluatedKey) {
+    params.ExclusiveStartKey = data.LastEvaluatedKey;
+    return params;
+  }
+  return null;
+};
+
+readList.getItems = async (client, params) => {
+  // prepare parameters
+  const action = params.KeyConditionExpression ? 'query' : 'scan';
+  params = cleanParams(cloneParams(params));
+  if (!params.hasOwnProperty('Limit')) params.Limit = 100;
+  const data = await client[action](params).promise();
+  if (data.LastEvaluatedKey) {
+    params.ExclusiveStartKey = data.LastEvaluatedKey;
+  }
+  return {nextParams: data.LastEvaluatedKey ? params : null, items: data.Items || []};
+};
+
+readList.byKeys = async (client, tableName, keys, generalParams) => {
   // sanitize individual per-table parameters
   let gp = {};
   if (generalParams) {
