@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.8.0 *New signature for `readList()`, added streamable reading.*
 - 1.7.2 *Technical release.*
 - 1.7.1 *Minor performance tweaks, bugfixes in the test case.*
 - 1.7.0 *Added `deleteByNames()` and `cloneByNames()`, renamed `getAllByKeys()` to `getByKeys()`.*
