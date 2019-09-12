@@ -189,6 +189,12 @@ class Adapter {
     return filtering(options.filter, fieldMap, this.searchable, this.searchablePrefix, params);
   }
 
+  async scanAllByParams(params, fieldMap) {
+    const result = readList.getItems(this.client, params);
+    fieldMap = fieldsToMap(fieldMap);
+    return {nextParams: result.nextParams, items: result.items.map(item => this.fromDynamo(item, fieldMap))};
+  }
+
   async getAllByParams(params, options, fields) {
     params = this.cloneParams(params);
     const result = await paginateList(this.client, params, options);
@@ -206,7 +212,7 @@ class Adapter {
   }
 
   async getAll(options, item, index) {
-    const params = this.makeParams(options, true, this.prepareListParams(item, index));
+    const params = this.makeListParams(options, true, item, index);
     return this.getAllByParams(params, options, options && options.fields);
   }
 
@@ -225,7 +231,7 @@ class Adapter {
   }
 
   async deleteAll(options, item, index) {
-    const params = this.makeParams(options, false, this.prepareListParams(item, index));
+    const params = this.makeListParams(options, false, item, index);
     return this.deleteAllByParams(params);
   }
 
@@ -239,7 +245,7 @@ class Adapter {
   }
 
   async cloneAll(options, mapFn, item, index) {
-    const params = this.makeParams(options, false, this.prepareListParams(item, index));
+    const params = this.makeListParams(options, false, item, index);
     return this.cloneAllByParams(params, mapFn);
   }
 
@@ -249,6 +255,10 @@ class Adapter {
     params = cloneParams(params);
     params.TableName = this.table;
     return params;
+  }
+
+  makeListParams(options, project, item, index) {
+    return this.makeParams(options, project, this.prepareListParams(item, index));
   }
 
   fromDynamo(item, fieldMap) {
