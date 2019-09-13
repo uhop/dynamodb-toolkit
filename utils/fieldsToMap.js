@@ -1,6 +1,8 @@
 'use strict';
 
-const fieldsToMap = (fields, projectionFieldMap) => {
+const topPart = /^([^\.]*)\./;
+
+const fieldsToMap = (fields, projectionFieldMap, topLevel) => {
   if (!fields) return null;
   let fieldNames, fieldMap;
   if (typeof fields == 'string') {
@@ -8,6 +10,12 @@ const fieldsToMap = (fields, projectionFieldMap) => {
       .split(',')
       .map(f => f.trim())
       .filter(f => f);
+    if (topLevel) {
+      fieldNames = fieldNames.map(f => {
+        const top = topPart.exec(f);
+        return top ? top[1] : f;
+      });
+    }
     fieldMap = fieldNames.reduce((acc, name) => ((acc[name] = 1), acc), {});
   } else {
     if (!projectionFieldMap) return fields;
