@@ -1,0 +1,1398 @@
+{
+	"info": {
+		"_postman_id": "6a6581f8-7166-497a-bb8e-6807371baed4",
+		"name": "Unit test dynamodb-toolkit",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Delete all planets",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "76363195-9551-49b3-a04a-2e6b401eef2c",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						""
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Should be empty",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "0592b1b5-8a19-456e-8588-5ffa45d3532f",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must be an empty envelope\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.total).to.eql(0);",
+							"    pm.expect(json.data.length).to.eql(0);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000",
+					"host": [
+						"localhost"
+					],
+					"port": "3000"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Load a list of planets",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "b78077ae-ca8f-4117-a9d1-ac58bcc5cef8",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must load 61 items\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.processed).to.eql(61);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "PUT",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/-load",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"-load"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get a list of planets",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "783d9bd2-a249-4fa7-a670-01f1f98aac72",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must be the first page\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.total).to.eql(61);",
+							"    pm.expect(json.offset).to.eql(0);",
+							"    pm.expect(json.limit).to.eql(10);",
+							"    pm.expect(json.data.length).to.eql(10);",
+							"});",
+							"",
+							"pm.test(\"the first item should be Alderaan\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.data[0].name).to.eql(\"Alderaan\");",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000",
+					"host": [
+						"localhost"
+					],
+					"port": "3000"
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get a list of planets (next page)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "207ee5c9-3d3e-4653-b668-3a7abfe39ccd",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must be the second page\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.total).to.eql(61);",
+							"    pm.expect(json.offset).to.eql(10);",
+							"    pm.expect(json.limit).to.eql(10);",
+							"    pm.expect(json.data.length).to.eql(10);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/?offset=10",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						""
+					],
+					"query": [
+						{
+							"key": "offset",
+							"value": "10"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get a  planet",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8d49f78f-d7c7-4de9-bef9-bd704ff9b45e",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"the item should be Alderaan with 4 fields\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.name).to.eql(\"Alderaan\");",
+							"    pm.expect(json.climate).to.eql(\"temperate\");",
+							"    pm.expect(json.diameter).to.eql(\"12500\");",
+							"    pm.expect(json.terrain).to.eql(\"grasslands, mountains\");",
+							"    pm.expect(Object.keys(json).length).to.eql(4);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/Alderaan?fields=name,climate,terrain,diameter",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"Alderaan"
+					],
+					"query": [
+						{
+							"key": "fields",
+							"value": "name,climate,terrain,diameter"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get planets by name",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "48e465d5-6fc8-4952-9bb1-d9bfa20e8784",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"3 items should be returned\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.length).to.eql(3);",
+							"    json.sort((a, b) => a.name < b.name ? -1 : b.name < a.name ? 1 : 0);",
+							"    pm.expect(json[0].name).to.eql(\"Bespin\");",
+							"    pm.expect(json[1].name).to.eql(\"Endor\");",
+							"    pm.expect(json[2].name).to.eql(\"Hoth\");",
+							"});",
+							"",
+							"pm.test(\"the first item should be Bespin with 2 fields\", () => {",
+							"    const json = pm.response.json();",
+							"    json.sort((a, b) => a.name < b.name ? -1 : b.name < a.name ? 1 : 0);",
+							"    const planet = json[0];",
+							"    pm.expect(planet.name).to.eql(\"Bespin\");",
+							"    pm.expect(planet.diameter).to.eql(\"118000\");",
+							"    pm.expect(Object.keys(planet).length).to.eql(2);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/-by-names?names=Hoth,Endor,Bespin,XX&fields=name,diameter",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"-by-names"
+					],
+					"query": [
+						{
+							"key": "names",
+							"value": "Hoth,Endor,Bespin,XX"
+						},
+						{
+							"key": "fields",
+							"value": "name,diameter"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get a list of planets sorted",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "6512513c-72fe-407d-aa3c-95a8958932a5",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must be the first page\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.total).to.eql(61);",
+							"    pm.expect(json.offset).to.eql(0);",
+							"    pm.expect(json.limit).to.eql(10);",
+							"    pm.expect(json.data.length).to.eql(10);",
+							"});",
+							"",
+							"pm.test(\"the first item should be unknown\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.data[0].name).to.eql(\"unknown\");",
+							"    pm.expect(Object.keys(json.data[0]).length).to.eql(1);",
+							"});",
+							"",
+							"pm.test(\"the list shoud be reverse sorted\", () => {",
+							"    const json = pm.response.json();",
+							"    const reversed = json.data.slice(0).sort((a, b) => a.name < b.name ? 1 : b.name < a.name ? -1 : 0);",
+							"    pm.expect(reversed).to.eql(json.data);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/?sort=-name&fields=name",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						""
+					],
+					"query": [
+						{
+							"key": "sort",
+							"value": "-name"
+						},
+						{
+							"key": "fields",
+							"value": "name"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get a list of planets filtered",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "bf7b6b43-513b-4c35-8ea8-74e77cc2a9c1",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must be the first page\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.total).to.eql(2);",
+							"    pm.expect(json.offset).to.eql(0);",
+							"    pm.expect(json.limit).to.eql(10);",
+							"    pm.expect(json.data.length).to.eql(2);",
+							"});",
+							"",
+							"pm.test(\"we should get Tatooine and Dantooine\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.data.length).to.eql(2);",
+							"    pm.expect(Object.keys(json.data[0]).length).to.eql(1);",
+							"    pm.expect(json.data[0].name).to.eql(\"Tatooine\");",
+							"    pm.expect(Object.keys(json.data[1]).length).to.eql(1);",
+							"    pm.expect(json.data[1].name).to.eql(\"Dantooine\");",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/?sort=-name&fields=name&filter=tooine",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						""
+					],
+					"query": [
+						{
+							"key": "sort",
+							"value": "-name"
+						},
+						{
+							"key": "fields",
+							"value": "name"
+						},
+						{
+							"key": "filter",
+							"value": "tooine"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Clone all \"tooine\"",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "ec820956-b4e6-45be-a23f-95acedda1365",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must clone 2 items\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.processed).to.eql(2);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "PUT",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/-clone/?filter=tooine",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"-clone",
+						""
+					],
+					"query": [
+						{
+							"key": "filter",
+							"value": "tooine"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Delete all \"tooine\"",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "d3c9dd94-171d-4326-b484-8d2c3a9872c0",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must delete 4 items\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.processed).to.eql(4);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/?filter=tooine",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						""
+					],
+					"query": [
+						{
+							"key": "filter",
+							"value": "tooine"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Create a planet",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "eee92d14-cc7e-454a-9b6b-aeff7f606ed8",
+						"exec": [
+							"pm.test(\"response must be valid and empty\", () => {",
+							"     pm.response.to.have.status(204);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"name": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"name\": \"AAA Fake\",\n  \"climate\": \"temperate\",\n  \"terrain\": \"rocky\"\n}"
+				},
+				"url": {
+					"raw": "localhost:3000/",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						""
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get a new planet #1",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8d49f78f-d7c7-4de9-bef9-bd704ff9b45e",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"the item should be AAA Fake with 3 fields\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json).to.eql({",
+							"      \"name\": \"AAA Fake\",",
+							"      \"climate\": \"temperate\",",
+							"      \"terrain\": \"rocky\"",
+							"    });",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake?consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake"
+					],
+					"query": [
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Update a planet",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "eef6a161-9ccb-42bf-943d-4e5612ddd2de",
+						"exec": [
+							"pm.test(\"response must be valid and empty\", () => {",
+							"     pm.response.to.have.status(204);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Content-Type",
+						"name": "Content-Type",
+						"type": "text",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"climate\": \"temperate\",\n  \"terrain\": \"rocky\",\n  \"diameter\": 12345,\n  \"config\": {\"a\": 1, \"b\": 2, \"c\": 3}\n}"
+				},
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get a new planet #2",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8d49f78f-d7c7-4de9-bef9-bd704ff9b45e",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"the item should be AAA Fake with 3 fields\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json).to.eql({",
+							"      \"name\": \"AAA Fake\",",
+							"      \"climate\": \"temperate\",",
+							"      \"terrain\": \"rocky\",",
+							"      \"diameter\": 12345,",
+							"      \"config\": {\"a\": 1, \"b\": 2, \"c\": 3}",
+							"    });",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake?consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake"
+					],
+					"query": [
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Patch a planet",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "d9ccadfb-3420-4edb-a7d9-d45510627451",
+						"exec": [
+							"pm.test(\"response must be valid and empty\", () => {",
+							"     pm.response.to.have.status(204);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "PATCH",
+				"header": [
+					{
+						"key": "Content-Type",
+						"name": "Content-Type",
+						"type": "text",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"terrain\": \"mountain\",\n  \"config.a\": \"one\",\n  \"__delete\": [\"config.b\"]\n}"
+				},
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get a new planet #3",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8d49f78f-d7c7-4de9-bef9-bd704ff9b45e",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"the item should be AAA Fake with 3 fields\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json).to.eql({",
+							"      \"name\": \"AAA Fake\",",
+							"      \"climate\": \"temperate\",",
+							"      \"terrain\": \"mountain\",",
+							"      \"diameter\": 12345,",
+							"      \"config\": {\"a\": \"one\", \"c\": 3}",
+							"    });",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake?consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake"
+					],
+					"query": [
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Patch a planet (deep)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "36b46774-9747-4c7f-a317-d5678ab649df",
+						"exec": [
+							"pm.test(\"response must be valid and empty\", () => {",
+							"     pm.response.to.have.status(204);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "PATCH",
+				"header": [
+					{
+						"key": "Content-Type",
+						"name": "Content-Type",
+						"type": "text",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"terrain\": \"lakes\",\n  \"config\": {\"c\": \"three\"},\n  \"people\": \"beautiful\"\n}"
+				},
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake?deep=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake"
+					],
+					"query": [
+						{
+							"key": "deep",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get a new planet #4",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8d49f78f-d7c7-4de9-bef9-bd704ff9b45e",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"the item should be AAA Fake with 3 fields\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json).to.eql({",
+							"      \"name\": \"AAA Fake\",",
+							"      \"climate\": \"temperate\",",
+							"      \"terrain\": \"lakes\",",
+							"      \"people\": \"beautiful\",",
+							"      \"diameter\": 12345,",
+							"      \"config\": {\"a\": \"one\", \"c\": \"three\"}",
+							"    });",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake?consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake"
+					],
+					"query": [
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Clone a planet",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "f7677b9e-5c2c-4c69-bbcf-1cbe45201c5b",
+						"exec": [
+							"pm.test(\"response must be valid and empty\", () => {",
+							"     pm.response.to.have.status(204);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "PUT",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake/-clone",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake",
+						"-clone"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get the cloned planet #1",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8d49f78f-d7c7-4de9-bef9-bd704ff9b45e",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"the item should be AAA Fake with 3 fields\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json).to.eql({",
+							"      \"name\": \"AAA Fake COPY\",",
+							"      \"climate\": \"temperate\",",
+							"      \"terrain\": \"lakes\",",
+							"      \"people\": \"beautiful\",",
+							"      \"diameter\": 12345,",
+							"      \"config\": {\"a\": \"one\", \"c\": \"three\"}",
+							"    });",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake%20COPY?consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake%20COPY"
+					],
+					"query": [
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Delete a planet the clone",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "9eca202f-23f6-4021-ac33-ddd1efd87730",
+						"exec": [
+							"pm.test(\"response must be valid and empty\", () => {",
+							"     pm.response.to.have.status(204);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake%20COPY",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake%20COPY"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get the cloned planet #2",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8d49f78f-d7c7-4de9-bef9-bd704ff9b45e",
+						"exec": [
+							"pm.test(\"response should be 404\", () => {",
+							"     pm.response.to.have.status(404);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake%20COPY?consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake%20COPY"
+					],
+					"query": [
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Delete a planet",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "83bac43a-1d6b-4ef0-9ab2-8462f99118ba",
+						"exec": [
+							"pm.test(\"response must be valid and empty\", () => {",
+							"     pm.response.to.have.status(204);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get a new planet #5",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8d49f78f-d7c7-4de9-bef9-bd704ff9b45e",
+						"exec": [
+							"pm.test(\"response should be 404\", () => {",
+							"     pm.response.to.have.status(404);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake?consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake"
+					],
+					"query": [
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Clone planets by names",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "36697524-9ee6-4ea8-9c0f-1a8c56508765",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must clone 2 items\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.processed).to.eql(2);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "PUT",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/-clone-by-names/?names=Cerea,Endor",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"-clone-by-names",
+						""
+					],
+					"query": [
+						{
+							"key": "names",
+							"value": "Cerea,Endor"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get cloned planets by name #1",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "48e465d5-6fc8-4952-9bb1-d9bfa20e8784",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"2 items should be returned\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.length).to.eql(2);",
+							"    json.sort((a, b) => a.name < b.name ? -1 : b.name < a.name ? 1 : 0);",
+							"    pm.expect(json[0].name).to.eql(\"Cerea COPY\");",
+							"    pm.expect(json[1].name).to.eql(\"Endor COPY\");",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/-by-names?names=Cerea%20COPY,Endor%20COPY&consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"-by-names"
+					],
+					"query": [
+						{
+							"key": "names",
+							"value": "Cerea%20COPY,Endor%20COPY"
+						},
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Delete planets by names",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8d73ca97-4b78-4438-a0d3-6e09cbadd6db",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must delete 2 items\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.processed).to.eql(2);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/-by-names?names=Cerea%20COPY,Endor%20COPY",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"-by-names"
+					],
+					"query": [
+						{
+							"key": "names",
+							"value": "Cerea%20COPY,Endor%20COPY"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get cloned planets by name #2",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "48e465d5-6fc8-4952-9bb1-d9bfa20e8784",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"no items should be returned\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.length).to.eql(0);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/-by-names?names=Cerea%20COPY,Endor%20COPY&consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"-by-names"
+					],
+					"query": [
+						{
+							"key": "names",
+							"value": "Cerea%20COPY,Endor%20COPY"
+						},
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Clean up",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "76363195-9551-49b3-a04a-2e6b401eef2c",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must delete 59 items\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.processed).to.eql(59);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						""
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
