@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.9.0 *Added: projecting sub-objects, new way to clone objects, and unit tests.*
 - 1.8.2 *Bugfix in `scanAllByParams()`.*
 - 1.8.1 *Added `makeListParams() ` and `scanAllByParams()`.*
 - 1.8.0 *New signature for `readList()`, added streamable reading.*
