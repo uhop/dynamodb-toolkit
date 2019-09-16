@@ -37,6 +37,22 @@ const copyList = async (client, params, mapFn) => {
   return processed;
 };
 
+copyList.viaKeys = async (client, params, mapFn) => {
+  // prepare parameters
+  params = cleanParams(cloneParams(params));
+  params.Limit = 25;
+
+  const tableName = params.TableName;
+
+  // iterate over parameters copying records
+  let keys = [];
+  for(;;) {
+    params = await readList(client, params, async data => (keys = keys.concat(data.Items)));
+    if (!params) break;
+  }
+  return copyList.byKeys(client, tableName, keys, mapFn);
+};
+
 copyList.byKeys = async (client, tableName, keys, mapFn) => {
   let processed = 0;
   if (keys.length > 25) {

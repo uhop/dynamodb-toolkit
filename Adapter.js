@@ -236,11 +236,12 @@ class Adapter {
 
   async cloneAllByParams(params, mapFn) {
     params = this.cloneParams(params);
-    return copyList(this.client, params, item => this.toDynamo(mapFn(this.fromDynamo(item))));
+    addProjection(params, this.keyFields.join(','));
+    return copyList.viaKeys(this.client, params, item => this.toDynamo(mapFn(this.fromDynamo(item))));
   }
 
   async cloneByKeys(keys, mapFn) {
-    return await copyList.byKeys(this.client, this.table, keys.map(key => this.toDynamoKey(key)), item => this.toDynamo(mapFn(this.fromDynamo(item))));
+    return copyList.byKeys(this.client, this.table, keys.map(key => this.toDynamoKey(key)), item => this.toDynamo(mapFn(this.fromDynamo(item))));
   }
 
   async cloneAll(options, mapFn, item, index) {
