@@ -698,7 +698,7 @@
 							"     pm.response.to.be.json;",
 							"});",
 							"",
-							"pm.test(\"the item should be AAA Fake with 3 fields\", () => {",
+							"pm.test(\"the item should be AAA Fake with 5 fields\", () => {",
 							"    const json = pm.response.json();",
 							"    pm.expect(json).to.eql({",
 							"      \"name\": \"AAA Fake\",",
@@ -793,7 +793,7 @@
 							"     pm.response.to.be.json;",
 							"});",
 							"",
-							"pm.test(\"the item should be AAA Fake with 3 fields\", () => {",
+							"pm.test(\"the item should be AAA Fake updated config\", () => {",
 							"    const json = pm.response.json();",
 							"    pm.expect(json).to.eql({",
 							"      \"name\": \"AAA Fake\",",
@@ -893,7 +893,7 @@
 							"     pm.response.to.be.json;",
 							"});",
 							"",
-							"pm.test(\"the item should be AAA Fake with 3 fields\", () => {",
+							"pm.test(\"the item should be AAA Fake with new config\", () => {",
 							"    const json = pm.response.json();",
 							"    pm.expect(json).to.eql({",
 							"      \"name\": \"AAA Fake\",",
@@ -925,6 +925,110 @@
 						{
 							"key": "consistent",
 							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get sub-objects #1",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8d49f78f-d7c7-4de9-bef9-bd704ff9b45e",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"the item should be AAA Fake with 2 fields\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json).to.eql({",
+							"      \"name\": \"AAA Fake\",",
+							"      \"config\": {\"a\": \"one\"}",
+							"    });",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake?consistent=1&fields=config.a,name",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake"
+					],
+					"query": [
+						{
+							"key": "consistent",
+							"value": "1"
+						},
+						{
+							"key": "fields",
+							"value": "config.a,name"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get sub-objects #2",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8d49f78f-d7c7-4de9-bef9-bd704ff9b45e",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"the item should be AAA Fake with other 2 fields\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json).to.eql({",
+							"      \"diameter\": 12345,",
+							"      \"config\": {\"a\": \"one\", \"c\": \"three\"}",
+							"    });",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake?consistent=1&fields=diameter,config.c,config.b,config.a",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake"
+					],
+					"query": [
+						{
+							"key": "consistent",
+							"value": "1"
+						},
+						{
+							"key": "fields",
+							"value": "diameter,config.c,config.b,config.a"
 						}
 					]
 				}
