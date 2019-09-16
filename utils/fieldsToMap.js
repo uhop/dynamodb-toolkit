@@ -23,14 +23,13 @@ const fieldsToMap = (fields, projectionFieldMap, topLevel) => {
     fieldMap = fields;
   }
   if (!fieldNames.length) return null;
-  return projectionFieldMap
-    ? fieldNames
-        .map(f => {
-          const other = projectionFieldMap[f];
-          return typeof other == 'string' ? other : f;
-        })
-        .reduce((acc, name) => ((acc[name] = 1), acc), {})
-    : fieldMap;
+  if (!projectionFieldMap) return fieldMap;
+  return fieldNames
+    .map(f => {
+      const other = projectionFieldMap[f];
+      return typeof other == 'string' ? other : f;
+    })
+    .reduce((acc, name) => ((acc[name] = 1), acc), {});
 };
 
 module.exports = fieldsToMap;
