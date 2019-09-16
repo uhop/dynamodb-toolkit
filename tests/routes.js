@@ -43,14 +43,13 @@ const adapter = new Adapter({
     return key;
   },
   prepareListParams(_, index) {
-    return index
-      ? {
-          IndexName: index,
-          KeyConditionExpression: '#t = :t',
-          ExpressionAttributeNames: {'#t': '-t'},
-          ExpressionAttributeValues: {':t': {N: '1'}}
-        }
-      : {};
+    index = index || '-t-name-index';
+    return {
+      IndexName: index,
+      KeyConditionExpression: '#t = :t',
+      ExpressionAttributeNames: {'#t': '-t'},
+      ExpressionAttributeValues: {':t': {N: '1'}}
+    };
   },
   revive(item, fieldMap) {
     if (fieldMap) {
