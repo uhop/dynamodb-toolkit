@@ -189,6 +189,7 @@ class Adapter {
   }
 
   async scanAllByParams(params, fieldMap) {
+    params = this.cloneParams(params);
     const result = await readList.getItems(this.client, params);
     fieldMap = fieldsToMap(fieldMap, null, this.topLevelFieldMap);
     return {nextParams: result.nextParams, items: result.items.map(item => this.fromDynamo(item, fieldMap))};
