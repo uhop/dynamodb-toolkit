@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.9.2 *Added profile-related utilities.*
 - 1.9.1 *Bugfix: added missing normalization for `scanAllByParams()`, updated dev deps.*
 - 1.9.0 *Added: projecting sub-objects, new way to clone objects, and unit tests.*
 - 1.8.2 *Bugfix in `scanAllByParams()`.*

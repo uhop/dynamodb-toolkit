@@ -9,10 +9,9 @@ const AWS = require('aws-sdk');
 const Adapter = require('../Adapter');
 const KoaAdapter = require('../helpers/KoaAdapter');
 const {isConsistent} = require('../helpers/isTrue');
+const createClient = require('../utils/createClient');
 
-AWS.config.update({region: 'us-east-1'});
-
-const client = new AWS.DynamoDB();
+const client = createClient(AWS);
 
 const adapter = new Adapter({
   client,
