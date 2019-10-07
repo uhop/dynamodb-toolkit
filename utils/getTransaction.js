@@ -23,7 +23,7 @@ const getTransaction = async (client, ...requests) => {
   }
   if (!batch.length) return [];
   const result = await doBatch(client, batch);
-  return result.responses.map(item => item && item.Item);
+  return result.responses.map((item, index) => ({table: batch[index].TableName, item: item && item.Item}));
 };
 
 module.exports = getTransaction;
