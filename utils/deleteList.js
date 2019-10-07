@@ -24,14 +24,13 @@ const deleteList = async (client, params) => {
 
   // iterate over parameters deleting records
   let processed = 0;
-  for(;;) {
+  while(params) {
     params = await readList(client, params, async data => {
       if (data.Items.length) {
         processed += data.Items.length;
         await deleteKeyList(client, params.TableName, data.Items);
       }
     });
-    if (!params) break;
   }
   return processed;
 };

@@ -169,7 +169,7 @@ class Adapter {
       }
       params.ExpressionAttributeNames[keyName] = this.keyFields[0];
     }
-    params.Item = this.toDynamo(mapFn(this.revive(convertFrom(data.Item))));
+    params.Item = this.toDynamo(mapFn(this.fromDynamo(data.Item)));
     await this.client.putItem(params).promise();
     return true;
   }
@@ -227,7 +227,7 @@ class Adapter {
   }
 
   async deleteByKeys(keys) {
-    return await deleteList.byKeys(this.client, this.table, keys.map(key => this.toDynamoKey(key)));
+    return deleteList.byKeys(this.client, this.table, keys.map(key => this.toDynamoKey(key)));
   }
 
   async deleteAll(options, item, index) {
@@ -272,6 +272,67 @@ class Adapter {
 
   toDynamoKey(item, index) {
     return convertTo(this.prepareKey(item, index), this.specialTypes);
+  }
+
+  makeGetBatch(keys, params) {
+    const batch = {
+      action: 'get',
+      table: this.table,
+      keys: keys.map(key => this.toDynamoKey(key)),
+      params
+    };
+    return batch;
+  }
+
+  makeDeleteBatch(keys, params) {
+    return {
+      action: 'delete',
+      table: this.table,
+      keys: keys.map(key => this.toDynamoKey(key)),
+      params
+    };
+  }
+
+  makePutBatch(items, params) {
+    return {
+      action: 'put',
+      table: this.table,
+      items: items.map(item => this.toDynamo(item)),
+      params
+    };
+  }
+
+  makePatchBatch(items, deep, params) {
+    return {
+      action: 'patch',
+      table: this.table,
+      items: items.map(item => {
+        const dbItem = convertTo(this.prepare(item, true, deep), this.specialTypes);
+        this.keyFields.forEach(field => delete dbItem[field]);
+        let p;
+        if (deep) {
+          p = prepareUpdate(dbItem);
+        } else {
+          const deleteProps = item.__delete;
+          delete dbItem.__delete;
+          p = prepareUpdate.flat(dbItem, deleteProps);
+        }
+        return {
+          key: this.toDynamoKey(item),
+          params: p
+        }
+      }),
+      params
+    };
+  }
+
+  makeCheckBatch(keys, params) {
+    return {
+      action: 'check',
+      table: this.table,
+      keys: keys.map(key => this.toDynamoKey(key)),
+      params
+    };
   }
 }
 
