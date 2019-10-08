@@ -22,6 +22,16 @@ class KoaAdapter {
     return Object.assign(item, ctx.params);
   }
 
+  namesToKeys(ctx) {
+    // this function creates an array of keys from the context (e.g., params.names)
+    if (!ctx.query.names) throw new Error('Query parameter "names" was expected. Should be a comma-separated list of names.');
+    return ctx.query.names
+      .split(',')
+      .map(name => name.trim())
+      .filter(name => name)
+      .map(name => ({name}));
+  }
+
   // main operations
 
   async get(ctx) {
@@ -86,8 +96,20 @@ class KoaAdapter {
     ctx.body = await this.adapter.getAll(this.makeOptions(ctx), this.augmentFromContext({}, ctx));
   }
 
+  async getByNames(ctx) {
+    ctx.body = await this.adapter.getByKeys(
+      ctx.method === 'PUT' ? ctx.request.body : this.namesToKeys(ctx),
+      ctx.query.fields,
+      isConsistent(ctx.query) ? {ConsistentRead: true} : null
+    );
+  }
+
   async deleteAll(ctx) {
     ctx.body = {processed: await this.adapter.deleteAll(this.makeOptions(ctx), this.augmentFromContext({}, ctx))};
+  }
+
+  async deleteByNames(ctx) {
+    ctx.body = {processed: await this.adapter.deleteByKeys(ctx.method === 'PUT' ? ctx.request.body : this.namesToKeys(ctx))};
   }
 
   async doCloneAll(ctx, mapFn) {
@@ -96,6 +118,14 @@ class KoaAdapter {
 
   async cloneAll(ctx) {
     return this.doCloneAll(ctx, cloneFn(ctx));
+  }
+
+  async doCloneByNames(ctx, mapFn) {
+    ctx.body = {processed: await this.adapter.cloneByKeys(this.namesToKeys(ctx), mapFn)};
+  }
+
+  async cloneByNames(ctx) {
+    return this.doCloneByNames(ctx, cloneFn(ctx));
   }
 }
 

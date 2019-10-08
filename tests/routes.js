@@ -68,15 +68,6 @@ const adapter = new Adapter({
   }
 });
 
-const namesToKeys = ctx => {
-  if (!ctx.query.names) throw new Error('Query parameter "names" was expected. Should be a comma-separated list of planet names.');
-  return ctx.query.names
-    .split(',')
-    .map(name => name.trim())
-    .filter(name => name)
-    .map(name => ({name}));
-};
-
 const cloneFn = item => ({...item, name: item.name + ' COPY'});
 
 const koaAdapter = new KoaAdapter(adapter, {
@@ -102,25 +93,16 @@ const koaAdapter = new KoaAdapter(adapter, {
     descending && (options.descending = true);
     ctx.body = await this.adapter.getAll(options, null, index);
   },
-  // use standard deleteAll()
   async cloneAll(ctx) {
     return this.doCloneAll(ctx, cloneFn);
+  },
+  async cloneByNames(ctx) {
+    return this.doCloneByNames(ctx, cloneFn);
   },
   async load(ctx) {
     const data = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, 'data.json.gz'))));
     await this.adapter.putAll(data);
     ctx.body = {processed: data.length};
-  },
-  // by-names operations
-  async getByNames(ctx) {
-    const params = isConsistent(ctx.query) ? {ConsistentRead: true} : null;
-    ctx.body = await this.adapter.getByKeys(namesToKeys(ctx), ctx.query.fields, params);
-  },
-  async deleteByNames(ctx) {
-    ctx.body = {processed: await this.adapter.deleteByKeys(namesToKeys(ctx))};
-  },
-  async cloneByNames(ctx) {
-    ctx.body = {processed: await this.adapter.cloneByKeys(namesToKeys(ctx), cloneFn)};
   }
 });
 
