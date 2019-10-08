@@ -22,14 +22,25 @@ class KoaAdapter {
     return Object.assign(item, ctx.params);
   }
 
-  namesToKeys(ctx) {
+  extractKeys(ctx, forceQuery) {
     // this function creates an array of keys from the context (e.g., params.names)
-    if (!ctx.query.names) throw new Error('Query parameter "names" was expected. Should be a comma-separated list of names.');
-    return ctx.query.names
-      .split(',')
-      .map(name => name.trim())
-      .filter(name => name)
-      .map(name => ({name}));
+    let names;
+    if (!forceQuery && (ctx.method === 'PUT' || ctx.method === 'POST')) {
+      if (!ctx.request.body || !(ctx.request.body instanceof Array)) throw new Error('Array of names was expected as a payload.');
+      names = ctx.request.body;
+    } else {
+      if (!ctx.query.names) throw new Error('Query parameter "names" was expected. Should be a comma-separated list of names.');
+      names = ctx.query.names
+        .split(',')
+        .map(name => name.trim())
+        .filter(name => name);
+    }
+    return this.namesToKeys(ctx, names);
+  }
+
+  namesToKeys(ctx, names) {
+    // this function converts names to keys
+    return names.map(name => ({name}));
   }
 
   // main operations
@@ -97,11 +108,7 @@ class KoaAdapter {
   }
 
   async getByNames(ctx) {
-    ctx.body = await this.adapter.getByKeys(
-      ctx.method === 'PUT' ? ctx.request.body : this.namesToKeys(ctx),
-      ctx.query.fields,
-      isConsistent(ctx.query) ? {ConsistentRead: true} : null
-    );
+    ctx.body = await this.adapter.getByKeys(this.extractKeys(ctx), ctx.query.fields, isConsistent(ctx.query) ? {ConsistentRead: true} : null);
   }
 
   async deleteAll(ctx) {
@@ -109,7 +116,7 @@ class KoaAdapter {
   }
 
   async deleteByNames(ctx) {
-    ctx.body = {processed: await this.adapter.deleteByKeys(ctx.method === 'PUT' ? ctx.request.body : this.namesToKeys(ctx))};
+    ctx.body = {processed: await this.adapter.deleteByKeys(this.extractKeys(ctx))};
   }
 
   async doCloneAll(ctx, mapFn) {
@@ -121,7 +128,7 @@ class KoaAdapter {
   }
 
   async doCloneByNames(ctx, mapFn) {
-    ctx.body = {processed: await this.adapter.cloneByKeys(this.namesToKeys(ctx), mapFn)};
+    ctx.body = {processed: await this.adapter.cloneByKeys(this.extractKeys(ctx, true), mapFn)};
   }
 
   async cloneByNames(ctx) {
