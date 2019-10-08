@@ -25,14 +25,13 @@ const copyList = async (client, params, mapFn) => {
 
   // iterate over parameters copying records
   let processed = 0;
-  for(;;) {
+  while(params) {
     params = await readList(client, params, async data => {
       if (data.Items.length) {
         processed += data.Items.length;
         await writeKeyList(client, params.TableName, data.Items.map(mapFn));
       }
     });
-    if (!params) break;
   }
   return processed;
 };
@@ -46,9 +45,8 @@ copyList.viaKeys = async (client, params, mapFn) => {
 
   // iterate over parameters copying records
   let keys = [];
-  for(;;) {
+  while(params) {
     params = await readList(client, params, async data => (keys = keys.concat(data.Items)));
-    if (!params) break;
   }
   return copyList.byKeys(client, tableName, keys, mapFn);
 };
