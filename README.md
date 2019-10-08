@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.10.1 *Added `xxxByNames` methods to `KoaAdapter`.*
 - 1.10.0 *Added support for multi-table batches and transactions. Minor overall improvements.*
 - 1.9.2 *Added profile-related utilities.*
 - 1.9.1 *Bugfix: added missing normalization for `scanAllByParams()`, updated dev deps.*
