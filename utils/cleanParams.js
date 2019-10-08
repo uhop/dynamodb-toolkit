@@ -5,7 +5,7 @@ const cleanParams = params => {
     const names = Object.keys(params.ExpressionAttributeNames);
     if (names.length) {
       const usedKeys = names.filter(key => {
-        const pattern = new RegExp('\\b' + key + '\\b');
+        const pattern = new RegExp(key + '\\b');
         return (
           (params.KeyConditionExpression && pattern.test(params.KeyConditionExpression)) ||
           (params.ConditionExpression && pattern.test(params.ConditionExpression)) ||
@@ -30,7 +30,7 @@ const cleanParams = params => {
     const values = Object.keys(params.ExpressionAttributeValues);
     if (values.length) {
       const usedKeys = values.filter(key => {
-        const pattern = new RegExp('\\b' + key + '\\b');
+        const pattern = new RegExp(key + '\\b');
         return (
           (params.KeyConditionExpression && pattern.test(params.KeyConditionExpression)) ||
           (params.ConditionExpression && pattern.test(params.ConditionExpression)) ||
