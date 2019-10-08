@@ -4,7 +4,7 @@ const combineParams = require('./combineParams');
 
 const doBatch = async (client, batch) => client.transactWriteItems({TransactItems: batch}).promise();
 
-const getTransaction = async (client, ...requests) => {
+const applyTransaction = async (client, ...requests) => {
   let batch = [];
 
   for (const request of requests) {
@@ -45,6 +45,7 @@ const getTransaction = async (client, ...requests) => {
     }
   }
   batch.length && await doBatch(client, batch);
+  return batch.length;
 };
 
-module.exports = getTransaction;
+module.exports = applyTransaction;
