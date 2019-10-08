@@ -274,10 +274,17 @@ class Adapter {
     return convertTo(this.prepareKey(item, index), this.specialTypes);
   }
 
+  async validateItems(items, isPatch, deep) {
+    for (let i = 0; i < items.length; ++i) {
+      await this.validateItem(items[i], isPatch, deep);
+    }
+  }
+
   makeGetBatch(keys, params) {
     const batch = {
       action: 'get',
       table: this.table,
+      adapter: this,
       keys: keys.map(key => this.toDynamoKey(key)),
       params
     };
@@ -320,7 +327,7 @@ class Adapter {
         return {
           key: this.toDynamoKey(item),
           params: p
-        }
+        };
       }),
       params
     };
