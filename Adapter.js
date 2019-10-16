@@ -98,12 +98,9 @@ class Adapter {
     await this.validateItem(item);
     params = this.cloneParams(params);
     if (!force) {
-      const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length;
-      if (params.ConditionExpression) {
-        params.ConditionExpression = `attribute_exists(${keyName}) AND (${params.ConditionExpression})`;
-      } else {
-        params.ConditionExpression = `attribute_exists(${keyName})`;
-      }
+      const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length,
+        condition = `attribute_exists(${keyName})`;
+      params.ConditionExpression = params.ConditionExpression ? `${condition} AND (${params.ConditionExpression})` : condition;
       params.ExpressionAttributeNames[keyName] = this.keyFields[0];
     }
     params.Item = this.toDynamo(item);
@@ -116,12 +113,9 @@ class Adapter {
     await this.validateItem(item, true, deep);
     params = this.cloneParams(params);
     params.Key = this.toDynamoKey(key, params.IndexName);
-    const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length;
-    if (params.ConditionExpression) {
-      params.ConditionExpression = `attribute_exists(${keyName}) AND (${params.ConditionExpression})`;
-    } else {
-      params.ConditionExpression = `attribute_exists(${keyName})`;
-    }
+    const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length,
+      condition = `attribute_exists(${keyName})`;
+    params.ConditionExpression = params.ConditionExpression ? `${condition} AND (${params.ConditionExpression})` : condition;
     params.ExpressionAttributeNames[keyName] = this.keyFields[0];
     const dbItem = convertTo(this.prepare(item, true, deep), this.specialTypes);
     this.keyFields.forEach(field => delete dbItem[field]);
@@ -154,23 +148,14 @@ class Adapter {
   }
 
   async cloneByKey(key, mapFn, force, params) {
-    params = this.cloneParams(params);
-    params.Key = this.toDynamoKey(key, params.IndexName);
-    const data = await this.client.getItem(cleanParams(params)).promise();
-    if (!data.Item) return false;
-    delete params.Key;
-    if (!force) {
-      params.ExpressionAttributeNames = params.ExpressionAttributeNames || {};
-      const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length;
-      if (params.ConditionExpression) {
-        params.ConditionExpression = `attribute_not_exists(${keyName}) AND (${params.ConditionExpression})`;
-      } else {
-        params.ConditionExpression = `attribute_not_exists(${keyName})`;
-      }
-      params.ExpressionAttributeNames[keyName] = this.keyFields[0];
+    const item = await this.getByKey(key, null, this.cleanGetParams(params));
+    if (typeof item == 'undefined') return false;
+    const clonedItem = mapFn(item);
+    if (force) {
+      await this.put(clonedItem, true, params);
+    } else {
+      await this.post(clonedItem);
     }
-    params.Item = this.toDynamo(mapFn(this.fromDynamo(data.Item)));
-    await this.client.putItem(params).promise();
     return true;
   }
 
@@ -258,6 +243,12 @@ class Adapter {
     return params;
   }
 
+  cleanGetParams(params) {
+    params = this.cloneParams(params);
+    delete params.ConditionExpression;
+    return cleanParams(params);
+  }
+
   makeListParams(options, project, item, index) {
     return this.makeParams(options, project, this.prepareListParams(item, index));
   }
@@ -279,6 +270,8 @@ class Adapter {
       await this.validateItem(items[i], isPatch, deep);
     }
   }
+
+  // batch operations
 
   makeGetBatch(keys, params) {
     const batch = {
@@ -338,6 +331,53 @@ class Adapter {
       action: 'check',
       table: this.table,
       keys: keys.map(key => this.toDynamoKey(key)),
+      params
+    };
+  }
+
+  makeGetRawBatch(rawKeys, params) {
+    const batch = {
+      action: 'get',
+      table: this.table,
+      adapter: this,
+      keys: rawKeys,
+      params
+    };
+    return batch;
+  }
+
+  makeDeleteRawBatch(rawKeys, params) {
+    return {
+      action: 'delete',
+      table: this.table,
+      keys: rawKeys,
+      params
+    };
+  }
+
+  makePutRawBatch(rawItems, params) {
+    return {
+      action: 'put',
+      table: this.table,
+      items: rawItems,
+      params
+    };
+  }
+
+  makePatchRawBatch(rawItems, deep, params) {
+    return {
+      action: 'patch',
+      table: this.table,
+      items: rawItems,
+      params
+    };
+  }
+
+  makeCheckRawBatch(rawKeys, params) {
+    return {
+      action: 'check',
+      table: this.table,
+      keys: rawKeys,
       params
     };
   }
