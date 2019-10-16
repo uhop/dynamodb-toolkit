@@ -85,27 +85,16 @@ class Adapter {
 
   async post(item) {
     await this.validateItem(item);
-    const params = {
-      TableName: this.table,
-      ConditionExpression: 'attribute_not_exists(#k)',
-      ExpressionAttributeNames: {'#k': this.keyFields[0]},
-      Item: this.toDynamo(item)
-    };
-    return this.client.putItem(cleanParams(params)).promise();
+    const params = cleanParams(this.checkExistence({Item: this.toDynamo(item)}, true));
+    return this.client.putItem(params).promise();
   }
 
   async put(item, force, params) {
     await this.validateItem(item);
     params = this.cloneParams(params);
-    if (!force) {
-      const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length,
-        condition = `attribute_exists(${keyName})`;
-      params.ConditionExpression = params.ConditionExpression ? `${condition} AND (${params.ConditionExpression})` : condition;
-      params.ExpressionAttributeNames[keyName] = this.keyFields[0];
-    }
     params.Item = this.toDynamo(item);
-    params = this.updateParams(params, {name: 'put', force});
-    params = cleanParams(params);
+    !force && (params = this.checkExistence(params));
+    params = cleanParams(this.updateParams(params, {name: 'put', force}));
     return this.client.putItem(params).promise();
   }
 
@@ -113,10 +102,7 @@ class Adapter {
     await this.validateItem(item, true, deep);
     params = this.cloneParams(params);
     params.Key = this.toDynamoKey(key, params.IndexName);
-    const keyName = '#k' + Object.keys(params.ExpressionAttributeNames).length,
-      condition = `attribute_exists(${keyName})`;
-    params.ConditionExpression = params.ConditionExpression ? `${condition} AND (${params.ConditionExpression})` : condition;
-    params.ExpressionAttributeNames[keyName] = this.keyFields[0];
+    params = this.checkExistence(params);
     const dbItem = convertTo(this.prepare(item, true, deep), this.specialTypes);
     this.keyFields.forEach(field => delete dbItem[field]);
     if (deep) {
@@ -126,8 +112,7 @@ class Adapter {
       delete dbItem.__delete;
       params = prepareUpdate.flat(dbItem, deleteProps, params);
     }
-    params = this.updateParams(params, {name: 'patch', deep});
-    params = cleanParams(params);
+    params = cleanParams(this.updateParams(params, {name: 'patch', deep}));
     return params.UpdateExpression ? this.client.updateItem(params).promise() : null;
   }
 
@@ -247,6 +232,17 @@ class Adapter {
     params = this.cloneParams(params);
     delete params.ConditionExpression;
     return cleanParams(params);
+  }
+
+  checkExistence(params, invert) {
+    params = this.cloneParams(params);
+    const names = params.ExpressionAttributeNames || {},
+      keyName = '#k' + Object.keys(names).length,
+      condition = `attribute_${invert ? 'not_' : ''}exists(${keyName})`;
+    names[keyName] = this.keyFields[0];
+    params.ExpressionAttributeNames = names;
+    params.ConditionExpression = params.ConditionExpression ? `${condition} AND (${params.ConditionExpression})` : condition;
+    return params;
   }
 
   makeListParams(options, project, item, index) {
