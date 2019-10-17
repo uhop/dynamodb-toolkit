@@ -219,6 +219,62 @@ class Adapter {
     return this.cloneAllByParams(params, mapFn);
   }
 
+  // generic implementations
+
+  // async get(item, fields, params) { /* see above */ }
+  // async patch(item, deep, params) { /* see above */ }
+  // async delete(item, params) { /* see above */ }
+  // async cloneByKey(key, mapFn, force, params) { /* see above */ }
+  // async clone(item, mapFn, force, params) { /* see above */ }
+
+  // async getAll(options, item, index) { /* see above */ }
+  // async deleteAll(options, item, index) { /* see above */ }
+  // async cloneAll(options, mapFn, item, index) { /* see above */ }
+
+  async genericGetByKeys(keys, fields, params) {
+    params = this.cloneParams(params);
+    fields && addProjection(params, fields, this.projectionFieldMap, true);
+    const results = await Promise.all(keys.map(key => this.getByKey(key, null, params)));
+    return results.filter(item => typeof item != 'undefined');
+  }
+
+  async genericPutAll(items) {
+    return Promise.all(items.map(item => this.put(item, true)));
+  }
+
+  async genericDeleteAllByParams(params) {
+    params = this.cloneParams(params);
+    const fieldMap = fieldsToMap(this.keyFields.join(','), null, this.topLevelFieldMap);
+    let processed = 0;
+    while (params) {
+      const result = await this.scanAllByParams(params, fieldMap);
+      processed += await this.deleteByKeys(result.items);
+      params = result.nextParams;
+    }
+    return processed;
+  }
+
+  async genericDeleteByKeys(keys) {
+    await Promise.all(keys.map(key => this.deleteByKey(key)));
+    return keys.length;
+  }
+
+  async genericCloneAllByParams(params, mapFn) {
+    params = this.cloneParams(params);
+    let processed = 0;
+    while (params) {
+      const result = await this.scanAllByParams(params);
+      processed += await this.cloneByKeys(result.items, mapFn);
+      params = result.nextParams;
+    }
+    return processed;
+  }
+
+  async genericCloneByKeys(keys, mapFn) {
+    await Promise.all(keys.map(key => this.cloneByKey(key, mapFn, true)));
+    return keys.length;
+  }
+
   // utilities
 
   cloneParams(params) {
