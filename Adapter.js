@@ -85,7 +85,7 @@ class Adapter {
 
   async post(item) {
     await this.validateItem(item);
-    const params = cleanParams(this.checkExistence({Item: this.toDynamo(item)}, true));
+    const params = cleanParams(this.updateParams(this.checkExistence({Item: this.toDynamo(item)}, true), {name: 'post'}));
     return this.client.putItem(params).promise();
   }
 
@@ -123,8 +123,7 @@ class Adapter {
   async deleteByKey(key, params) {
     params = this.cloneParams(params);
     params.Key = this.toDynamoKey(key, params.IndexName);
-    params = this.updateParams(params, {name: 'delete'});
-    params = cleanParams(params);
+    params = cleanParams(this.updateParams(params, {name: 'delete'}));
     return this.client.deleteItem(params).promise();
   }
 
