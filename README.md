@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.10.6 *Bugfix in `applyTransaction()`.*
 - 1.10.5 *Added generic implementations of compound operations.*
 - 1.10.4 *Added `checkExistence()` helper.*
 - 1.10.3 *Minor improvements, added batch makers working on raw keys and items.*
