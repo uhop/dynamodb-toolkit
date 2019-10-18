@@ -29,7 +29,7 @@ const applyTransaction = async (client, ...requests) => {
         break;
       case 'put':
         for (const item of request.items) {
-          batch.push({Delete: {TableName: request.table, Item: item, ...base}});
+          batch.push({Put: {TableName: request.table, Item: item, ...base}});
         }
         break;
       case 'patch':
