@@ -1,5 +1,6 @@
 'use strict';
 
+const applyTransaction = require('./utils/applyTransaction');
 const addProjection = require('./utils/addProjection');
 const {convertTo, convertFrom} = require('./utils/convertTypes');
 const prepareUpdate = require('./utils/prepareUpdate');
@@ -69,36 +70,42 @@ class Adapter {
     // this function should throw an exception if an item should not be written to DB
   }
 
-  // general API
+  async checkConsistency(batch) {
+    // this function returns consistency checks for other items, e.g., parents
+    return null;
+  }
 
-  async getByKey(key, fields, params) {
+  // batch operations
+
+  async makeGet(key, fields, params) {
     params = this.cloneParams(params);
     params.Key = this.toDynamoKey(key, params.IndexName);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
-    const data = await this.client.getItem(cleanParams(params)).promise();
-    return data.Item ? this.fromDynamo(data.Item, fieldsToMap(fields, null, this.topLevelFieldMap)) : undefined;
+    return {action: 'get', adapter: this, params: cleanParams(params)};
   }
 
-  async get(item, fields, params) {
-    return this.getByKey(item, fields, params);
+  async makeCheck(key, params) {
+    params = this.cloneParams(params);
+    params.Key = this.toDynamoKey(key, params.IndexName);
+    return {action: 'delete', params: cleanParams(params)};
   }
 
-  async post(item) {
+  async makePost(item) {
     await this.validateItem(item);
     const params = cleanParams(this.updateParams(this.checkExistence({Item: this.toDynamo(item)}, true), {name: 'post'}));
-    return this.client.putItem(params).promise();
+    return {action: 'put', params};
   }
 
-  async put(item, force, params) {
+  async makePut(item, force, params) {
     await this.validateItem(item);
     params = this.cloneParams(params);
     params.Item = this.toDynamo(item);
     !force && (params = this.checkExistence(params));
     params = cleanParams(this.updateParams(params, {name: 'put', force}));
-    return this.client.putItem(params).promise();
+    return {action: 'put', params};
   }
 
-  async patchByKey(key, item, deep, params) {
+  async makePatch(key, item, deep, params) {
     await this.validateItem(item, true, deep);
     params = this.cloneParams(params);
     params.Key = this.toDynamoKey(key, params.IndexName);
@@ -113,7 +120,53 @@ class Adapter {
       params = prepareUpdate.flat(dbItem, deleteProps, params);
     }
     params = cleanParams(this.updateParams(params, {name: 'patch', deep}));
-    return params.UpdateExpression ? this.client.updateItem(params).promise() : null;
+    return {action: 'patch', params};
+  }
+
+  async makeDelete(key, params) {
+    params = await this.cloneParams(params);
+    params.Key = this.toDynamoKey(key, params.IndexName);
+    params = cleanParams(this.updateParams(params, {name: 'delete'}));
+    return {action: 'delete', params};
+  }
+
+  // general API
+
+  async getByKey(key, fields, params) {
+    const batch = await this.makeGet(key, fields, params);
+    const data = await this.client.getItem(batch.params).promise();
+    return data.Item ? this.fromDynamo(data.Item, fieldsToMap(fields, null, this.topLevelFieldMap)) : undefined;
+  }
+
+  async get(item, fields, params) {
+    return this.getByKey(item, fields, params);
+  }
+
+  async post(item) {
+    const batch = await this.makePost(item),
+      checks = await this.checkConsistency(batch);
+    if (checks) {
+      return applyTransaction(this.client, checks, batch.params);
+    }
+    return this.client.putItem(batch.params).promise();
+  }
+
+  async put(item, force, params) {
+    const batch = await this.makePut(item, force, params),
+      checks = await this.checkConsistency(batch);
+    if (checks) {
+      return applyTransaction(this.client, checks, batch.params);
+    }
+    return this.client.putItem(batch.params).promise();
+  }
+
+  async patchByKey(key, item, deep, params) {
+    const batch = await this.makePatch(key, item, deep, params),
+      checks = await this.checkConsistency(batch);
+    if (checks) {
+      return applyTransaction(this.client, checks, batch.params);
+    }
+    return this.client.updateItem(batch.params).promise();
   }
 
   async patch(item, deep, params) {
@@ -121,10 +174,12 @@ class Adapter {
   }
 
   async deleteByKey(key, params) {
-    params = this.cloneParams(params);
-    params.Key = this.toDynamoKey(key, params.IndexName);
-    params = cleanParams(this.updateParams(params, {name: 'delete'}));
-    return this.client.deleteItem(params).promise();
+    const batch = await this.makeDelete(key, params),
+      checks = await this.checkConsistency(batch);
+    if (checks) {
+      return applyTransaction(this.client, checks, batch.params);
+    }
+    return this.client.deleteItem(batch.params).promise();
   }
 
   async delete(item, params) {
@@ -224,6 +279,7 @@ class Adapter {
   // async get(item, fields, params) { /* see above */ }
   // async patch(item, deep, params) { /* see above */ }
   // async delete(item, params) { /* see above */ }
+
   // async cloneByKey(key, mapFn, force, params) { /* see above */ }
   // async clone(item, mapFn, force, params) { /* see above */ }
 
@@ -320,117 +376,6 @@ class Adapter {
     for (let i = 0; i < items.length; ++i) {
       await this.validateItem(items[i], isPatch, deep);
     }
-  }
-
-  // batch operations
-
-  makeGetBatch(keys, params) {
-    const batch = {
-      action: 'get',
-      table: this.table,
-      adapter: this,
-      keys: keys.map(key => this.toDynamoKey(key)),
-      params
-    };
-    return batch;
-  }
-
-  makeDeleteBatch(keys, params) {
-    return {
-      action: 'delete',
-      table: this.table,
-      keys: keys.map(key => this.toDynamoKey(key)),
-      params
-    };
-  }
-
-  makePutBatch(items, params) {
-    return {
-      action: 'put',
-      table: this.table,
-      items: items.map(item => this.toDynamo(item)),
-      params
-    };
-  }
-
-  makePatchBatch(items, deep, params) {
-    return {
-      action: 'patch',
-      table: this.table,
-      items: items.map(item => {
-        const dbItem = convertTo(this.prepare(item, true, deep), this.specialTypes);
-        this.keyFields.forEach(field => delete dbItem[field]);
-        let p;
-        if (deep) {
-          p = prepareUpdate(dbItem);
-        } else {
-          const deleteProps = item.__delete;
-          delete dbItem.__delete;
-          p = prepareUpdate.flat(dbItem, deleteProps);
-        }
-        return {
-          key: this.toDynamoKey(item),
-          params: p
-        };
-      }),
-      params
-    };
-  }
-
-  makeCheckBatch(keys, params) {
-    return {
-      action: 'check',
-      table: this.table,
-      keys: keys.map(key => this.toDynamoKey(key)),
-      params
-    };
-  }
-
-  makeGetRawBatch(rawKeys, params) {
-    const batch = {
-      action: 'get',
-      table: this.table,
-      adapter: this,
-      keys: rawKeys,
-      params
-    };
-    return batch;
-  }
-
-  makeDeleteRawBatch(rawKeys, params) {
-    return {
-      action: 'delete',
-      table: this.table,
-      keys: rawKeys,
-      params
-    };
-  }
-
-  makePutRawBatch(rawItems, params) {
-    return {
-      action: 'put',
-      table: this.table,
-      items: rawItems,
-      params
-    };
-  }
-
-  makePatchRawBatch(rawItems, deep, params) {
-    return {
-      action: 'patch',
-      table: this.table,
-      items: rawItems,
-      params
-    };
-  }
-
-  makeCheckRawBatch(rawKeys, params) {
-    return {
-      action: 'check',
-      table: this.table,
-      keys: rawKeys,
-      params
-    };
   }
 }
 

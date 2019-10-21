@@ -8,55 +8,52 @@ const doBatch = async (client, batch) => batchGet(client, {RequestItems: batch})
 
 const getBatch = async (client, ...requests) => {
   let size = 0,
-    batch = null,
+    batch = {},
     result = [];
 
-    const addToBatch = (queue, params) => {
-      if (batch) {
-        const old = batch[request.table];
-        if (old) {
-          old.Keys = old.Keys ? old.Keys.concat(queue) : queue;
-        } else {
-          batch[request.table] = {Keys: queue};
-        }
+  const addToBatch = item => {
+    if (item.action !== 'get') return;
+    const params = item.params;
+    let table = batch[params.TableName];
+    if (!table) {
+      table = batch[params.TableName] = {Keys: []};
+    }
+    table.Keys.push(params.Key);
+    !table.ConsistentRead && params.ConsistentRead && (table.ConsistentRead = true);
+    if (params.ProjectionExpression) {
+      if (table.ProjectionExpression) {
+        if (table.ProjectionExpression !== params.ProjectionExpression)
+          throw Error(
+            `Items of the same table "${params.TableName}" has different ProjectionExpression: "${table.ProjectionExpression}" vs. "${params.ProjectionExpression}"`
+          );
       } else {
-        batch = {[request.table]: {Keys: queue}};
+        table.ProjectionExpression = params.ProjectionExpression;
       }
-      if (params) {
-        const table = batch[request.table];
-        !table.ConsistentRead && params.ConsistentRead && (table.ConsistentRead = true);
-        !table.ProjectionExpression && params.ProjectionExpression && (table.ProjectionExpression = params.ProjectionExpression);
-        !table.ExpressionAttributeNames && params.ExpressionAttributeNames && (table.ExpressionAttributeNames = params.ExpressionAttributeNames);
-      }
-    };
+    }
+    !table.ExpressionAttributeNames && params.ExpressionAttributeNames && (table.ExpressionAttributeNames = params.ExpressionAttributeNames);
+    ++size;
+  };
 
-  const runBatch = async (queue, params) => {
-    queue && queue.length && addToBatch(queue, params);
+  const runBatch = async () => {
     const responses = await doBatch(client, batch);
     size = 0;
-    batch = null;
+    batch = {};
     Object.keys(responses).forEach(table => responses[table].forEach(item => result.push({table, item})));
   };
 
   for (const request of requests) {
     if (!request) continue;
-    let queue = [];
-    switch (request.action) {
-      case 'get':
-        for (const key of request.keys) {
-          queue.push(key);
-          if (++size >= LIMIT) {
-            await runBatch(queue, request.params);
-            queue = [];
-          }
-        }
-        break;
+    if (request instanceof Array) {
+      for (const item of request) {
+        addToBatch(item);
+        size >= LIMIT && (await runBatch());
+      }
+      continue;
     }
-    queue.length && addToBatch(queue, request.params);
+    addToBatch(request);
+    size >= LIMIT && (await runBatch());
   }
-  if (size) {
-    await runBatch();
-  }
+  size && (await runBatch());
   return result;
 };
 

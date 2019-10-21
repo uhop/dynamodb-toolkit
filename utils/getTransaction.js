@@ -2,25 +2,30 @@
 
 const doBatch = async (client, batch) => client.transactGetItems({TransactItems: batch}).promise();
 
-const getTransaction = async (client, ...requests) => {
-  let batch = [], adapters = [];
+const processBatchItem = batch => {
+  switch (batch.action) {
+    case 'get':
+      return {Get: batch.params};
+  }
+};
 
+const getTransaction = async (client, ...requests) => {
+  let batch = [],
+    adapters = [];
   for (const request of requests) {
     if (!request) continue;
-    const params = request.params,
-      base = {};
-    if (params) {
-      params.ProjectionExpression && (base.ProjectionExpression = params.ProjectionExpression);
-      params.ExpressionAttributeNames && (base.ExpressionAttributeNames = params.ExpressionAttributeNames);
-    }
-    switch (request.action) {
-      case 'get':
-        for (const key of request.keys) {
-          batch.push({Get: {TableName: request.table, Key: key, ...base}});
-          adapters.push(request.adapter);
+    if (request instanceof Array) {
+      request.forEach(item => {
+        const batchItem = processBatchItem(item);
+        if (batchItem) {
+          batch.push(batchItem);
+          adapters.push(item.adapter);
         }
-        break;
+      });
+      continue;
     }
+    const batchItem = processBatchItem(request);
+    batchItem && batch.push(batchItem);
   }
   if (!batch.length) return [];
   const result = await doBatch(client, batch);

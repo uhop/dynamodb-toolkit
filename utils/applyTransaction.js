@@ -1,50 +1,36 @@
 'use strict';
 
-const combineParams = require('./combineParams');
-
 const doBatch = async (client, batch) => client.transactWriteItems({TransactItems: batch}).promise();
+
+const processBatchItem = batch => {
+  switch (batch.action) {
+    case 'check':
+      return {ConditionCheck: batch.params};
+    case 'delete':
+      return {Delete: batch.params};
+    case 'put':
+      return {Put: batch.params};
+    case 'patch':
+      return {Update: batch.params};
+  }
+};
 
 const applyTransaction = async (client, ...requests) => {
   let batch = [];
-
   for (const request of requests) {
     if (!request) continue;
-    const params = request.params,
-      base = {};
-    if (params) {
-      params.ConditionExpression && (base.ConditionExpression = params.ConditionExpression);
-      params.ExpressionAttributeNames && (base.ExpressionAttributeNames = params.ExpressionAttributeNames);
-      params.ExpressionAttributeValues && (base.ExpressionAttributeValues = params.ExpressionAttributeValues);
+    if (request instanceof Array) {
+      request.forEach(item => {
+        const batchItem = processBatchItem(item);
+        batchItem && batch.push(batchItem);
+      });
+      continue;
     }
-    switch (request.action) {
-      case 'check':
-        for (const key of request.keys) {
-          batch.push({ConditionCheck: {TableName: request.table, Key: key, ...base}});
-        }
-        break;
-      case 'delete':
-        for (const key of request.keys) {
-          batch.push({Delete: {TableName: request.table, Key: key, ...base}});
-        }
-        break;
-      case 'put':
-        for (const item of request.items) {
-          batch.push({Put: {TableName: request.table, Item: item, ...base}});
-        }
-        break;
-      case 'patch':
-        for (const item of request.items) {
-          const p = combineParams(base, item.params),
-            updateItem = {TableName: request.table, Key: item.key, UpdateExpression: p.UpdateExpression};
-          p.ConditionExpression && (updateItem.ConditionExpression = p.ConditionExpression);
-          p.ExpressionAttributeNames && (updateItem.ExpressionAttributeNames = p.ExpressionAttributeNames);
-          p.ExpressionAttributeValues && (updateItem.ExpressionAttributeValues = p.ExpressionAttributeValues);
-          batch.push({Update: updateItem});
-        }
-        break;
-    }
+    const batchItem = processBatchItem(request);
+    batchItem && batch.push(batchItem);
   }
-  batch.length && await doBatch(client, batch);
+  batch = batch.filter(item => item);
+  batch.length && (await doBatch(client, batch));
   return batch.length;
 };
 

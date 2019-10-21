@@ -9,54 +9,48 @@ const doBatch = async (client, batch) => batchWrite(client, {RequestItems: batch
 const applyBatch = async (client, ...requests) => {
   let size = 0,
     total = 0,
-    batch = null;
+    batch = {};
 
-    const addToBatch = queue => {
-      if (batch) {
-        const old = batch[request.table];
-        batch[request.table] = old ? old.concat(queue) : queue;
-      } else {
-        batch = {[request.table]: queue};
-      }
-    };
+  const addToBatch = item => {
+    const params = item.params;
+    let request;
+    switch (item.action) {
+      case 'put':
+        request = {PutRequest: {Item: item.params.Item}};
+        break;
+      case 'delete':
+        request = {DeleteRequest: {Key: item.params.Key}};
+        break;
+    }
+    if (!request) return;
+    let table = batch[params.TableName];
+    if (!table) {
+      table = batch[params.TableName] = [];
+    }
+    table.push(request);
+    ++size;
+  };
 
-  const runBatch = async queue => {
-    queue && queue.length && addToBatch(queue);
+  const runBatch = async () => {
     await doBatch(client, batch);
     total += size;
     size = 0;
-    batch = null;
+    batch = {};
   };
 
   for (const request of requests) {
     if (!request) continue;
-    let queue = [];
-    switch (request.action) {
-      case 'put':
-        for (const item of request.items) {
-          queue.push({PutRequest: {Item: item}});
-          if (++size >= LIMIT) {
-            await runBatch(queue);
-            queue = [];
-          }
-        }
-        break;
-      case 'delete':
-        for (const key of request.keys) {
-          queue.push({DeleteRequest: {Key: key}});
-          if (++size >= LIMIT) {
-            await runBatch(queue);
-            queue = [];
-          }
-        }
-        break;
+    if (request instanceof Array) {
+      for (const item of request) {
+        addToBatch(item);
+        size >= LIMIT && (await runBatch());
+      }
+      continue;
     }
-    queue.length && addToBatch(queue);
+    addToBatch(request);
+    size >= LIMIT && (await runBatch());
   }
-  if (size) {
-    await doBatch(client, batch);
-    total += size;
-  }
+  size && (await runBatch());
   return total;
 };
 
