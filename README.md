@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.11.0 *New style of batches, support for transactional consistency checks.*
 - 1.10.6 *Bugfix in `applyTransaction()`.*
 - 1.10.5 *Added generic implementations of compound operations.*
 - 1.10.4 *Added `checkExistence()` helper.*
