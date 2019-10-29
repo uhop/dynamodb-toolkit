@@ -87,7 +87,7 @@ class Adapter {
   async makeCheck(key, params) {
     params = this.cloneParams(params);
     params.Key = this.toDynamoKey(key, params.IndexName);
-    return {action: 'delete', params: cleanParams(params)};
+    return {action: 'check', params: cleanParams(params)};
   }
 
   async makePost(item) {
