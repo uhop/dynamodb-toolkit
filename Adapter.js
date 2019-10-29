@@ -146,7 +146,7 @@ class Adapter {
     const batch = await this.makePost(item),
       checks = await this.checkConsistency(batch);
     if (checks) {
-      return applyTransaction(this.client, checks, batch.params);
+      return applyTransaction(this.client, checks, batch);
     }
     return this.client.putItem(batch.params).promise();
   }
@@ -155,7 +155,7 @@ class Adapter {
     const batch = await this.makePut(item, force, params),
       checks = await this.checkConsistency(batch);
     if (checks) {
-      return applyTransaction(this.client, checks, batch.params);
+      return applyTransaction(this.client, checks, batch);
     }
     return this.client.putItem(batch.params).promise();
   }
@@ -164,7 +164,7 @@ class Adapter {
     const batch = await this.makePatch(key, item, deep, params),
       checks = await this.checkConsistency(batch);
     if (checks) {
-      return applyTransaction(this.client, checks, batch.params);
+      return applyTransaction(this.client, checks, batch);
     }
     return this.client.updateItem(batch.params).promise();
   }
@@ -177,7 +177,7 @@ class Adapter {
     const batch = await this.makeDelete(key, params),
       checks = await this.checkConsistency(batch);
     if (checks) {
-      return applyTransaction(this.client, checks, batch.params);
+      return applyTransaction(this.client, checks, batch);
     }
     return this.client.deleteItem(batch.params).promise();
   }
