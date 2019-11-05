@@ -1,6 +1,7 @@
 'use strict';
 
-const getTotal = async (client, action, params) => {
+const getTotal = async (client, params) => {
+  const action = params.KeyConditionExpression ? 'query' : 'scan';
   let counter = 0;
   const p = Object.assign({}, params);
   delete p.ProjectionExpression;

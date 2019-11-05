@@ -21,7 +21,7 @@ const paginateList = async (client, params, options, needTotal = true, minLimit 
   main: {
     if (offset < 0 || limit <= 0) {
       if (needTotal) {
-        total = await getTotal(client, action, params);
+        total = await getTotal(client, params);
       }
       break main;
     }
