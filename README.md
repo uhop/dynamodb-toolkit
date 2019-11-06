@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.12.0 *Updated `getTotal()` API and added a no-limit version of `paginateList()`.*
 - 1.11.2 *Typo fix in `Adapter.makeCheck()`.*
 - 1.11.1 *Bugfix in `Adapter` related to transactions.*
 - 1.11.0 *New style of batches, support for transactional consistency checks.*
