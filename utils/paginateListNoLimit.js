@@ -3,10 +3,8 @@
 const getTotal = require('./getTotal');
 const cleanParams = require('./cleanParams');
 const cloneParams = require('./cloneParams');
-const paginateListNoLimit = require('./paginateListNoLimit');
 
-const paginateList = async (client, params, options, needTotal = true, minLimit = 10, maxLimit = 100) => {
-  if (params.FilterExpression) return paginateListNoLimit(client, params, options, needTotal, maxLimit);
+const paginateListNoLimit = async (client, params, options, needTotal = true, maxLimit = 100) => {
   options = options || {};
   let result = [],
     total = 0,
@@ -29,56 +27,41 @@ const paginateList = async (client, params, options, needTotal = true, minLimit 
     }
     // skip the offset
     let listingParams = cleanParams(cloneParams(params)),
-      countingParams;
+      countingParams, skipped = 0;
     if (offset > 0) {
-      let skipped = 0;
-      if (offset > minLimit) {
-        countingParams = cloneParams(params);
-        countingParams.Select = 'COUNT';
-        delete countingParams.ProjectionExpression;
-        cleanParams(countingParams);
-        while (offset - skipped > minLimit) {
-          countingParams.Limit = offset - skipped;
-          const data = await client[action](countingParams).promise();
-          total += data.Count;
-          skipped += data.Count;
-          if (!data.LastEvaluatedKey) break main;
-          countingParams.ExclusiveStartKey = data.LastEvaluatedKey;
-        }
-        delete countingParams.Limit;
-        const lastKey = countingParams.ExclusiveStartKey;
-        lastKey && (listingParams.ExclusiveStartKey = lastKey);
-      }
+      countingParams = cloneParams(params);
+      countingParams.Select = 'COUNT';
+      delete countingParams.ProjectionExpression;
+      cleanParams(countingParams);
       while (skipped < offset) {
-        listingParams.Limit = minLimit;
-        const data = await client[action](listingParams).promise();
+        const data = await client[action](countingParams).promise();
+        if (skipped + data.Count > offset) break;
         total += data.Count;
-        if (offset - skipped < data.Count) {
-          result = result.concat(data.Items.slice(offset - skipped, offset - skipped + limit));
+        skipped += data.Count;
+        if (!data.LastEvaluatedKey) break main;
+        countingParams.ExclusiveStartKey = data.LastEvaluatedKey;
+      }
+      const lastKey = countingParams.ExclusiveStartKey;
+      lastKey && (listingParams.ExclusiveStartKey = lastKey);
+    }
+    // collect items
+    while (result.length < limit) {
+      const data = await client[action](listingParams).promise();
+      if (data.Count) {
+        total += data.Count;
+        if (skipped < offset) {
+          result = result.concat(data.Items.slice(offset - skipped, limit - result.length));
           skipped = offset;
         } else {
-          skipped += data.Count;
-        }
-        listingParams.ExclusiveStartKey = data.LastEvaluatedKey;
-        if (!data.LastEvaluatedKey) break main;
-      }
-    }
-    // get up to the limit
-    while (result.length < limit) {
-      listingParams.Limit = Math.max(minLimit, limit - result.length);
-      const data = await client[action](listingParams).promise();
-      total += data.Count;
-      if (data.Count > 0) {
-        if (result.length + data.Count <= limit) {
-          result = result.concat(data.Items);
-        } else {
-          result = result.concat(data.Items.slice(0, limit - result.length));
+          if (result.length + data.Count <= limit) {
+            result = result.concat(data.Items);
+          } else {
+            result = result.concat(data.Items.slice(0, limit - result.length));
+          }
         }
       }
       listingParams.ExclusiveStartKey = data.LastEvaluatedKey;
-      if (!data.LastEvaluatedKey) {
-        break main;
-      }
+      if (!data.LastEvaluatedKey) break main;
     }
     // count the rest if requested
     if (needTotal) {
@@ -104,4 +87,4 @@ const paginateList = async (client, params, options, needTotal = true, minLimit 
   return output;
 };
 
-module.exports = paginateList;
+module.exports = paginateListNoLimit;
