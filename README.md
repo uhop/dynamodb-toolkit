@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.13.0 *Refactored `xxxList()` functions to use `getBatch()` and `applyBatch()`.*
 - 1.12.0 *Updated `getTotal()` API and added a no-limit version of `paginateList()`.*
 - 1.11.2 *Typo fix in `Adapter.makeCheck()`.*
 - 1.11.1 *Bugfix in `Adapter` related to transactions.*
