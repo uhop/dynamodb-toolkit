@@ -6,8 +6,8 @@
 
 const getBatch = require('./getBatch');
 
-const readListByKeys = async (client, tableName, keys, generalParams) => {
-  const result = await getBatch(client, keys.map(key => ({action: 'get', params: Object.assign({TableName: tableName, Key: key}, generalParams)})));
+const readListByKeys = async (client, tableName, keys, params) => {
+  const result = await getBatch(client, keys.map(key => ({action: 'get', params: Object.assign({TableName: tableName, Key: key}, params)})));
   return result.map(pair => pair.item);
 };
 
