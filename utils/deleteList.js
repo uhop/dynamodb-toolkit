@@ -9,10 +9,7 @@ const readList = require('./readList');
 const deleteListByKeys = require('./deleteListByKeys');
 
 const deleteList = async (client, params) => {
-  // prepare parameters
   params = cleanParams(cloneParams(params));
-
-  // iterate over parameters deleting records
   let processed = 0;
   while(params) {
     params = await readList(client, params, async data => {
