@@ -39,16 +39,19 @@ const applyBatch = async (client, ...requests) => {
   };
 
   for (const request of requests) {
-    if (!request) continue;
     if (request instanceof Array) {
       for (const item of request) {
-        addToBatch(item);
-        size >= LIMIT && (await runBatch());
+        if (item) {
+          addToBatch(item);
+          size >= LIMIT && (await runBatch());
+        }
       }
       continue;
     }
-    addToBatch(request);
-    size >= LIMIT && (await runBatch());
+    if (request) {
+      addToBatch(request);
+      size >= LIMIT && (await runBatch());
+    }
   }
   size && (await runBatch());
   return total;
