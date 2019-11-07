@@ -8,10 +8,9 @@ const cleanParams = require('./cleanParams');
 const cloneParams = require('./cloneParams');
 
 const readList = async (client, params, fn) => {
-  // prepare parameters
-  const action = params.KeyConditionExpression ? 'query' : 'scan';
   params = cleanParams(cloneParams(params));
-  const data = await client[action](params).promise();
+  const action = params.KeyConditionExpression ? 'query' : 'scan',
+    data = await client[action](params).promise();
   await fn(data);
   if (data.LastEvaluatedKey) {
     params.ExclusiveStartKey = data.LastEvaluatedKey;
@@ -21,10 +20,9 @@ const readList = async (client, params, fn) => {
 };
 
 readList.getItems = async (client, params) => {
-  // prepare parameters
-  const action = params.KeyConditionExpression ? 'query' : 'scan';
   params = cleanParams(cloneParams(params));
-  const data = await client[action](params).promise();
+  const action = params.KeyConditionExpression ? 'query' : 'scan',
+    data = await client[action](params).promise();
   if (data.LastEvaluatedKey) {
     params.ExclusiveStartKey = data.LastEvaluatedKey;
   }
