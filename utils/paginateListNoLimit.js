@@ -50,7 +50,7 @@ const paginateListNoLimit = async (client, params, options, needTotal = true, ma
       if (data.Count) {
         total += data.Count;
         if (skipped < offset) {
-          result = result.concat(data.Items.slice(offset - skipped, limit - result.length));
+          result = data.Items.slice(offset - skipped, limit + offset - skipped);
           skipped = offset;
         } else {
           if (result.length + data.Count <= limit) {
