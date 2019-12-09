@@ -456,6 +456,124 @@
 			"response": []
 		},
 		{
+			"name": "Get a list of planets filtered (page #1)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "bf7b6b43-513b-4c35-8ea8-74e77cc2a9c1",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must be the first page\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.total).to.eql(40);",
+							"    pm.expect(json.offset).to.eql(0);",
+							"    pm.expect(json.limit).to.eql(10);",
+							"    pm.expect(json.data.length).to.eql(10);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/?sort=-name&fields=name&filter=a",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						""
+					],
+					"query": [
+						{
+							"key": "sort",
+							"value": "-name"
+						},
+						{
+							"key": "fields",
+							"value": "name"
+						},
+						{
+							"key": "filter",
+							"value": "a"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get a list of planets filtered (page #2)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "bf7b6b43-513b-4c35-8ea8-74e77cc2a9c1",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must be the second page\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.total).to.eql(40);",
+							"    pm.expect(json.offset).to.eql(10);",
+							"    pm.expect(json.limit).to.eql(10);",
+							"    pm.expect(json.data.length).to.eql(10);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/?sort=-name&fields=name&filter=a&offset=10",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						""
+					],
+					"query": [
+						{
+							"key": "sort",
+							"value": "-name"
+						},
+						{
+							"key": "fields",
+							"value": "name"
+						},
+						{
+							"key": "filter",
+							"value": "a"
+						},
+						{
+							"key": "offset",
+							"value": "10"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
 			"name": "Clone all \"tooine\"",
 			"event": [
 				{
