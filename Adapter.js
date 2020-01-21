@@ -212,17 +212,17 @@ class Adapter {
     return filtering(options.filter, fieldsToMap(options.fields, null, this.topLevelFieldMap), this.searchable, this.searchablePrefix, params);
   }
 
-  async scanAllByParams(params, fieldMap) {
+  async scanAllByParams(params, fields) {
     params = this.cloneParams(params);
     const result = await readList.getItems(this.client, params);
-    fieldMap = fieldsToMap(fieldMap, null, this.topLevelFieldMap);
+    const fieldMap = fieldsToMap(fields, null, this.topLevelFieldMap);
     return {nextParams: result.nextParams, items: result.items.map(item => this.fromDynamo(item, fieldMap))};
   }
 
-  async getAllByParams(params, options, fields) {
+  async getAllByParams(params, options) {
     params = this.cloneParams(params);
     const result = await paginateList(this.client, params, options);
-    const fieldMap = fieldsToMap(fields, null, this.topLevelFieldMap);
+    const fieldMap = fieldsToMap(options && options.fields, null, this.topLevelFieldMap);
     result.data = result.data.map(item => this.fromDynamo(item, fieldMap));
     return result;
   }
@@ -237,7 +237,7 @@ class Adapter {
 
   async getAll(options, item, index) {
     const params = this.makeListParams(options, true, item, index);
-    return this.getAllByParams(params, options, options && options.fields);
+    return this.getAllByParams(params, options);
   }
 
   async putAll(items) {
@@ -246,7 +246,7 @@ class Adapter {
 
   async deleteAllByParams(params) {
     params = this.cloneParams(params);
-    addProjection(params, this.keyFields.join(','));
+    params = this.addKeyFields(params, true);
     return deleteList(this.client, params);
   }
 
@@ -261,7 +261,7 @@ class Adapter {
 
   async cloneAllByParams(params, mapFn) {
     params = this.cloneParams(params);
-    addProjection(params, this.keyFields.join(','));
+    params = this.addKeyFields(params, true);
     return copyList.viaKeys(this.client, params, item => this.toDynamo(mapFn(this.fromDynamo(item))));
   }
 
@@ -300,10 +300,10 @@ class Adapter {
 
   async genericDeleteAllByParams(params) {
     params = this.cloneParams(params);
-    const fieldMap = fieldsToMap(this.keyFields.join(','), null, this.topLevelFieldMap);
+    params = this.addKeyFields(params, true);
     let processed = 0;
     while (params) {
-      const result = await this.scanAllByParams(params, fieldMap);
+      const result = await readList.getItems(this.client, params);
       processed += await this.deleteByKeys(result.items);
       params = result.nextParams;
     }
@@ -317,9 +317,10 @@ class Adapter {
 
   async genericCloneAllByParams(params, mapFn) {
     params = this.cloneParams(params);
+    params = this.addKeyFields(params, true);
     let processed = 0;
     while (params) {
-      const result = await this.scanAllByParams(params);
+      const result = await readList.getItems(this.client, params);
       processed += await this.cloneByKeys(result.items, mapFn);
       params = result.nextParams;
     }
@@ -358,6 +359,10 @@ class Adapter {
 
   makeListParams(options, project, item, index) {
     return this.makeParams(options, project, this.prepareListParams(item, index));
+  }
+
+  addKeyFields(params, skipSelect) {
+    return addProjection(params, this.keyFields.join(','), null, skipSelect);
   }
 
   fromDynamo(item, fieldMap) {
