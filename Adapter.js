@@ -230,7 +230,12 @@ class Adapter {
   async getByKeys(keys, fields, params) {
     params = this.cloneParams(params);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
-    const items = await readList.byKeys(this.client, this.table, keys.map(key => this.toDynamoKey(key, params.IndexName)), cleanParams(params));
+    const items = await readList.byKeys(
+      this.client,
+      this.table,
+      keys.map(key => this.toDynamoKey(key, params.IndexName)),
+      cleanParams(params)
+    );
     const fieldMap = fieldsToMap(fields, null, this.topLevelFieldMap);
     return items.map(item => this.fromDynamo(item, fieldMap));
   }
@@ -251,7 +256,11 @@ class Adapter {
   }
 
   async deleteByKeys(keys) {
-    return deleteList.byKeys(this.client, this.table, keys.map(key => this.toDynamoKey(key)));
+    return deleteList.byKeys(
+      this.client,
+      this.table,
+      keys.map(key => this.toDynamoKey(key))
+    );
   }
 
   async deleteAll(options, item, index) {
@@ -266,7 +275,12 @@ class Adapter {
   }
 
   async cloneByKeys(keys, mapFn) {
-    return copyList.byKeys(this.client, this.table, keys.map(key => this.toDynamoKey(key)), item => this.toDynamo(mapFn(this.fromDynamo(item))));
+    return copyList.byKeys(
+      this.client,
+      this.table,
+      keys.map(key => this.toDynamoKey(key)),
+      item => this.toDynamo(mapFn(this.fromDynamo(item)))
+    );
   }
 
   async cloneAll(options, mapFn, item, index) {
@@ -303,8 +317,9 @@ class Adapter {
     params = this.addKeyFields(params, true);
     let processed = 0;
     while (params) {
-      const result = await readList.getItems(this.client, params);
-      processed += await this.deleteByKeys(result.items);
+      const result = await readList.getItems(this.client, params),
+        items = result.items.map(item => this.fromDynamo(item, fieldMap));
+      processed += await this.deleteByKeys(items);
       params = result.nextParams;
     }
     return processed;
@@ -320,8 +335,9 @@ class Adapter {
     params = this.addKeyFields(params, true);
     let processed = 0;
     while (params) {
-      const result = await readList.getItems(this.client, params);
-      processed += await this.cloneByKeys(result.items, mapFn);
+      const result = await readList.getItems(this.client, params),
+        items = result.items.map(item => this.fromDynamo(item, fieldMap));
+      processed += await this.cloneByKeys(items, mapFn);
       params = result.nextParams;
     }
     return processed;
