@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.13.4 *Bugfix in generic operations.*
 - 1.13.3 *Added `addKeyFields()`, simplified `getAllByParams()`, fixed `genericDeleteAllByParams()`.*
 - 1.13.2 *Bugfix in pagination with filtering.*
 - 1.13.1 *Added an alternative way to go over database records: `iterateList()`.*
