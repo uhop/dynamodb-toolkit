@@ -318,7 +318,7 @@ class Adapter {
     let processed = 0;
     while (params) {
       const result = await readList.getItems(this.client, params),
-        items = result.items.map(item => this.fromDynamo(item, fieldMap));
+        items = result.items.map(item => this.fromDynamo(item));
       processed += await this.deleteByKeys(items);
       params = result.nextParams;
     }
@@ -336,7 +336,7 @@ class Adapter {
     let processed = 0;
     while (params) {
       const result = await readList.getItems(this.client, params),
-        items = result.items.map(item => this.fromDynamo(item, fieldMap));
+        items = result.items.map(item => this.fromDynamo(item));
       processed += await this.cloneByKeys(items, mapFn);
       params = result.nextParams;
     }
