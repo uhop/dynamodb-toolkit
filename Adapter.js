@@ -304,12 +304,20 @@ class Adapter {
   async genericGetByKeys(keys, fields, params) {
     params = this.cloneParams(params);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
-    const results = await Promise.all(keys.map(key => this.getByKey(key, null, params)));
-    return results.filter(item => typeof item != 'undefined');
+    const results = [];
+    for (let i = 0; i < keys.length; ++i) {
+      const key = keys[i],
+        result = await this.getByKey(key, null, params);
+      typeof result != 'undefined' && results.push(result);
+    }
+    return results;
   }
 
   async genericPutAll(items) {
-    return Promise.all(items.map(item => this.put(item, true)));
+    for (let i = 0; i < items.length; ++i) {
+      const item = items[i];
+      await this.put(item, true);
+    }
   }
 
   async genericDeleteAllByParams(params) {
@@ -326,8 +334,13 @@ class Adapter {
   }
 
   async genericDeleteByKeys(keys) {
-    const results = await Promise.all(keys.map(key => this.deleteByKey(key)));
-    return results.reduce((acc, result) => acc + (typeof result == 'number' ? result : result ? 1 : 0), 0);
+    let processed = 0;
+    for (let i = 0; i < keys.length; ++i) {
+      const key = keys[i];
+      const result = await this.deleteByKey(key);
+      processed += typeof result == 'number' ? result : result ? 1 : 0;
+    }
+    return processed;
   }
 
   async genericCloneAllByParams(params, mapFn) {
@@ -344,8 +357,13 @@ class Adapter {
   }
 
   async genericCloneByKeys(keys, mapFn) {
-    const results = await Promise.all(keys.map(key => this.cloneByKey(key, mapFn, true)));
-    return results.reduce((acc, result) => acc + (typeof result == 'number' ? result : result ? 1 : 0), 0);
+    let processed = 0;
+    for (let i = 0; i < keys.length; ++i) {
+      const key = keys[i];
+      const result = await this.cloneByKey(key, mapFn, true);
+      processed += typeof result == 'number' ? result : result ? 1 : 0;
+    }
+    return processed;
   }
 
   // utilities
