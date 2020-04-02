@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.13.6 *Bugfix to return a number of processed records from generic mass operations.*
 - 1.13.5 *Bugfix to unbreak generic ops.*
 - 1.13.4 *Bugfix in generic operations.*
 - 1.13.3 *Added `addKeyFields()`, simplified `getAllByParams()`, fixed `genericDeleteAllByParams()`.*
