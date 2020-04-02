@@ -1,6 +1,6 @@
 {
   "name": "dynamodb-toolkit",
-  "version": "1.13.7",
+  "version": "1.13.8",
   "description": "Helpers for AWS DynamoDB to build efficient web applications",
   "main": "index.js",
   "scripts": {
