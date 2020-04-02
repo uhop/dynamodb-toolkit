@@ -327,7 +327,7 @@ class Adapter {
 
   async genericDeleteByKeys(keys) {
     const results = await Promise.all(keys.map(key => this.deleteByKey(key)));
-    return results.reduce((acc, result) => acc + (typeof result == 'number' ? result : 1), 0);
+    return results.reduce((acc, result) => acc + (typeof result == 'number' ? result : result ? 1 : 0), 0);
   }
 
   async genericCloneAllByParams(params, mapFn) {
@@ -345,7 +345,7 @@ class Adapter {
 
   async genericCloneByKeys(keys, mapFn) {
     const results = await Promise.all(keys.map(key => this.cloneByKey(key, mapFn, true)));
-    return results.reduce((acc, result) => acc + (typeof result == 'number' ? result : 1), 0);
+    return results.reduce((acc, result) => acc + (typeof result == 'number' ? result : result ? 1 : 0), 0);
   }
 
   // utilities
