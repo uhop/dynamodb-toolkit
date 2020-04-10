@@ -68,18 +68,16 @@ const adapter = new Adapter({
   }
 });
 
-const cloneFn = item => ({...item, name: item.name + ' COPY'});
-
 const koaAdapter = new KoaAdapter(adapter, {
   sortableIndices: {name: '-t-name-index'},
-  augmentFromContext(item, ctx) {
+  augmentItemFromContext(item, ctx) {
     if (ctx.params.planet) {
       item.name = ctx.params.planet;
     }
     return item;
   },
-  async clone(ctx) {
-    return this.doClone(ctx, cloneFn);
+  augmentCloneFromContext(ctx) {
+    return item => ({...item, name: item.name + ' COPY'});
   },
   async getAll(ctx) {
     let index, descending;
@@ -92,12 +90,6 @@ const koaAdapter = new KoaAdapter(adapter, {
     const options = this.makeOptions(ctx);
     descending && (options.descending = true);
     ctx.body = await this.adapter.getAll(options, null, index);
-  },
-  async cloneAll(ctx) {
-    return this.doCloneAll(ctx, cloneFn);
-  },
-  async cloneByNames(ctx) {
-    return this.doCloneByNames(ctx, cloneFn);
   },
   async load(ctx) {
     const data = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, 'data.json.gz'))));

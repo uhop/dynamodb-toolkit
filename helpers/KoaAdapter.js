@@ -3,8 +3,6 @@
 const Adapter = require('../Adapter');
 const {isTrue, isConsistent} = require('./isTrue');
 
-const cloneFn = ctx => item => Object.assign({}, item, ctx.request.body);
-
 class KoaAdapter {
   constructor(adapter, overlay) {
     this.adapter = adapter instanceof Adapter ? adapter : new Adapter(adapter);
@@ -17,9 +15,13 @@ class KoaAdapter {
 
   // user-provided
 
-  augmentFromContext(item, ctx) {
+  augmentItemFromContext(item, ctx) {
     // this function can override keys taking them from the context (params, query)
     return Object.assign(item, ctx.params);
+  }
+
+  augmentCloneFromContext(ctx) {
+    return item => Object.assign({}, item, ctx.request.body);
   }
 
   extractKeys(ctx, forceQuery) {
@@ -47,7 +49,7 @@ class KoaAdapter {
 
   async get(ctx) {
     const params = this.adapter.makeParams({consistent: isConsistent(ctx.query)}),
-      item = await this.adapter.getByKey(this.augmentFromContext({}, ctx), ctx.query.fields, params);
+      item = await this.adapter.getByKey(this.augmentItemFromContext({}, ctx), ctx.query.fields, params);
     if (typeof item !== 'undefined') {
       ctx.body = item;
     } else {
@@ -56,35 +58,35 @@ class KoaAdapter {
   }
 
   async post(ctx) {
-    const item = this.augmentFromContext(ctx.request.body, ctx);
+    const item = this.augmentItemFromContext(ctx.request.body, ctx);
     await this.adapter.post(item);
     ctx.status = 204;
   }
 
   async put(ctx) {
-    const item = this.augmentFromContext(ctx.request.body, ctx);
+    const item = this.augmentItemFromContext(ctx.request.body, ctx);
     await this.adapter.put(item, isTrue(ctx.query, 'force'));
     ctx.status = 204;
   }
 
   async patch(ctx) {
-    const item = this.augmentFromContext(ctx.request.body, ctx);
+    const item = this.augmentItemFromContext(ctx.request.body, ctx);
     await this.adapter.patch(item, isTrue(ctx.query, 'deep'));
     ctx.status = 204;
   }
 
   async delete(ctx) {
-    await this.adapter.deleteByKey(this.augmentFromContext({}, ctx));
+    await this.adapter.deleteByKey(this.augmentItemFromContext({}, ctx));
     ctx.status = 204;
   }
 
   async doClone(ctx, mapFn) {
-    const done = await this.adapter.cloneByKey(this.augmentFromContext({}, ctx), mapFn, isTrue(ctx.query, 'force'));
+    const done = await this.adapter.cloneByKey(this.augmentItemFromContext({}, ctx), mapFn, isTrue(ctx.query, 'force'));
     ctx.status = done ? 204 : 404;
   }
 
   async clone(ctx) {
-    return this.doClone(ctx, cloneFn(ctx));
+    return this.doClone(ctx, this.augmentCloneFromContext(ctx));
   }
 
   // mass operations
@@ -104,7 +106,7 @@ class KoaAdapter {
   }
 
   async getAll(ctx) {
-    ctx.body = await this.adapter.getAll(this.makeOptions(ctx), this.augmentFromContext({}, ctx));
+    ctx.body = await this.adapter.getAll(this.makeOptions(ctx), this.augmentItemFromContext({}, ctx));
   }
 
   async getByNames(ctx) {
@@ -112,7 +114,7 @@ class KoaAdapter {
   }
 
   async deleteAll(ctx) {
-    ctx.body = {processed: await this.adapter.deleteAll(this.makeOptions(ctx), this.augmentFromContext({}, ctx))};
+    ctx.body = {processed: await this.adapter.deleteAll(this.makeOptions(ctx), this.augmentItemFromContext({}, ctx))};
   }
 
   async deleteByNames(ctx) {
@@ -120,11 +122,11 @@ class KoaAdapter {
   }
 
   async doCloneAll(ctx, mapFn) {
-    ctx.body = {processed: await this.adapter.cloneAll(this.makeOptions(ctx), mapFn, this.augmentFromContext({}, ctx))};
+    ctx.body = {processed: await this.adapter.cloneAll(this.makeOptions(ctx), mapFn, this.augmentItemFromContext({}, ctx))};
   }
 
   async cloneAll(ctx) {
-    return this.doCloneAll(ctx, cloneFn(ctx));
+    return this.doCloneAll(ctx, this.augmentCloneFromContext(ctx));
   }
 
   async doCloneByNames(ctx, mapFn) {
@@ -132,7 +134,7 @@ class KoaAdapter {
   }
 
   async cloneByNames(ctx) {
-    return this.doCloneByNames(ctx, cloneFn(ctx));
+    return this.doCloneByNames(ctx, this.augmentCloneFromContext(ctx));
   }
 }
 
