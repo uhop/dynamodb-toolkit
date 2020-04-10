@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.13.9 *Added an overridable clone function.*
 - 1.13.8 *Serialized generic mass operations. Slower but less resource consumption.*
 - 1.13.7 *Better work with boolean results in mass operations.*
 - 1.13.6 *Bugfix to return a number of processed records from generic mass operations.*
