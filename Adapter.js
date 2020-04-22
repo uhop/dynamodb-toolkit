@@ -14,6 +14,15 @@ const filtering = require('./utils/filtering');
 const cleanParams = require('./utils/cleanParams');
 const cloneParams = require('./utils/cloneParams');
 
+class Raw {
+  constructor(source) {
+    Object.assign(this, source);
+  }
+  static make(source) {
+    return new Raw(source);
+  }
+}
+
 class Adapter {
   constructor(options) {
     // defaults
@@ -36,17 +45,24 @@ class Adapter {
   prepare(item, isPatch, deep) {
     // prepare to write it to a database
     // add some technical fields if required
+    // returns a raw item
     return item;
   }
 
-  prepareKey(item, index) {
+  prepareKey(key, index) {
     // prepare a key for a database
     // add some technical fields if required
-    item = this.prepare(item);
+    // returns a raw key object
+    const rawKey = key instanceof Adapter.Raw ? key : this.prepare(key);
+    return this.restrictKey(rawKey, index);
+  }
+
+  restrictKey(rawKey, index) {
+    // remove unnecessary properties
     return this.keyFields.reduce((acc, key) => {
-      if (item.hasOwnProperty(key)) acc[key] = item[key];
+      if (rawKey.hasOwnProperty(key)) acc[key] = rawKey[key];
       return acc;
-    }, {});
+    }, new Adapter.Raw({}));
   }
 
   prepareListParams(item, index) {
@@ -60,10 +76,10 @@ class Adapter {
     return params;
   }
 
-  revive(item, fieldMap) {
+  revive(rawItem, fieldMap) {
     // reconstitute a database object
     // remove some technical fields if required
-    return item;
+    return rawItem;
   }
 
   async validateItem(item, isPatch, deep) {
@@ -91,13 +107,18 @@ class Adapter {
   }
 
   async makePost(item) {
-    await this.validateItem(item);
-    const params = cleanParams(this.updateParams(this.checkExistence({Item: this.toDynamo(item)}, true), {name: 'post'}));
+    if (!(item instanceof Adapter.Raw)) {
+      await this.validateItem(item);
+      item = this.toDynamo(item);
+    }
+    const params = cleanParams(this.updateParams(this.checkExistence({Item: item}, true), {name: 'post'}));
     return {action: 'put', params};
   }
 
   async makePut(item, force, params) {
-    await this.validateItem(item);
+    if (!(item instanceof Adapter.Raw)) {
+      await this.validateItem(item);
+    }
     params = this.cloneParams(params);
     params.Item = this.toDynamo(item);
     !force && (params = this.checkExistence(params));
@@ -106,18 +127,20 @@ class Adapter {
   }
 
   async makePatch(key, item, deep, params) {
-    await this.validateItem(item, true, deep);
+    const deleteProps = item.__delete;
+    if (!(item instanceof Adapter.Raw)) {
+      await this.validateItem(item, true, deep);
+    }
+    item = convertTo(this.prepare(item, true, deep), this.specialTypes);
     params = this.cloneParams(params);
     params.Key = this.toDynamoKey(key, params.IndexName);
     params = this.checkExistence(params);
-    const dbItem = convertTo(this.prepare(item, true, deep), this.specialTypes);
-    this.keyFields.forEach(field => delete dbItem[field]);
+    this.keyFields.forEach(field => delete item[field]);
     if (deep) {
-      params = prepareUpdate(dbItem, params);
+      params = prepareUpdate(item, params);
     } else {
-      const deleteProps = item.__delete;
-      delete dbItem.__delete;
-      params = prepareUpdate.flat(dbItem, deleteProps, params);
+      delete item.__delete;
+      params = prepareUpdate.flat(item, deleteProps, params);
     }
     params = cleanParams(this.updateParams(params, {name: 'patch', deep}));
     return {action: 'patch', params};
@@ -132,14 +155,16 @@ class Adapter {
 
   // general API
 
-  async getByKey(key, fields, params) {
+  async getByKey(key, fields, params, returnRaw) {
     const batch = await this.makeGet(key, fields, params);
     const data = await this.client.getItem(batch.params).promise();
-    return data.Item ? this.fromDynamo(data.Item, fieldsToMap(fields, null, this.topLevelFieldMap)) : undefined;
+    if (!data.Item) return; // undefined
+    if (returnRaw) return new Adapter.Raw(data.Item);
+    return this.fromDynamo(data.Item, fieldsToMap(fields, null, this.topLevelFieldMap));
   }
 
-  async get(item, fields, params) {
-    return this.getByKey(item, fields, params);
+  async get(item, fields, params, returnRaw) {
+    return this.getByKey(item, fields, params, returnRaw);
   }
 
   async post(item) {
@@ -186,8 +211,8 @@ class Adapter {
     return this.deleteByKey(item, params);
   }
 
-  async cloneByKey(key, mapFn, force, params) {
-    const item = await this.getByKey(key, null, this.cleanGetParams(params));
+  async cloneByKey(key, mapFn, force, params, returnRaw) {
+    const item = await this.getByKey(key, null, this.cleanGetParams(params), returnRaw);
     if (typeof item == 'undefined') return false;
     const clonedItem = mapFn(item);
     if (force) {
@@ -198,8 +223,8 @@ class Adapter {
     return true;
   }
 
-  async clone(item, mapFn, force, params) {
-    return this.cloneByKey(item, mapFn, force, params);
+  async clone(item, mapFn, force, params, returnRaw) {
+    return this.cloneByKey(item, mapFn, force, params, returnRaw);
   }
 
   // mass operations
@@ -212,22 +237,34 @@ class Adapter {
     return filtering(options.filter, fieldsToMap(options.fields, null, this.topLevelFieldMap), this.searchable, this.searchablePrefix, params);
   }
 
-  async scanAllByParams(params, fields) {
+  async scanAllByParams(params, fields, returnRaw) {
     params = this.cloneParams(params);
     const result = await readList.getItems(this.client, params);
-    const fieldMap = fieldsToMap(fields, null, this.topLevelFieldMap);
-    return {nextParams: result.nextParams, items: result.items.map(item => this.fromDynamo(item, fieldMap))};
+    let transformFn;
+    if (returnRaw) {
+      transformFn = item => this.fromDynamo(item);
+    } else {
+      const fieldMap = fieldsToMap(fields, null, this.topLevelFieldMap);
+      transformFn = item => this.fromDynamo(item, fieldMap);
+    }
+    return {nextParams: result.nextParams, items: result.items.map(transformFn)};
   }
 
-  async getAllByParams(params, options) {
+  async getAllByParams(params, options, returnRaw) {
     params = this.cloneParams(params);
     const result = await paginateList(this.client, params, options);
-    const fieldMap = fieldsToMap(options && options.fields, null, this.topLevelFieldMap);
-    result.data = result.data.map(item => this.fromDynamo(item, fieldMap));
+    let transformFn;
+    if (returnRaw) {
+      transformFn = item => this.fromDynamo(item);
+    } else {
+      const fieldMap = fieldsToMap(options && options.fields, null, this.topLevelFieldMap);
+      transformFn = item => this.fromDynamo(item, fieldMap);
+    }
+    result.data = result.data.map(transformFn);
     return result;
   }
 
-  async getByKeys(keys, fields, params) {
+  async getByKeys(keys, fields, params, returnRaw) {
     params = this.cloneParams(params);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
     const items = await readList.byKeys(
@@ -236,13 +273,19 @@ class Adapter {
       keys.map(key => this.toDynamoKey(key, params.IndexName)),
       cleanParams(params)
     );
-    const fieldMap = fieldsToMap(fields, null, this.topLevelFieldMap);
-    return items.map(item => this.fromDynamo(item, fieldMap));
+    let transformFn;
+    if (returnRaw) {
+      transformFn = item => this.fromDynamo(item);
+    } else {
+      const fieldMap = fieldsToMap(fields, null, this.topLevelFieldMap);
+      transformFn = item => this.fromDynamo(item, fieldMap);
+    }
+    return items.map(transformFn);
   }
 
-  async getAll(options, item, index) {
+  async getAll(options, item, index, returnRaw) {
     const params = this.makeListParams(options, true, item, index);
-    return this.getAllByParams(params, options);
+    return this.getAllByParams(params, options, returnRaw);
   }
 
   async putAll(items) {
@@ -268,24 +311,24 @@ class Adapter {
     return this.deleteAllByParams(params);
   }
 
-  async cloneAllByParams(params, mapFn) {
+  async cloneAllByParams(params, mapFn, returnRaw) {
     params = this.cloneParams(params);
     params = this.addKeyFields(params, true);
-    return copyList.viaKeys(this.client, params, item => this.toDynamo(mapFn(this.fromDynamo(item))));
+    return copyList.viaKeys(this.client, params, item => this.toDynamo(mapFn(this.fromDynamo(item, null, returnRaw))));
   }
 
-  async cloneByKeys(keys, mapFn) {
+  async cloneByKeys(keys, mapFn, returnRaw) {
     return copyList.byKeys(
       this.client,
       this.table,
       keys.map(key => this.toDynamoKey(key)),
-      item => this.toDynamo(mapFn(this.fromDynamo(item)))
+      item => this.toDynamo(mapFn(this.fromDynamo(item, null, returnRaw)))
     );
   }
 
-  async cloneAll(options, mapFn, item, index) {
+  async cloneAll(options, mapFn, item, index, returnRaw) {
     const params = this.makeListParams(options, false, item, index);
-    return this.cloneAllByParams(params, mapFn);
+    return this.cloneAllByParams(params, mapFn, returnRaw);
   }
 
   // generic implementations
@@ -301,13 +344,13 @@ class Adapter {
   // async deleteAll(options, item, index) { /* see above */ }
   // async cloneAll(options, mapFn, item, index) { /* see above */ }
 
-  async genericGetByKeys(keys, fields, params) {
+  async genericGetByKeys(keys, fields, params, returnRaw) {
     params = this.cloneParams(params);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
     const results = [];
     for (let i = 0; i < keys.length; ++i) {
       const key = keys[i],
-        result = await this.getByKey(key, null, params);
+        result = await this.getByKey(key, null, params, returnRaw);
       typeof result != 'undefined' && results.push(result);
     }
     return results;
@@ -326,7 +369,7 @@ class Adapter {
     let processed = 0;
     while (params) {
       const result = await readList.getItems(this.client, params),
-        items = result.items.map(item => this.fromDynamo(item));
+        items = result.items.map(item => this.fromDynamo(item, null));
       processed += await this.deleteByKeys(items);
       params = result.nextParams;
     }
@@ -343,24 +386,24 @@ class Adapter {
     return processed;
   }
 
-  async genericCloneAllByParams(params, mapFn) {
+  async genericCloneAllByParams(params, mapFn, returnRaw) {
     params = this.cloneParams(params);
     params = this.addKeyFields(params, true);
     let processed = 0;
     while (params) {
       const result = await readList.getItems(this.client, params),
-        items = result.items.map(item => this.fromDynamo(item));
-      processed += await this.cloneByKeys(items, mapFn);
+        items = result.items.map(item => this.fromDynamo(item, null, true));
+      processed += await this.cloneByKeys(items, mapFn, returnRaw);
       params = result.nextParams;
     }
     return processed;
   }
 
-  async genericCloneByKeys(keys, mapFn) {
+  async genericCloneByKeys(keys, mapFn, returnRaw) {
     let processed = 0;
     for (let i = 0; i < keys.length; ++i) {
       const key = keys[i];
-      const result = await this.cloneByKey(key, mapFn, true);
+      const result = await this.cloneByKey(key, mapFn, true, null, returnRaw);
       processed += typeof result == 'number' ? result : result ? 1 : 0;
     }
     return processed;
@@ -399,16 +442,18 @@ class Adapter {
     return addProjection(params, this.keyFields.join(','), null, skipSelect);
   }
 
-  fromDynamo(item, fieldMap) {
-    return this.revive(convertFrom(item), fieldMap);
+  fromDynamo(item, fieldMap, returnRaw) {
+    const rawItem = convertFrom(item);
+    if (returnRaw) return new Adapter.Raw(rawItem);
+    return this.revive(rawItem, fieldMap);
   }
 
   toDynamo(item) {
     return convertTo(this.prepare(item), this.specialTypes);
   }
 
-  toDynamoKey(item, index) {
-    return convertTo(this.prepareKey(item, index), this.specialTypes);
+  toDynamoKey(key, index) {
+    return convertTo(this.prepareKey(key, index), this.specialTypes);
   }
 
   async validateItems(items, isPatch, deep) {
@@ -418,6 +463,7 @@ class Adapter {
   }
 }
 
+Adapter.Raw = Raw;
 Adapter.adapt = Adapter.make;
 
 module.exports = Adapter;
