@@ -23,6 +23,12 @@ class Raw {
   }
 }
 
+class DbRaw extends Raw {
+  static make(source) {
+    return new DbRaw(source);
+  }
+}
+
 class Adapter {
   constructor(options) {
     // defaults
@@ -53,7 +59,7 @@ class Adapter {
     // prepare a key for a database
     // add some technical fields if required
     // returns a raw key object
-    const rawKey = key instanceof Adapter.Raw ? key : this.prepare(key);
+    const rawKey = this.prepare(key);
     return this.restrictKey(rawKey, index);
   }
 
@@ -62,7 +68,7 @@ class Adapter {
     return this.keyFields.reduce((acc, key) => {
       if (rawKey.hasOwnProperty(key)) acc[key] = rawKey[key];
       return acc;
-    }, new Adapter.Raw({}));
+    }, {});
   }
 
   prepareListParams(item, index) {
@@ -109,9 +115,8 @@ class Adapter {
   async makePost(item) {
     if (!(item instanceof Adapter.Raw)) {
       await this.validateItem(item);
-      item = this.toDynamo(item);
     }
-    const params = cleanParams(this.updateParams(this.checkExistence({Item: item}, true), {name: 'post'}));
+    const params = cleanParams(this.updateParams(this.checkExistence({Item: this.toDynamo(item)}, true), {name: 'post'}));
     return {action: 'put', params};
   }
 
@@ -128,10 +133,14 @@ class Adapter {
 
   async makePatch(key, item, deep, params) {
     const deleteProps = item.__delete;
-    if (!(item instanceof Adapter.Raw)) {
+    if (item instanceof Adapter.DbRaw) {
+      // do nothing, we are good already
+    } else if (item instanceof Adapter.Raw) {
+      item = convertTo(item, this.specialTypes);
+    } else {
       await this.validateItem(item, true, deep);
+      item = convertTo(this.prepare(item, true, deep), this.specialTypes);
     }
-    item = convertTo(this.prepare(item, true, deep), this.specialTypes);
     params = this.cloneParams(params);
     params.Key = this.toDynamoKey(key, params.IndexName);
     params = this.checkExistence(params);
@@ -159,7 +168,8 @@ class Adapter {
     const batch = await this.makeGet(key, fields, params);
     const data = await this.client.getItem(batch.params).promise();
     if (!data.Item) return; // undefined
-    if (returnRaw) return new Adapter.Raw(data.Item);
+    if (returnRaw === 'db-raw') return new Adapter.DbRaw(data.Item);
+    if (returnRaw === 'raw') return new Adapter.Raw(convertFrom(data.Item));
     return this.fromDynamo(data.Item, fieldsToMap(fields, null, this.topLevelFieldMap));
   }
 
@@ -241,8 +251,8 @@ class Adapter {
     params = this.cloneParams(params);
     const result = await readList.getItems(this.client, params);
     let transformFn;
-    if (returnRaw) {
-      transformFn = item => this.fromDynamo(item);
+    if (returnRaw === 'db-raw' || returnRaw === 'raw') {
+      transformFn = item => this.fromDynamo(item, null, returnRaw);
     } else {
       const fieldMap = fieldsToMap(fields, null, this.topLevelFieldMap);
       transformFn = item => this.fromDynamo(item, fieldMap);
@@ -254,8 +264,8 @@ class Adapter {
     params = this.cloneParams(params);
     const result = await paginateList(this.client, params, options);
     let transformFn;
-    if (returnRaw) {
-      transformFn = item => this.fromDynamo(item);
+    if (returnRaw === 'db-raw' || returnRaw === 'raw') {
+      transformFn = item => this.fromDynamo(item, null, returnRaw);
     } else {
       const fieldMap = fieldsToMap(options && options.fields, null, this.topLevelFieldMap);
       transformFn = item => this.fromDynamo(item, fieldMap);
@@ -274,8 +284,8 @@ class Adapter {
       cleanParams(params)
     );
     let transformFn;
-    if (returnRaw) {
-      transformFn = item => this.fromDynamo(item);
+    if (returnRaw === 'db-raw' || returnRaw === 'raw') {
+      transformFn = item => this.fromDynamo(item, null, returnRaw);
     } else {
       const fieldMap = fieldsToMap(fields, null, this.topLevelFieldMap);
       transformFn = item => this.fromDynamo(item, fieldMap);
@@ -392,7 +402,7 @@ class Adapter {
     let processed = 0;
     while (params) {
       const result = await readList.getItems(this.client, params),
-        items = result.items.map(item => this.fromDynamo(item, null, true));
+        items = result.items.map(item => this.fromDynamo(item, null, 'db-raw'));
       processed += await this.cloneByKeys(items, mapFn, returnRaw);
       params = result.nextParams;
     }
@@ -443,16 +453,21 @@ class Adapter {
   }
 
   fromDynamo(item, fieldMap, returnRaw) {
+    if (returnRaw === 'db-raw') return new Adapter.DbRaw(item);
     const rawItem = convertFrom(item);
-    if (returnRaw) return new Adapter.Raw(rawItem);
+    if (returnRaw === 'raw') return new Adapter.Raw(rawItem);
     return this.revive(rawItem, fieldMap);
   }
 
   toDynamo(item) {
+    if (item instanceof Adapter.DbRaw) return item;
+    if (item instanceof Adapter.Raw) return convertTo(item, this.specialTypes);
     return convertTo(this.prepare(item), this.specialTypes);
   }
 
   toDynamoKey(key, index) {
+    if (key instanceof Adapter.DbRaw) return this.restrictKey(key, index);
+    if (key instanceof Adapter.Raw) return convertTo(this.restrictKey(key, index), this.specialTypes);
     return convertTo(this.prepareKey(key, index), this.specialTypes);
   }
 
@@ -464,6 +479,7 @@ class Adapter {
 }
 
 Adapter.Raw = Raw;
+Adapter.DbRaw = DbRaw;
 Adapter.adapt = Adapter.make;
 
 module.exports = Adapter;
