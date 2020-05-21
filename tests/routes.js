@@ -8,7 +8,6 @@ const AWS = require('aws-sdk');
 
 const Adapter = require('../Adapter');
 const KoaAdapter = require('../helpers/KoaAdapter');
-const {isConsistent} = require('../helpers/isTrue');
 const createClient = require('../utils/createClient');
 
 const client = createClient(AWS);
