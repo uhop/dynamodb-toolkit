@@ -49,7 +49,7 @@ const getOptions = (AWS, {profile, warn} = {}) => {
 const makeClient = (AWS, pragmas, options) => {
   const configOptions = getOptions(AWS, pragmas),
     opt = {...configOptions, ...options};
-  return pragmas && pragmas.isDocClient ? new AWS.DynamoDB.DocumentClient(opt) : new AWS.DynamoDB(opt);
+  return pragmas && pragmas.docClient ? new AWS.DynamoDB.DocumentClient(opt) : new AWS.DynamoDB(opt);
 };
 makeClient.getOptions = getOptions;
 
