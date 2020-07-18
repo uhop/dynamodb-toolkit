@@ -1,81 +1,73 @@
 'use strict';
 
+const AWS = require('aws-sdk');
+const getPath = require('./getPath');
+const setPath = require('./setPath');
+
+const cvt = AWS.DynamoDB.Converter;
+
+const defaultOptions = {convertEmptyValues: false, wrapNumbers: false};
+
 // deal with the DynamoDB data representation
 
-const convertValueFromDynamoDB = value => {
-  const types = Object.keys(value);
-  switch (types[0]) {
-    case 'N':
-      return +value.N;
-    case 'NULL':
-      return null;
-    case 'NS':
-      return value.NS.map(value => +value);
-    case 'L':
-      return value.L.map(value => convertValueFromDynamoDB(value));
-    case 'M':
-      return Object.keys(value.M).reduce((acc, key) => ((acc[key] = convertValueFromDynamoDB(value.M[key])), acc), {});
-    default:
-      return value[types[0]];
+const isIndex = /^\d+$/;
+
+const setDynamoPath = (o, path, value, separator = '.') => {
+  if (typeof path == 'string') path = path.split(separator);
+  let type = 'M';
+  for (let i = 0; i < path.length - 1; ++i) {
+    const part = path[i];
+    if (!o.hasOwnProperty(part)) return;
+    o = o[part];
+    o = o.M || o.L;
   }
+  return (o[path[path.length - 1]] = value);
 };
 
-const convertFrom = item => Object.keys(item).reduce((acc, key) => ((acc[key] = convertValueFromDynamoDB(item[key])), acc), {});
-
-const convertValueToDynamoDB = value => {
-  switch (typeof value) {
-    case 'string':
-      return value ? {S: value} : {NULL: true};
-    case 'number':
-      return {N: '' + value};
-    case 'boolean':
-      return {BOOL: value};
-    case 'undefined':
-      return; // undefined
-  }
-  if (value instanceof Array) {
-    return {L: value.map(convertValueToDynamoDB)};
-  }
-  if (value === null) {
-    return {NULL: true};
-  }
-  if (typeof value == 'object') {
-    return {
-      M: Object.keys(value).reduce((acc, key) => {
-        acc[key] = convertValueToDynamoDB(value[key]);
-        return acc;
-      }, {})
-    };
-  }
-  const v = '' + value;
-  return v ? {S: v} : {NULL: true};
+const convertFrom = (item, useType) => {
+  const result = cvt.unmarshall(item, defaultOptions);
+  if (!useType) return result;
+  Object.keys(useType).forEach(name => {
+    const names = name.split('.'),
+      value = getPath(result, names);
+    switch (useType[name]) {
+      case 'NS':
+        value &&
+          value.values &&
+          setPath(
+            o,
+            names,
+            Array.from(value.values).map(x => +x)
+          );
+        break;
+      case 'SS':
+      case 'BS':
+        value && value.values && setPath(o, names, Array.from(value.values));
+        break;
+    }
+  });
+  return result;
 };
 
-const convertTo = (item, useType = {}) => {
-  if (item && typeof item == 'object' && !(item instanceof Array)) {
-    return Object.keys(item).reduce((acc, key) => {
-      switch (useType[key]) {
-        case 'SS':
-          acc[key] = {SS: item[key]};
-          break;
-        case 'NS':
-          acc[key] = {NS: item[key].map(value => '' + value)};
-          break;
-        default:
-          const value = convertValueToDynamoDB(item[key]);
-          if (value) {
-            acc[key] = value;
-          }
-          break;
-      }
-      return acc;
-    }, {});
-  }
-  return convertValueToDynamoDB(item);
+const convertTo = (item, useType) => {
+  const result = cvt.marshall(item, defaultOptions);
+  if (!useType) return result;
+  Object.keys(useType).forEach(name => {
+    const names = name.split('.'),
+      value = getPath(item, names);
+    if (!(value instanceof Array)) return;
+    switch (useType[name]) {
+      case 'NS':
+        setDynamoPath(result, names, {NS: value.map(x => '' + x)});
+        break;
+      case 'SS':
+      case 'BS':
+        setDynamoPath(result, names, {[useType[name]]: [...value]});
+        break;
+    }
+  });
+  return result;
 };
-
-module.exports.convertValueFromDynamoDB = convertValueFromDynamoDB;
-module.exports.convertValueToDynamoDB = convertValueToDynamoDB;
 
 module.exports.convertFrom = convertFrom;
 module.exports.convertTo = convertTo;
