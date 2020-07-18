@@ -8,9 +8,9 @@ const AWS = require('aws-sdk');
 
 const Adapter = require('../Adapter');
 const KoaAdapter = require('../helpers/KoaAdapter');
-const createClient = require('../utils/createClient');
+const makeClient = require('../utils/makeClient');
 
-const client = createClient(AWS);
+const client = makeClient(AWS, {docClient: false});
 
 const adapter = new Adapter({
   client,
