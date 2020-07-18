@@ -135,13 +135,24 @@ class Adapter {
 
   async makePatch(key, item, params) {
     const deleteProps = item.__delete;
-    if (item instanceof Adapter.DbRaw) {
-      // do nothing, we are good already
-    } else if (item instanceof Adapter.Raw) {
-      item = convertTo(item, this.specialTypes);
+    if (this.isDocClient) {
+      if (item instanceof Adapter.DbRaw) {
+        item = convertFrom(item, this.specialTypes);
+      } else if (item instanceof Adapter.Raw) {
+        // do nothing, we are good already
+      } else {
+        await this.validateItem(item, true);
+        item = this.prepare(item, true);
+      }
     } else {
-      await this.validateItem(item, true);
-      item = convertTo(this.prepare(item, true), this.specialTypes);
+      if (item instanceof Adapter.DbRaw) {
+        // do nothing, we are good already
+      } else if (item instanceof Adapter.Raw) {
+        item = convertTo(item, this.specialTypes);
+      } else {
+        await this.validateItem(item, true);
+        item = convertTo(this.prepare(item, true), this.specialTypes);
+      }
     }
     params = this.cloneParams(params);
     params.Key = this.toDynamoKey(key, params.IndexName);
@@ -245,7 +256,11 @@ class Adapter {
     options.consistent && (params.ConsistentRead = true);
     options.descending && (params.ScanIndexForward = false);
     project && options.fields && addProjection(params, options.fields, this.projectionFieldMap, skipSelect);
-    return filtering(options.filter, this.searchable, {fieldMap: fieldsToMap(options.fields, null, this.topLevelFieldMap), params});
+    return filtering(options.filter, this.searchable, {
+      fieldMap: fieldsToMap(options.fields, null, this.topLevelFieldMap),
+      isDocClient: this.isDocClient,
+      params
+    });
   }
 
   async scanAllByParams(params, fields, returnRaw) {
