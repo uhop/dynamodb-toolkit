@@ -241,6 +241,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 1.16.0 *Switched conversion to `AWS.DynamoDB.Convert`, added `getPath()` and `setPath()` utilities.*
 - 1.15.1 *Added `seq()` for sequential asynchronous operations.*
 - 1.15.0 *Updated API to work with "db-raw" objects from a database.*
 - 1.14.0 *Updated API to work with "raw" objects from a database.*
