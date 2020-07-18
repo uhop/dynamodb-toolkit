@@ -20,7 +20,7 @@ const filtering = (filter, searchable, {fieldMap, prefix = '-search-', params = 
 
   params.ExpressionAttributeNames = searchKeys.reduce(
     (acc, value, index) => ((acc['#sr' + (offset + index)] = prefix + value), acc),
-    params.ExpressionAttributeNames ? Object.assign({}, params.ExpressionAttributeNames) : {}
+    {...params.ExpressionAttributeNames}
   );
 
   const value = (filter + '').toLowerCase();

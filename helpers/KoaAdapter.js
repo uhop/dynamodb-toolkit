@@ -21,7 +21,7 @@ class KoaAdapter {
   }
 
   augmentCloneFromContext(ctx) {
-    return item => Object.assign({}, item, ctx.request.body);
+    return item => ({...item, ...ctx.request.body});
   }
 
   extractKeys(ctx, forceQuery) {

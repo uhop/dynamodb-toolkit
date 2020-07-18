@@ -3,7 +3,7 @@
 const getTotal = async (client, params) => {
   const action = params.KeyConditionExpression ? 'query' : 'scan';
   let counter = 0;
-  const p = Object.assign({}, params);
+  const p = {...params};
   delete p.ProjectionExpression;
   p.Select = 'COUNT';
   for (;;) {
