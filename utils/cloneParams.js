@@ -1,9 +1,9 @@
 'use strict';
 
 const cloneParams = params => {
-  params = Object.assign({}, params);
-  params.ExpressionAttributeNames = Object.assign({}, params.ExpressionAttributeNames);
-  params.ExpressionAttributeValues = Object.assign({}, params.ExpressionAttributeValues);
+  params = {...params};
+  params.ExpressionAttributeNames = {...params.ExpressionAttributeNames};
+  params.ExpressionAttributeValues = {...params.ExpressionAttributeValues};
   return params;
 };
 
