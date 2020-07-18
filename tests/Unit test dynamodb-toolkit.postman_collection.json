@@ -325,7 +325,7 @@
 			"response": []
 		},
 		{
-			"name": "Get a list of planets sorted",
+			"name": "Get a list of planets reverse sorted",
 			"event": [
 				{
 					"listen": "test",
@@ -390,7 +390,7 @@
 			"response": []
 		},
 		{
-			"name": "Get a list of planets filtered",
+			"name": "Get a list of planets reverse filtered",
 			"event": [
 				{
 					"listen": "test",
@@ -949,7 +949,7 @@
 			"response": []
 		},
 		{
-			"name": "Patch a planet (deep)",
+			"name": "Patch a planet (again)",
 			"event": [
 				{
 					"listen": "test",
@@ -976,22 +976,16 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n  \"terrain\": \"lakes\",\n  \"config\": {\"c\": \"three\"},\n  \"people\": \"beautiful\"\n}"
+					"raw": "{\n  \"terrain\": \"lakes\",\n  \"config.c\": \"three\",\n  \"people\": \"beautiful\"\n}"
 				},
 				"url": {
-					"raw": "localhost:3000/AAA%20Fake?deep=1",
+					"raw": "localhost:3000/AAA%20Fake",
 					"host": [
 						"localhost"
 					],
 					"port": "3000",
 					"path": [
 						"AAA%20Fake"
-					],
-					"query": [
-						{
-							"key": "deep",
-							"value": "1"
-						}
 					]
 				}
 			},
