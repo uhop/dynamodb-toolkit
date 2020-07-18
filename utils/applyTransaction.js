@@ -1,6 +1,6 @@
 'use strict';
 
-const doBatch = async (client, batch) => client.transactWriteItems({TransactItems: batch}).promise();
+const doBatch = async (client, action, batch) => client[action]({TransactItems: batch}).promise();
 
 const processBatchItem = batch => {
   switch (batch.action) {
@@ -16,6 +16,7 @@ const processBatchItem = batch => {
 };
 
 const applyTransaction = async (client, ...requests) => {
+  const action = typeof client.createSet == 'function' ? 'transactWrite' : 'transactWriteItems';
   let batch = [];
   for (const request of requests) {
     if (!request) continue;
@@ -30,7 +31,7 @@ const applyTransaction = async (client, ...requests) => {
     batchItem && batch.push(batchItem);
   }
   batch = batch.filter(item => item);
-  batch.length && (await doBatch(client, batch));
+  batch.length && (await doBatch(client, action, batch));
   return batch.length;
 };
 

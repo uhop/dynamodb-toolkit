@@ -1,6 +1,6 @@
 'use strict';
 
-const filtering = (filter, fieldMap, searchable, prefix = '-search-', params = {}) => {
+const filtering = (filter, searchable, {fieldMap, prefix = '-search-', params = {}, isDocClient} = {}) => {
   if (!filter) return params;
 
   let searchKeys = Object.keys(searchable);
@@ -23,8 +23,9 @@ const filtering = (filter, fieldMap, searchable, prefix = '-search-', params = {
     params.ExpressionAttributeNames ? Object.assign({}, params.ExpressionAttributeNames) : {}
   );
 
+  const value = (filter + '').toLowerCase();
   params.ExpressionAttributeValues = params.ExpressionAttributeValues || {};
-  params.ExpressionAttributeValues[':flt' + offset] = {S: (filter + '').toLowerCase()};
+  params.ExpressionAttributeValues[':flt' + offset] = isDocClient ? value : {S: value};
 
   return params;
 };

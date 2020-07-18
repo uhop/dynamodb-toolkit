@@ -46,7 +46,7 @@ const adapter = new Adapter({
       IndexName: index,
       KeyConditionExpression: '#t = :t',
       ExpressionAttributeNames: {'#t': '-t'},
-      ExpressionAttributeValues: {':t': {N: '1'}}
+      ExpressionAttributeValues: this.toDynamoRaw({':t': 1})
     };
   },
   revive(item, fieldMap) {

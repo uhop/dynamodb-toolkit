@@ -1,6 +1,6 @@
 'use strict';
 
-const doBatch = async (client, batch) => client.transactGetItems({TransactItems: batch}).promise();
+const doBatch = async (client, action, batch) => client[action]({TransactItems: batch}).promise();
 
 const processBatchItem = batch => {
   switch (batch.action) {
@@ -10,6 +10,7 @@ const processBatchItem = batch => {
 };
 
 const getTransaction = async (client, ...requests) => {
+  const action = typeof client.createSet == 'function' ? 'transactGet' : 'transactGetItems';
   let batch = [],
     adapters = [];
   for (const request of requests) {
@@ -28,7 +29,7 @@ const getTransaction = async (client, ...requests) => {
     batchItem && batch.push(batchItem);
   }
   if (!batch.length) return [];
-  const result = await doBatch(client, batch);
+  const result = await doBatch(client, action, batch);
   return result.responses.map((item, index) => ({table: batch[index].TableName, item: item && item.Item, adapter: adapters[index]}));
 };
 

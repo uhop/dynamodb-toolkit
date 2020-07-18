@@ -1,64 +1,8 @@
 'use strict';
 
-// "collect" routines work with a DB representation of the data
-
-const collectValuesRecursively = (o, prefix, values) => {
-  if (o.L) {
-    o.L.forEach((item, index) => collectValuesRecursively(item, prefix.concat(index), values));
-    return;
-  }
-  if (o.M) {
-    Object.keys(o.M).forEach(key => collectValuesRecursively(o.M[key], prefix.concat(key), values));
-    return;
-  }
-  values.push({path: prefix, value: o});
-};
-
-const collectValues = o => {
-  const values = [];
-  Object.keys(o).forEach(key => collectValuesRecursively(o[key], [key], values));
-  return values;
-};
-
-// TODO: add ADD and DELETE for arrays
-
-const prepareUpdate = (patch, params = {}) => {
-  const names = params.ExpressionAttributeNames || {},
-    values = params.ExpressionAttributeValues || {},
-    uniqueNames = {};
-  let keyCounter = Object.keys(names).length,
-    valueCounter = Object.keys(values).length;
-  const setActions = collectValues(patch).reduce((acc, item) => {
-    const path = item.path.map(key => {
-      if (typeof key == 'number') return key;
-      let alias = uniqueNames['#' + key];
-      if (!alias) {
-        alias = uniqueNames['#' + key] = '#ups' + keyCounter++;
-        names[alias] = key;
-      }
-      return alias;
-    });
-    const valueAlias = ':upv' + valueCounter++;
-    values[valueAlias] = item.value;
-    acc.push(path.join('.') + ' = ' + valueAlias);
-    return acc;
-  }, []);
-  Object.keys(names).length && (params.ExpressionAttributeNames = names);
-  if (setActions.length) {
-    params.ExpressionAttributeValues = values;
-    if (params.UpdateExpression) {
-      params.UpdateExpression += ' ';
-    } else {
-      params.UpdateExpression = '';
-    }
-    params.UpdateExpression += 'SET ' + setActions.join(', ');
-  }
-  return params;
-};
-
 const isInteger = /^\d+$/;
 
-const prepareFlatUpdate = (patch, deleteProps, params = {}, separator = '.') => {
+const prepareUpdate = (patch, deleteProps, params = {}, separator = '.') => {
   const names = params.ExpressionAttributeNames || {},
     values = params.ExpressionAttributeValues || {},
     uniqueNames = {};
@@ -103,7 +47,5 @@ const prepareFlatUpdate = (patch, deleteProps, params = {}, separator = '.') => 
   }
   return params;
 };
-
-prepareUpdate.flat = prepareFlatUpdate;
 
 module.exports = prepareUpdate;

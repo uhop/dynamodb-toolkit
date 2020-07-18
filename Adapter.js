@@ -40,6 +40,8 @@ class Adapter {
     this.topLevelFieldMap = true;
     // overlay
     Object.assign(this, options);
+    // add calculated fields
+    this.isDocClient = typeof this.client.createSet == 'function';
   }
 
   static make(options) {
@@ -48,7 +50,7 @@ class Adapter {
 
   // user-defined methods
 
-  prepare(item, isPatch, deep) {
+  prepare(item, isPatch) {
     // prepare to write it to a database
     // add some technical fields if required
     // returns a raw item
@@ -88,7 +90,7 @@ class Adapter {
     return rawItem;
   }
 
-  async validateItem(item, isPatch, deep) {
+  async validateItem(item, isPatch) {
     // this function should throw an exception if an item should not be written to DB
   }
 
@@ -131,27 +133,23 @@ class Adapter {
     return {action: 'put', params};
   }
 
-  async makePatch(key, item, deep, params) {
+  async makePatch(key, item, params) {
     const deleteProps = item.__delete;
     if (item instanceof Adapter.DbRaw) {
       // do nothing, we are good already
     } else if (item instanceof Adapter.Raw) {
       item = convertTo(item, this.specialTypes);
     } else {
-      await this.validateItem(item, true, deep);
-      item = convertTo(this.prepare(item, true, deep), this.specialTypes);
+      await this.validateItem(item, true);
+      item = convertTo(this.prepare(item, true), this.specialTypes);
     }
     params = this.cloneParams(params);
     params.Key = this.toDynamoKey(key, params.IndexName);
     params = this.checkExistence(params);
     this.keyFields.forEach(field => delete item[field]);
-    if (deep) {
-      params = prepareUpdate(item, params);
-    } else {
-      delete item.__delete;
-      params = prepareUpdate.flat(item, deleteProps, params);
-    }
-    params = cleanParams(this.updateParams(params, {name: 'patch', deep}));
+    delete item.__delete;
+    params = prepareUpdate(item, deleteProps, params);
+    params = cleanParams(this.updateParams(params, {name: 'patch'}));
     return {action: 'patch', params};
   }
 
@@ -166,11 +164,10 @@ class Adapter {
 
   async getByKey(key, fields, params, returnRaw) {
     const batch = await this.makeGet(key, fields, params);
-    const data = await this.client.getItem(batch.params).promise();
+    const action = this.isDocClient ? 'get' : 'getItem';
+    const data = await this.client[action](batch.params).promise();
     if (!data.Item) return; // undefined
-    if (returnRaw === 'db-raw') return new Adapter.DbRaw(data.Item);
-    if (returnRaw === 'raw') return new Adapter.Raw(convertFrom(data.Item));
-    return this.fromDynamo(data.Item, fieldsToMap(fields, null, this.topLevelFieldMap));
+    return this.fromDynamo(data.Item, fieldsToMap(fields, null, this.topLevelFieldMap), returnRaw);
   }
 
   async get(item, fields, params, returnRaw) {
@@ -183,7 +180,8 @@ class Adapter {
     if (checks) {
       return applyTransaction(this.client, checks, batch);
     }
-    return this.client.putItem(batch.params).promise();
+    const action = this.isDocClient ? 'put' : 'putItem';
+    return this.client[action](batch.params).promise();
   }
 
   async put(item, force, params) {
@@ -192,20 +190,22 @@ class Adapter {
     if (checks) {
       return applyTransaction(this.client, checks, batch);
     }
-    return this.client.putItem(batch.params).promise();
+    const action = this.isDocClient ? 'put' : 'putItem';
+    return this.client[action](batch.params).promise();
   }
 
-  async patchByKey(key, item, deep, params) {
-    const batch = await this.makePatch(key, item, deep, params),
+  async patchByKey(key, item, params) {
+    const batch = await this.makePatch(key, item, params),
       checks = await this.checkConsistency(batch);
     if (checks) {
       return applyTransaction(this.client, checks, batch);
     }
-    return this.client.updateItem(batch.params).promise();
+    const action = this.isDocClient ? 'update' : 'updateItem';
+    return this.client[action](batch.params).promise();
   }
 
-  async patch(item, deep, params) {
-    return this.patchByKey(item, item, deep, params);
+  async patch(item, params) {
+    return this.patchByKey(item, item, params);
   }
 
   async deleteByKey(key, params) {
@@ -214,7 +214,8 @@ class Adapter {
     if (checks) {
       return applyTransaction(this.client, checks, batch);
     }
-    return this.client.deleteItem(batch.params).promise();
+    const action = this.isDocClient ? 'delete' : 'deleteItem';
+    return this.client[action](batch.params).promise();
   }
 
   async delete(item, params) {
@@ -244,7 +245,7 @@ class Adapter {
     options.consistent && (params.ConsistentRead = true);
     options.descending && (params.ScanIndexForward = false);
     project && options.fields && addProjection(params, options.fields, this.projectionFieldMap, skipSelect);
-    return filtering(options.filter, fieldsToMap(options.fields, null, this.topLevelFieldMap), this.searchable, this.searchablePrefix, params);
+    return filtering(options.filter, this.searchable, {fieldMap: fieldsToMap(options.fields, null, this.topLevelFieldMap), params});
   }
 
   async scanAllByParams(params, fields, returnRaw) {
@@ -344,7 +345,7 @@ class Adapter {
   // generic implementations
 
   // async get(item, fields, params) { /* see above */ }
-  // async patch(item, deep, params) { /* see above */ }
+  // async patch(item, params) { /* see above */ }
   // async delete(item, params) { /* see above */ }
 
   // async cloneByKey(key, mapFn, force, params) { /* see above */ }
@@ -402,7 +403,7 @@ class Adapter {
     let processed = 0;
     while (params) {
       const result = await readList.getItems(this.client, params),
-        items = result.items.map(item => this.fromDynamo(item, null, 'db-raw'));
+        items = result.items.map(item => this.fromDynamo(item, null, this.isDocClient ? 'raw' : 'db-raw'));
       processed += await this.cloneByKeys(items, mapFn, returnRaw);
       params = result.nextParams;
     }
@@ -453,27 +454,50 @@ class Adapter {
   }
 
   fromDynamo(item, fieldMap, returnRaw) {
+    if (this.isDocClient) {
+      if (returnRaw === 'db-raw') return new Adapter.DbRaw(convertFrom(item, this.specialTypes));
+      if (returnRaw === 'raw') return new Adapter.Raw(item);
+      return this.revive(item, fieldMap);
+    }
     if (returnRaw === 'db-raw') return new Adapter.DbRaw(item);
-    const rawItem = convertFrom(item);
+    const rawItem = convertFrom(item, this.specialTypes);
     if (returnRaw === 'raw') return new Adapter.Raw(rawItem);
     return this.revive(rawItem, fieldMap);
   }
 
   toDynamo(item) {
+    if (this.isDocClient) {
+      if (item instanceof Adapter.DbRaw) return convertFrom(item, this.specialTypes);
+      if (item instanceof Adapter.Raw) return item;
+      return this.prepare(item);
+    }
     if (item instanceof Adapter.DbRaw) return item;
     if (item instanceof Adapter.Raw) return convertTo(item, this.specialTypes);
     return convertTo(this.prepare(item), this.specialTypes);
   }
 
   toDynamoKey(key, index) {
+    if (this.isDocClient) {
+      if (key instanceof Adapter.DbRaw) return convertFrom(this.restrictKey(key, index), this.specialTypes);
+      if (key instanceof Adapter.Raw) return this.restrictKey(key, index);
+      return this.prepareKey(key, index);
+    }
     if (key instanceof Adapter.DbRaw) return this.restrictKey(key, index);
     if (key instanceof Adapter.Raw) return convertTo(this.restrictKey(key, index), this.specialTypes);
     return convertTo(this.prepareKey(key, index), this.specialTypes);
   }
 
-  async validateItems(items, isPatch, deep) {
+  fromDynamoRaw(item) {
+    return this.isDocClient ? item : convertFrom(item);
+  }
+
+  toDynamoRaw(item) {
+    return this.isDocClient ? item : convertTo(item);
+  }
+
+  async validateItems(items, isPatch) {
     for (let i = 0; i < items.length; ++i) {
-      await this.validateItem(items[i], isPatch, deep);
+      await this.validateItem(items[i], isPatch);
     }
   }
 }

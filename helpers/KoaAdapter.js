@@ -71,7 +71,7 @@ class KoaAdapter {
 
   async patch(ctx) {
     const item = this.augmentItemFromContext(ctx.request.body, ctx);
-    await this.adapter.patch(item, isTrue(ctx.query, 'deep'));
+    await this.adapter.patch(item);
     ctx.status = 204;
   }
 

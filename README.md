@@ -27,8 +27,8 @@ Supports out-of-the-box the following operations:
   * `put(item [, force [, params]])`
   * `delete(key [, params])` AKA `deleteByKey(key [, params])`
 * Special operations:
-  * `patch(item [, deep [, params]])` based on `patchByKey(key, item [, force [, params]])`
-  * `clone(item, mapFn [, deep [, params]])` AKA `cloneByKey(key, mapFn [, force [, params]])`
+  * `patch(item [, params])` based on `patchByKey(key, item [, force [, params]])`
+  * `clone(item, mapFn [, force [, params]])` AKA `cloneByKey(key, mapFn [, force [, params]])`
 * Mass operation building blocks:
   * `getAllByParams(params, options [, fields])`
   * `getByKeys(keys [, fields [, params]])`
