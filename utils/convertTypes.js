@@ -10,8 +10,6 @@ const defaultOptions = {convertEmptyValues: false, wrapNumbers: false};
 
 // deal with the DynamoDB data representation
 
-const isIndex = /^\d+$/;
-
 const setDynamoPath = (o, path, value, separator = '.') => {
   if (typeof path == 'string') path = path.split(separator);
   let type = 'M';
