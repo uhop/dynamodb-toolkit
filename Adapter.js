@@ -2,6 +2,7 @@
 
 const applyTransaction = require('./utils/applyTransaction');
 const addProjection = require('./utils/addProjection');
+const converter = require('./utils/converter');
 const {convertTo, convertFrom} = require('./utils/convertTypes');
 const prepareUpdate = require('./utils/prepareUpdate');
 const paginateList = require('./utils/paginateList');
@@ -31,7 +32,8 @@ class DbRaw extends Raw {
 
 class Adapter {
   constructor(options) {
-    // defaults
+    // set defaults
+    this.converter = converter;
     this.keyFields = [];
     this.specialTypes = {};
     this.projectionFieldMap = {};
@@ -137,7 +139,7 @@ class Adapter {
     const deleteProps = item.__delete;
     if (this.isDocClient) {
       if (item instanceof Adapter.DbRaw) {
-        item = convertFrom(item, this.specialTypes);
+        item = this.convertFrom(item);
       } else if (item instanceof Adapter.Raw) {
         // do nothing, we are good already
       } else {
@@ -148,10 +150,10 @@ class Adapter {
       if (item instanceof Adapter.DbRaw) {
         // do nothing, we are good already
       } else if (item instanceof Adapter.Raw) {
-        item = convertTo(item, this.specialTypes);
+        item = this.convertTo(item);
       } else {
         await this.validateItem(item, true);
-        item = convertTo(this.prepare(item, true), this.specialTypes);
+        item = this.convertTo(this.prepare(item, true));
       }
     }
     params = this.cloneParams(params);
@@ -468,46 +470,54 @@ class Adapter {
     return addProjection(params, this.keyFields.join(','), null, skipSelect);
   }
 
+  convertTo(item, ignoreSpecialTypes) {
+    return convertTo(this.converter, item, ignoreSpecialTypes ? null : this.specialTypes);
+  }
+
+  convertFrom(item, ignoreSpecialTypes) {
+    return convertFrom(this.converter, item, ignoreSpecialTypes ? null : this.specialTypes);
+  }
+
   fromDynamo(item, fieldMap, returnRaw) {
     if (this.isDocClient) {
-      if (returnRaw === 'db-raw') return new Adapter.DbRaw(convertFrom(item, this.specialTypes));
+      if (returnRaw === 'db-raw') return new Adapter.DbRaw(this.convertFrom(item));
       if (returnRaw === 'raw') return new Adapter.Raw(item);
       return this.revive(item, fieldMap);
     }
     if (returnRaw === 'db-raw') return new Adapter.DbRaw(item);
-    const rawItem = convertFrom(item, this.specialTypes);
+    const rawItem = this.convertFrom(item);
     if (returnRaw === 'raw') return new Adapter.Raw(rawItem);
     return this.revive(rawItem, fieldMap);
   }
 
   toDynamo(item) {
     if (this.isDocClient) {
-      if (item instanceof Adapter.DbRaw) return convertFrom(item, this.specialTypes);
+      if (item instanceof Adapter.DbRaw) return this.convertFrom(item);
       if (item instanceof Adapter.Raw) return item;
       return this.prepare(item);
     }
     if (item instanceof Adapter.DbRaw) return item;
-    if (item instanceof Adapter.Raw) return convertTo(item, this.specialTypes);
-    return convertTo(this.prepare(item), this.specialTypes);
+    if (item instanceof Adapter.Raw) return this.convertTo(item);
+    return this.convertTo(this.prepare(item));
   }
 
   toDynamoKey(key, index) {
     if (this.isDocClient) {
-      if (key instanceof Adapter.DbRaw) return convertFrom(this.restrictKey(key, index), this.specialTypes);
+      if (key instanceof Adapter.DbRaw) return this.convertFrom(this.restrictKey(key, index));
       if (key instanceof Adapter.Raw) return this.restrictKey(key, index);
       return this.prepareKey(key, index);
     }
     if (key instanceof Adapter.DbRaw) return this.restrictKey(key, index);
-    if (key instanceof Adapter.Raw) return convertTo(this.restrictKey(key, index), this.specialTypes);
-    return convertTo(this.prepareKey(key, index), this.specialTypes);
+    if (key instanceof Adapter.Raw) return this.convertTo(this.restrictKey(key, index));
+    return this.convertTo(this.prepareKey(key, index));
   }
 
   fromDynamoRaw(item) {
-    return this.isDocClient ? item : convertFrom(item);
+    return this.isDocClient ? item : this.convertFrom(item, true);
   }
 
   toDynamoRaw(item) {
-    return this.isDocClient ? item : convertTo(item);
+    return this.isDocClient ? item : this.convertTo(item, true);
   }
 
   async validateItems(items, isPatch) {

@@ -1,10 +1,7 @@
 'use strict';
 
-const AWS = require('aws-sdk');
 const getPath = require('./getPath');
 const setPath = require('./setPath');
-
-const cvt = AWS.DynamoDB.Converter;
 
 const defaultOptions = {convertEmptyValues: false, wrapNumbers: false};
 
@@ -22,8 +19,8 @@ const setDynamoPath = (o, path, value, separator = '.') => {
   return (o[path[path.length - 1]] = value);
 };
 
-const convertFrom = (item, useType) => {
-  const result = cvt.unmarshall(item, defaultOptions);
+const convertFrom = (converter, item, useType) => {
+  const result = converter.unmarshall(item, defaultOptions);
   if (!useType) return result;
   Object.keys(useType).forEach(name => {
     const names = name.split('.'),
@@ -47,8 +44,8 @@ const convertFrom = (item, useType) => {
   return result;
 };
 
-const convertTo = (item, useType) => {
-  const result = cvt.marshall(item, defaultOptions);
+const convertTo = (converter, item, useType) => {
+  const result = converter.marshall(item, defaultOptions);
   if (!useType) return result;
   Object.keys(useType).forEach(name => {
     const names = name.split('.'),
