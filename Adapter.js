@@ -39,7 +39,7 @@ class Adapter {
     this.projectionFieldMap = {};
     this.searchable = {};
     this.searchablePrefix = '-search-';
-    this.topLevelFieldMap = true;
+    this.topLevelFieldMap = false;
     // overlay
     Object.assign(this, options);
     // add calculated fields
