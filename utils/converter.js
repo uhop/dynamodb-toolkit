@@ -53,7 +53,7 @@ const Converter = {
   },
 
   output: (data, options) => {
-    const useSets = options && options.useSets,
+    const useArraysForSets = options && options.useArraysForSets,
       types = Object.keys(data);
     switch (types[0]) {
       case 'N':
@@ -66,12 +66,12 @@ const Converter = {
         return Object.keys(data.M).reduce((acc, key) => ((acc[key] = Converter.output(data.M[key], options)), acc), {});
       case 'NS': {
         const array = data.NS.map(n => +n);
-        return useSets ? new Set(array) : array;
+        return useArraysForSets ? array: new Set(array);
       }
       case 'BS':
       case 'SS': {
         const array = data[types[0]];
-        return useSets ? new Set(array) : array;
+        return useArraysForSets ? array : new Set(array);
       }
       default:
         return data[types[0]];

@@ -34,6 +34,7 @@ class Adapter {
   constructor(options) {
     // set defaults
     this.converter = converter;
+    this.converterOptions = null;
     this.keyFields = [];
     this.specialTypes = {};
     this.projectionFieldMap = {};
@@ -471,11 +472,11 @@ class Adapter {
   }
 
   convertTo(item, ignoreSpecialTypes) {
-    return convertTo(this.converter, item, ignoreSpecialTypes ? null : this.specialTypes);
+    return convertTo(this.converter, item, ignoreSpecialTypes ? null : this.specialTypes, this.converterOptions);
   }
 
   convertFrom(item, ignoreSpecialTypes) {
-    return convertFrom(this.converter, item, ignoreSpecialTypes ? null : this.specialTypes);
+    return convertFrom(this.converter, item, ignoreSpecialTypes ? null : this.specialTypes, this.converterOptions);
   }
 
   fromDynamo(item, fieldMap, returnRaw) {

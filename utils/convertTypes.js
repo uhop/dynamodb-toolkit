@@ -19,8 +19,8 @@ const setDynamoPath = (o, path, value, separator = '.') => {
   return (o[path[path.length - 1]] = value);
 };
 
-const convertFrom = (converter, item, useType) => {
-  const result = converter.unmarshall(item, defaultOptions);
+const convertFrom = (converter, item, useType, options = defaultOptions) => {
+  const result = converter.unmarshall(item, options);
   if (!useType) return result;
   Object.keys(useType).forEach(name => {
     const names = name.split('.'),
@@ -44,8 +44,8 @@ const convertFrom = (converter, item, useType) => {
   return result;
 };
 
-const convertTo = (converter, item, useType) => {
-  const result = converter.marshall(item, defaultOptions);
+const convertTo = (converter, item, useType, options = defaultOptions) => {
+  const result = converter.marshall(item, options);
   if (!useType) return result;
   Object.keys(useType).forEach(name => {
     const names = name.split('.'),
