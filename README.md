@@ -7,47 +7,103 @@ No-dependencies micro-library for [AWS DynamoDB](https://aws.amazon.com/dynamodb
 
 Helps with:
 
-* Encoding/decoding your beautiful JSON data to and fro DynamoDB internal format.
-* Working with multiple databases at the same time potentially using different credentials.
+* Flexible way to prepare your data objects for storing and revive it back:
+  * Supports complex indexing: design your own queries!
+  * Validate objects before storing.
+  * Check consistency of a database before storing objects.
+  * Rich set of efficient read/write/delete/clone operations.
+  * Various low-level and high-level utilities for DynamoDB.
+* Automatically encoding/decoding your beautiful JSON data to and fro DynamoDB internal format.
+  * Supports [AWS.DynamoDB](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/DynamoDB.html) clients.
+  * Supports [AWS.DynamoDB.DocumentClient](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/DynamoDB/DocumentClient.html) clients.
 * Supports vagaries of mass read/write/delete operations correctly handling throughput-related errors using the recommended exponential back-off algorithm.
-* Implements efficiently on the server:
+  * Supports transactions and batch requests.
+* Implements **efficiently on the server**:
   * **Paging** (in offset/limit terms) and **sorting** on an index (both ascending and descending).
   * **Subsetting** AKA **projection** (read operations can return a subset required of fields instead of the whole shebang which can be huge especially for mass read operations &mdash; think lists and tables).
-  * **Searching** AKA **filtering** (filters results using looking for a substring in a predefined set of fields).
+  * **Searching** AKA **filtering** (filters results looking for a substring in a predefined set of fields).
   * **Patching** (only necessary fields are transferred to be updated/deleted).
   * **Cloning** (making updated copies in a database).
-* Flexible, thoroughly asynchronous.
+* Thoroughly asynchronous.
+* Working with multiple databases at the same time potentially using different credentials.
 
-Supports out-of-the-box the following operations:
+Includes the following operations:
 
 * Standard REST:
-  * `get(key [, fields [, params]])` AKA `getByKey(key [, fields [, params]])`
+  * `get(key [, fields [, params [, returnRaw]]])`
+    * AKA `getByKey(key [, fields [, params [, returnRaw]]])`
   * `post(item)`
   * `put(item [, force [, params]])`
-  * `delete(key [, params])` AKA `deleteByKey(key [, params])`
+  * `delete(key [, params])`
+    * AKA `deleteByKey(key [, params])`
 * Special operations:
   * `patch(item [, params])` based on `patchByKey(key, item [, force [, params]])`
-  * `clone(item, mapFn [, force [, params]])` AKA `cloneByKey(key, mapFn [, force [, params]])`
+  * `clone(item, mapFn [, force [, params [, returnRaw]]])`
+    * AKA `cloneByKey(key, mapFn [, force [, params [, returnRaw]]])`
+* Batch/transaction helpers:
+  * `makeGet(key [, fields [, params]])`
+  * `makePost(item)`
+  * `makePut(item [, force [, params]])`
+  * `makeDelete(key [, params])`
+  * `makeCheck(key [, params])`
+  * `makePatch(key, item [, params])`
 * Mass operation building blocks:
-  * `getAllByParams(params, options [, fields])`
-  * `getByKeys(keys [, fields [, params]])`
-  * `getAll(options, item [, index])`
+  * `scanAllByParams(params [, fields [, returnRaw]])`
+  * `getAllByParams(params [, options [, returnRaw]])`
+  * `getByKeys(keys [, fields [, params [, returnRaw]]])`
+  * `getAll(options, item [, index [, returnRaw]])`
   * `putAll(items)`
   * `deleteAllByParams(params)`
   * `deleteByKeys(keys)`
   * `deleteAll(options, item [, index])`
-  * `cloneAllByParams(params, mapFn)`
-  * `cloneByKeys(keys, mapFn)`
-  * `cloneAll(options, mapFn, item [, index])`
+  * `cloneAllByParams(params, mapFn [, returnRaw])`
+  * `cloneByKeys(keys, mapFn [, returnRaw])`
+  * `cloneAll(options, mapFn, item [, index [, returnRaw]])`
+* Alternative generic implementations formulated in terms of other methods:
+  * `genericGetByKeys(keys [, fields [, params [, returnRaw]]])`
+  * `genericPutAll(items)`
+  * `genericDeleteAllByParams(params)`
+  * `genericDeleteByKeys(keys)`
+  * `genericCloneAllByParams(params, mapFn [, returnRaw])`
+  * `genericCloneByKeys(keys, mapFn [, returnRaw])`
 * Utilities:
-  * `makeParams(options, project, params, skipSelect)` &mdash; prepares a DynamoDB `params`.
+  * `makeParams(options [, project [, params [, skipSelect]]])` &mdash; prepares a DynamoDB `params`.
   * `cloneParams(params)` &mdash; a shallow copy of `params` with forcing a table name.
-  * `fromDynamo(item, fieldMap)` &mdash; imports data from the DynamoDB format.
-  * `toDynamo(item)` &mdash; exports data to the DynamoDB format.
-  * `toDynamoKey(item, index)` &mdash; exports a key to the DynamoDB format for a given index.
+  * `cleanGetParams(params)` &mdash; removes `ConditionExpression` from `params`.
+  * `checkExistence(params [, invert])` &mdash; generates an (non-)existence of an item.
+  * `makeListParams(options, project, item [, index])` &mdash; prepares `params` to list items.
+  * `addKeyFields(params [, skipSelect])` &mdash; adds a projection of key fields to `params`.
+  * `convertTo(item [, ignoreSpecialTypes])` &mdash; converts to the DynamoDB internal format.
+  * `convertFrom(item [, ignoreSpecialTypes])` &mdash; converts from the DynamoDB internal format.
+  * `fromDynamo(item [, fields [, returnRaw]])` &mdash; converts to a given format. Runs user-defined transformations.
+  * `toDynamo(item)` &mdash; converts any supported format to a given DynamoDB client. Runs user-defined transformations.
+  * `toDynamoKey(key [, index])` &mdash; converts an item to a valid DynamoDB key. Runs user-defined transformations.
+  * `fromDynamoRaw(item)` &mdash; converts from a client-specific format.
+  * `toDynamoRaw(item)` &mdash; converts to a client-specific format.
+  * `validateItems(items [, isPatch])` &mdash; asynchronously validates all items.
 
-The library provides a helper for [Koa](https://koajs.com/) to write HTTP REST servers. It takes care of query parameters, extracts POST/PUT JSON bodies,
-sends responses encoded as JSON with proper HTTP status codes, and prepares parameters for mass operations.
+In order to have all machinery working properly, a user should define the following properties, or rely on defaults:
+
+* Data properties:
+  * `keyFields` &mdash; a required list of keys starting with the partition key.
+  * `specialTypes` &mdash; an optional dictionary, which arrays should be stored as DynamoDB sets.
+  * `projectionFieldMap` &mdash; an optional dictionary to map top-level properties to different fields.
+    * Frequently used with hierarchical indicies.
+  * `searchable` &mdash; an optional dictionary of searchable top-level fields.
+  * `searchablePrefix` &mdash; an optional prefix to create technical searchable fields.
+* Methods:
+  * `prepare(item [, isPatch])` &mdash; prepares an item to be stored in a database. It can add or transform properties.
+  * `prepareKey(key [, index])` &mdash; prepares a database key.
+  * `restrictKey(rawKey [, index])` &mdash; removes unwanted properties from a key. Different indices may have different set of properties.
+  * `prepareListParams(item [, index])` &mdash; creates `params` for a given item and an index to list related items.
+  * `updateParams(params, options)` &mdash; updates `params` for different writing operations.
+  * `revive(rawItem [, fields])` &mdash; transforms an item after reading it from a database. Its counterpart is `prepare()`.
+  * `validateItem(item [, isPatch])` &mdash; asynchronously validates an item.
+  * `checkConsistency(batch)` &mdash; asynchronously produces an additional batch of operations to check for consistency before updating a database.
+
+The library provides a helper for [Koa](https://koajs.com/) to write HTTP REST servers. It takes care of query parameters,
+extracts POST/PUT JSON bodies, sends responses encoded as JSON with proper HTTP status codes, and prepares parameters for
+mass operations.
 
 # Example
 
