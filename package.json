@@ -28,5 +28,10 @@
     "koa": "^2.13.0",
     "koa-body": "^4.2.0",
     "koa-router": "^9.1.0"
-  }
+  },
+  "files": [
+    "/*.js",
+    "/utils",
+    "/helpers"
+  ]
 }

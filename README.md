@@ -1,8 +1,7 @@
-# dynamodb-toolkit
+# dynamodb-toolkit [![NPM version][npm-img]][npm-url]
 
-[![Dependencies][deps-image]][deps-url]
-[![devDependencies][dev-deps-image]][dev-deps-url]
-[![NPM version][npm-image]][npm-url]
+[npm-img]:      https://img.shields.io/npm/v/dynamodb-toolkit.svg
+[npm-url]:      https://npmjs.org/package/dynamodb-toolkit
 
 No-dependencies micro-library for [AWS DynamoDB](https://aws.amazon.com/dynamodb/) to build small efficient RESTful APIs and high-performance command-line utilities.
 
@@ -65,20 +64,16 @@ const Router = require('koa-router');
 
 const AWS = require('aws-sdk');
 
-const Adapter = require('dynamodb-toolkit');
-const KoaAdapter = require('dynamodb-toolkit/helpers/KoaAdapter');
+const Adapter = require('../Adapter');
+const KoaAdapter = require('../helpers/KoaAdapter');
+const makeClient = require('../utils/makeClient');
+const subsetObject = require('../utils/subsetObject');
 ```
 
 ## Create a DynamoDB client
 
 ```js
-AWS.config.update({region: 'us-east-1'});
-const client = new AWS.DynamoDB();
-
-// Example with different credentials:
-// const credentials = new AWS.SharedIniFileCredentials(
-//   {profile: 'production'});
-// const client = new AWS.DynamoDB({credentials: credentials});
+const client = makeClient(AWS, {docClient: false});
 ```
 
 ## Define a DynamoDB adapter
@@ -89,50 +84,59 @@ const adapter = new Adapter({
   table: 'test',
   keyFields: ['name'],
   searchable: {name: 1, climate: 1, terrain: 1}, // searchable fields
-  prepare(item) {
+
+  prepare(item, isPatch) {
     // convert to an item which will be stored in a database
     // we can add some technical fields, e.g., fields to search on
     const data = Object.keys(item).reduce((acc, key) => {
       if (key.charAt(0) !== '-') {
         acc[key] = item[key];
-        if (this.searchable[key] === 1)
+        if (this.searchable[key] === 1) {
           acc['-search-' + key] = (item[key] + '').toLowerCase();
+        }
       }
       return acc;
     }, {});
-    data['-t'] = 1;
+    if (isPatch) {
+      delete data.name; // removes the key field
+    } else {
+      data['-t'] = 1; // create the technical field for an index
+    }
     return data;
   },
-  revive(item, fieldMap) {
-    // convert back to our original item
-    // we can remove all technical fields we added before
-    return Object.keys(item).reduce((acc, key) => {
-      if (!fieldMap || fieldMap[key] === 1) {
-        acc[key] = item[key];
-      }
-      return acc;
-    }, {});
-  },
+
   prepareKey(item, index) {
     // make a key for our database
     const key = {name: item.name};
-    if (index) {
+    if (index) { // we have only one index
       // our index requires an artificial field
       key.IndexName = index;
       key['-t'] = 1;
     }
     return key;
   },
+
   prepareListParams(_, index) {
     // prepare params for a list of items
-    return index
-      ? {
-          IndexName: index,
-          KeyConditionExpression: '#t = :t',
-          ExpressionAttributeNames: {'#t': '-t'},
-          ExpressionAttributeValues: {':t': {N: '1'}}
-        }
-      : {};
+    index = index || '-t-name-index';
+    return {
+      IndexName: index,
+      KeyConditionExpression: '#t = :t',
+      ExpressionAttributeNames: {'#t': '-t'},
+      ExpressionAttributeValues: this.toDynamoRaw({':t': 1})
+    };
+  },
+
+  revive(item, fields) {
+    // convert back to our original item returning only requested fields
+    if (fields) return subsetObject(item, fields);
+    // custom subsetting: remove all technical fields
+    return Object.keys(item).reduce((acc, key) => {
+      if (key.charAt(0) !== '-') {
+        acc[key] = item[key];
+      }
+      return acc;
+    }, {});
   }
 });
 ```
@@ -140,38 +144,26 @@ const adapter = new Adapter({
 We mostly defined how to transform our object to something we keep in a database and back.
 By default these operations just return their `item` parameter so we don't need to specify them if we don't want any transformations.
 
-## Define Koa helpers
-
-```js
-// takes names from the query and constructs keys
-const namesToKeys = ctx => {
-  if (!ctx.query.names) throw new Error('Query parameter "names" was expected.');
-  return ctx.query.names
-    .split(',')
-    .map(name => name.trim())
-    .filter(name => name)
-    .map(name => ({name}));
-};
-
-// simple custom clone function, which updates a name
-const cloneFn = item => ({...item, name: item.name + ' COPY'});
-```
-
 ## Define a Koa adapter
 
 ```js
 const koaAdapter = new KoaAdapter(adapter, {
-  sortableIndices: {name: '-t-name-index'}, // sorting by name uses this index
-  augmentFromContext(item, ctx) {
+  sortableIndices: {name: '-t-name-index'},
+
+  augmentItemFromContext(item, ctx) {
     if (ctx.params.planet) {
       item.name = ctx.params.planet;
     }
     return item;
   },
-  async clone(ctx) {
-    return this.doClone(ctx, cloneFn);
+
+  augmentCloneFromContext(ctx) {
+    // how to transform an object when cloning (the default)
+    return item => ({...item, name: item.name + ' COPY'});
   },
+
   async getAll(ctx) {
+    // custom getAll(), which supports sorting
     let index, descending;
     if (ctx.query.sort) {
       let sortName = ctx.query.sort;
@@ -183,24 +175,12 @@ const koaAdapter = new KoaAdapter(adapter, {
     descending && (options.descending = true);
     ctx.body = await this.adapter.getAll(options, null, index);
   },
-  async cloneAll(ctx) {
-    return this.doCloneAll(ctx, cloneFn);
-  },
+
   async load(ctx) {
+    // custom operation
     const data = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, 'data.json.gz'))));
     await this.adapter.putAll(data);
     ctx.body = {processed: data.length};
-  },
-  // by-names operations
-  async getByNames(ctx) {
-    const params = this.makeParams(ctx);
-    ctx.body = await this.adapter.getByKeys(namesToKeys(ctx), ctx.query.fields, params);
-  },
-  async deleteByNames(ctx) {
-    ctx.body = {processed: await this.adapter.deleteByKeys(namesToKeys(ctx))};
-  },
-  async cloneByNames(ctx) {
-    ctx.body = {processed: await this.adapter.cloneByKeys(namesToKeys(ctx), cloneFn)};
   }
 });
 ```
@@ -241,6 +221,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 2.0.0 *Minor API change, better support for paths, support for `AWS.DynamoDB.DocumentClient`, and so on.*
 - 1.16.0 *Switched conversion to `AWS.DynamoDB.Convert`, added `getPath()` and `setPath()` utilities.*
 - 1.15.1 *Added `seq()` for sequential asynchronous operations.*
 - 1.15.0 *Updated API to work with "db-raw" objects from a database.*
@@ -295,11 +276,3 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 # Acknowledgements
 
 The test JSON file containing planets of the Star Wars universe is extracted from [SWAPI](https://swapi.co/) and used under BSD license.
-
-
-[npm-image]:       https://img.shields.io/npm/v/dynamodb-toolkit.svg
-[npm-url]:         https://npmjs.org/package/dynamodb-toolkit
-[deps-image]:      https://img.shields.io/david/uhop/dynamodb-toolkit.svg
-[deps-url]:        https://david-dm.org/uhop/dynamodb-toolkit
-[dev-deps-image]:  https://img.shields.io/david/dev/uhop/dynamodb-toolkit.svg
-[dev-deps-url]:    https://david-dm.org/uhop/dynamodb-toolkit?type=dev
