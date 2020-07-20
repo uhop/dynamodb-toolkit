@@ -9,6 +9,7 @@ const AWS = require('aws-sdk');
 const Adapter = require('../Adapter');
 const KoaAdapter = require('../helpers/KoaAdapter');
 const makeClient = require('../utils/makeClient');
+const subsetObject = require('../utils/subsetObject');
 
 const client = makeClient(AWS, {docClient: false});
 
@@ -49,15 +50,9 @@ const adapter = new Adapter({
       ExpressionAttributeValues: this.toDynamoRaw({':t': 1})
     };
   },
-  revive(item, fieldMap) {
-    if (fieldMap) {
-      return Object.keys(item).reduce((acc, key) => {
-        if (fieldMap[key] === 1) {
-          acc[key] = item[key];
-        }
-        return acc;
-      }, {});
-    }
+  revive(item, fields) {
+    if (fields) return subsetObject(item, fields);
+    // custom subsetting: remove all technical properties
     return Object.keys(item).reduce((acc, key) => {
       if (key.charAt(0) !== '-') {
         acc[key] = item[key];

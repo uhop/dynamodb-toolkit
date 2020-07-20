@@ -1,6 +1,6 @@
 'use strict';
 
-const fieldsToMap = require('./fieldsToMap');
+const normalizeFields = require('./normalizeFields');
 
 // form a project expression for DynamoDB
 
@@ -8,7 +8,7 @@ const isInteger = /^\d+$/;
 
 const addProjection = (params, fields, projectionFieldMap, skipSelect, separator = '.') => {
   if (!fields) return params;
-  fields = fieldsToMap(fields, projectionFieldMap);
+  fields = normalizeFields(fields, projectionFieldMap);
   if (!fields) return params;
   const names = params.ExpressionAttributeNames || {},
     uniqueNames = {};

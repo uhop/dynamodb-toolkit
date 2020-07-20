@@ -10,10 +10,10 @@ const deleteList = require('./utils/deleteList');
 const copyList = require('./utils/copyList');
 const readList = require('./utils/readList');
 const writeList = require('./utils/writeList');
-const fieldsToMap = require('./utils/fieldsToMap');
 const filtering = require('./utils/filtering');
 const cleanParams = require('./utils/cleanParams');
 const cloneParams = require('./utils/cloneParams');
+const subsetObject = require('./utils/subsetObject');
 
 class Raw {
   constructor(source) {
@@ -40,7 +40,6 @@ class Adapter {
     this.projectionFieldMap = {};
     this.searchable = {};
     this.searchablePrefix = '-search-';
-    this.topLevelFieldMap = false;
     // overlay
     Object.assign(this, options);
     // add calculated fields
@@ -87,9 +86,10 @@ class Adapter {
     return params;
   }
 
-  revive(rawItem, fieldMap) {
+  revive(rawItem, fields) {
     // reconstitute a database object
     // remove some technical fields if required
+    if (fields) return subsetObject(item, fields);
     return rawItem;
   }
 
@@ -181,7 +181,7 @@ class Adapter {
     const action = this.isDocClient ? 'get' : 'getItem';
     const data = await this.client[action](batch.params).promise();
     if (!data.Item) return; // undefined
-    return this.fromDynamo(data.Item, fieldsToMap(fields, null, this.topLevelFieldMap), returnRaw);
+    return this.fromDynamo(data.Item, fields, returnRaw);
   }
 
   async get(item, fields, params, returnRaw) {
@@ -260,7 +260,7 @@ class Adapter {
     options.descending && (params.ScanIndexForward = false);
     project && options.fields && addProjection(params, options.fields, this.projectionFieldMap, skipSelect);
     return filtering(options.filter, this.searchable, {
-      fieldMap: fieldsToMap(options.fields, null, this.topLevelFieldMap),
+      fields: options.fields,
       isDocClient: this.isDocClient,
       params
     });
@@ -273,8 +273,7 @@ class Adapter {
     if (returnRaw === 'db-raw' || returnRaw === 'raw') {
       transformFn = item => this.fromDynamo(item, null, returnRaw);
     } else {
-      const fieldMap = fieldsToMap(fields, null, this.topLevelFieldMap);
-      transformFn = item => this.fromDynamo(item, fieldMap);
+      transformFn = item => this.fromDynamo(item, fields);
     }
     return {nextParams: result.nextParams, items: result.items.map(transformFn)};
   }
@@ -286,8 +285,7 @@ class Adapter {
     if (returnRaw === 'db-raw' || returnRaw === 'raw') {
       transformFn = item => this.fromDynamo(item, null, returnRaw);
     } else {
-      const fieldMap = fieldsToMap(options && options.fields, null, this.topLevelFieldMap);
-      transformFn = item => this.fromDynamo(item, fieldMap);
+      transformFn = item => this.fromDynamo(item, options && options.fields);
     }
     result.data = result.data.map(transformFn);
     return result;
@@ -306,8 +304,7 @@ class Adapter {
     if (returnRaw === 'db-raw' || returnRaw === 'raw') {
       transformFn = item => this.fromDynamo(item, null, returnRaw);
     } else {
-      const fieldMap = fieldsToMap(fields, null, this.topLevelFieldMap);
-      transformFn = item => this.fromDynamo(item, fieldMap);
+      transformFn = item => this.fromDynamo(item, fields);
     }
     return items.map(transformFn);
   }
@@ -479,16 +476,16 @@ class Adapter {
     return convertFrom(this.converter, item, ignoreSpecialTypes ? null : this.specialTypes, this.converterOptions);
   }
 
-  fromDynamo(item, fieldMap, returnRaw) {
+  fromDynamo(item, fields, returnRaw) {
     if (this.isDocClient) {
       if (returnRaw === 'db-raw') return new Adapter.DbRaw(this.convertFrom(item));
       if (returnRaw === 'raw') return new Adapter.Raw(item);
-      return this.revive(item, fieldMap);
+      return this.revive(item, fields);
     }
     if (returnRaw === 'db-raw') return new Adapter.DbRaw(item);
     const rawItem = this.convertFrom(item);
     if (returnRaw === 'raw') return new Adapter.Raw(rawItem);
-    return this.revive(rawItem, fieldMap);
+    return this.revive(rawItem, fields);
   }
 
   toDynamo(item) {
