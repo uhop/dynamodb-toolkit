@@ -101,6 +101,8 @@ In order to have all machinery working properly, a user should define the follow
   * `validateItem(item [, isPatch])` &mdash; asynchronously validates an item.
   * `checkConsistency(batch)` &mdash; asynchronously produces an additional batch of operations to check for consistency before updating a database.
 
+# Koa
+
 The library provides a helper for [Koa](https://koajs.com/) to write HTTP REST servers. It takes care of query parameters,
 extracts POST/PUT JSON bodies, sends responses encoded as JSON with proper HTTP status codes, and prepares parameters for
 mass operations.
