@@ -6,7 +6,7 @@ const normalizeFields = (fields, projectionFieldMap, separator = '.') => {
     if (typeof fields == 'string') {
       fields = fields
         .split(',')
-        .trim()
+        .map(f => f.trim())
         .filter(f => f);
     } else if (typeof fields == 'object') {
       fields = Object.keys(fields);

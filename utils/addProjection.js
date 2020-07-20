@@ -13,7 +13,7 @@ const addProjection = (params, fields, projectionFieldMap, skipSelect, separator
   const names = params.ExpressionAttributeNames || {},
     uniqueNames = {};
   let keyCounter = Object.keys(names).length;
-  const projection = Object.keys(fields)
+  const projection = fields
     .reduce((acc, key) => {
       const path = key.split(separator).map(key => {
         if (isInteger.test(key)) return key;
