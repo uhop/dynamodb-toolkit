@@ -1,9 +1,10 @@
 # dynamodb-toolkit [![NPM version][npm-img]][npm-url]
 
-[npm-img]:      https://img.shields.io/npm/v/dynamodb-toolkit.svg
-[npm-url]:      https://npmjs.org/package/dynamodb-toolkit
+[npm-img]: https://img.shields.io/npm/v/dynamodb-toolkit.svg
+[npm-url]: https://npmjs.org/package/dynamodb-toolkit
 
-No-dependencies micro-library for [AWS DynamoDB](https://aws.amazon.com/dynamodb/) to build small efficient RESTful APIs and high-performance command-line utilities.
+No-dependencies opinionated micro-library for [AWS DynamoDB](https://aws.amazon.com/dynamodb/)
+to build small efficient RESTful APIs and high-performance command-line utilities with a simple intuitive API.
 
 Helps with:
 
@@ -27,7 +28,9 @@ Helps with:
 * Thoroughly asynchronous.
 * Working with multiple databases at the same time potentially using different credentials.
 
-Includes the following operations:
+# Adapter
+
+The main module includes the following operations:
 
 * Standard REST:
   * `get(key [, fields [, params [, returnRaw]]])`
@@ -101,6 +104,18 @@ In order to have all machinery working properly, a user should define the follow
   * `validateItem(item [, isPatch])` &mdash; asynchronously validates an item.
   * `checkConsistency(batch)` &mdash; asynchronously produces an additional batch of operations to check for consistency before updating a database.
 
+# Utilities
+
+Included utilities help to deal with:
+
+* Helping to create clients with all necessary settings.
+* Various operations on parameters (`params`) including: adding projections, filtering.
+* Batching operations for efficiency.
+* Transactions.
+* Preparing patches.
+* Mass operations: reading by keys, list with pagination, copying, deleting, iterating over, getting totals, writing.
+* More.
+
 # Koa
 
 The library provides a helper for [Koa](https://koajs.com/) to write HTTP REST servers. It takes care of query parameters,
@@ -109,7 +124,8 @@ mass operations.
 
 # Example
 
-This is the annotated [tests/routes.js](https://github.com/uhop/dynamodb-toolkit/blob/master/tests/routes.js):
+This is the annotated [tests/routes.js](https://github.com/uhop/dynamodb-toolkit/blob/master/tests/routes.js),
+which provides a rich REST API for the planets of the Star Wars universe from [SWAPI](https://swapi.co/).
 
 ## Include dependencies
 
@@ -122,10 +138,10 @@ const Router = require('koa-router');
 
 const AWS = require('aws-sdk');
 
-const Adapter = require('../Adapter');
-const KoaAdapter = require('../helpers/KoaAdapter');
-const makeClient = require('../utils/makeClient');
-const subsetObject = require('../utils/subsetObject');
+const Adapter = require('dynamodb-toolkit');
+const KoaAdapter = require('dynamodb-toolkit/helpers/KoaAdapter');
+const makeClient = require('dynamodb-toolkit/utils/makeClient');
+const subsetObject = require('dynamodb-toolkit/utils/subsetObject');
 ```
 
 ## Create a DynamoDB client
