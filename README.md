@@ -30,7 +30,26 @@ Helps with:
 
 # Adapter
 
-The main module includes the following operations:
+## What you may want to define yourself
+
+* Data properties:
+  * `keyFields` &mdash; a **required** list of keys starting with the partition key.
+  * `specialTypes` &mdash; an optional dictionary, which arrays should be stored as DynamoDB sets.
+  * `projectionFieldMap` &mdash; an optional dictionary to map top-level properties to different fields.
+    * Frequently used with hierarchical indices.
+  * `searchable` &mdash; an optional dictionary of searchable top-level fields.
+  * `searchablePrefix` &mdash; an optional prefix to create technical searchable fields.
+* Methods:
+  * `prepare(item [, isPatch])` &mdash; prepares an item to be stored in a database. It can add or transform properties.
+  * `prepareKey(key [, index])` &mdash; prepares a database key.
+  * `restrictKey(rawKey [, index])` &mdash; removes unwanted properties from a key. Different indices may have different set of properties.
+  * `prepareListParams(item [, index])` &mdash; creates `params` for a given item and an index to list related items.
+  * `updateParams(params, options)` &mdash; updates `params` for different writing operations.
+  * `revive(rawItem [, fields])` &mdash; transforms an item after reading it from a database. Its counterpart is `prepare()`.
+  * `validateItem(item [, isPatch])` &mdash; asynchronously validates an item.
+  * `checkConsistency(batch)` &mdash; asynchronously produces an additional batch of operations to check for consistency before updating a database.
+
+## What you immediately get
 
 * Standard REST:
   * `get(key [, fields [, params [, returnRaw]]])`
@@ -91,25 +110,6 @@ The main module includes the following operations:
   * `fromDynamoRaw(item)` &mdash; converts from a client-specific format.
   * `toDynamoRaw(item)` &mdash; converts to a client-specific format.
   * `validateItems(items [, isPatch])` &mdash; asynchronously validates all items.
-
-In order to have all machinery working properly, a user should define the following properties, or rely on defaults:
-
-* Data properties:
-  * `keyFields` &mdash; a required list of keys starting with the partition key.
-  * `specialTypes` &mdash; an optional dictionary, which arrays should be stored as DynamoDB sets.
-  * `projectionFieldMap` &mdash; an optional dictionary to map top-level properties to different fields.
-    * Frequently used with hierarchical indicies.
-  * `searchable` &mdash; an optional dictionary of searchable top-level fields.
-  * `searchablePrefix` &mdash; an optional prefix to create technical searchable fields.
-* Methods:
-  * `prepare(item [, isPatch])` &mdash; prepares an item to be stored in a database. It can add or transform properties.
-  * `prepareKey(key [, index])` &mdash; prepares a database key.
-  * `restrictKey(rawKey [, index])` &mdash; removes unwanted properties from a key. Different indices may have different set of properties.
-  * `prepareListParams(item [, index])` &mdash; creates `params` for a given item and an index to list related items.
-  * `updateParams(params, options)` &mdash; updates `params` for different writing operations.
-  * `revive(rawItem [, fields])` &mdash; transforms an item after reading it from a database. Its counterpart is `prepare()`.
-  * `validateItem(item [, isPatch])` &mdash; asynchronously validates an item.
-  * `checkConsistency(batch)` &mdash; asynchronously produces an additional batch of operations to check for consistency before updating a database.
 
 # Utilities
 
@@ -179,7 +179,7 @@ const adapter = new Adapter({
       return acc;
     }, {});
     if (isPatch) {
-      delete data.name; // removes the key field
+      delete data.name; // remove the key field
     } else {
       data['-t'] = 1; // create the technical field for an index
     }
@@ -239,7 +239,7 @@ const koaAdapter = new KoaAdapter(adapter, {
   },
 
   augmentCloneFromContext(ctx) {
-    // how to transform an object when cloning (the default)
+    // how to transform an object when cloning/moving (the default)
     return item => ({...item, name: item.name + ' COPY'});
   },
 
@@ -270,6 +270,8 @@ Most operations were trivial. Some operations takes more than a couple of lines 
 
 ## Define the routing table
 
+Now we can define a rich API using existing operations already provided to us:
+
 ```js
 const router = new Router();
 
@@ -280,6 +282,8 @@ router
   .put('/-load', async ctx => koaAdapter.load(ctx))
   .put('/-clone', async ctx => koaAdapter.cloneAll(ctx))
   .put('/-clone-by-names', async ctx => koaAdapter.cloneByNames(ctx))
+  .put('/-move', async ctx => koaAdapter.moveAll(ctx))
+  .put('/-move-by-names', async ctx => koaAdapter.moveByNames(ctx))
   .get('/-by-names', async ctx => koaAdapter.getByNames(ctx))
   .delete('/-by-names', async ctx => koaAdapter.deleteByNames(ctx))
 
@@ -289,7 +293,8 @@ router
   .put('/:planet', async ctx => koaAdapter.put(ctx))
   .patch('/:planet', async ctx => koaAdapter.patch(ctx))
   .delete('/:planet', async ctx => koaAdapter.delete(ctx))
-  .put('/:planet/-clone', async ctx => koaAdapter.clone(ctx));
+  .put('/:planet/-clone', async ctx => koaAdapter.clone(ctx))
+  .put('/:planet/-move', async ctx => koaAdapter.move(ctx));
 
 module.exports = router;
 ```
@@ -302,6 +307,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 2.1.0 *Added `moveXXX()` operations, some minor implementation improvements.*
 - 2.0.0 *Minor API change, better support for paths, support for `AWS.DynamoDB.DocumentClient`, and so on.*
 - 1.16.0 *Switched conversion to `AWS.DynamoDB.Convert`, added `getPath()` and `setPath()` utilities.*
 - 1.15.1 *Added `seq()` for sequential asynchronous operations.*
