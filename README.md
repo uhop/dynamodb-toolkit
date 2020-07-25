@@ -6,13 +6,13 @@
 No-dependencies opinionated micro-library for [AWS DynamoDB](https://aws.amazon.com/dynamodb/)
 to build small efficient RESTful APIs and high-performance command-line utilities with a simple intuitive API.
 
-Helps with:
-
-* Flexible way to prepare your data objects for storing and revive it back:
+* Designed to work with existing code. Your legacy code can be gradually improved. No special requirements for database tables or indices!
+* Battle-proven. Used in production of mission-critical applications.
+* Provides a flexible way preparing your data objects for storing and reviving them back:
   * Supports complex indexing: design your own queries!
   * Validate objects before storing.
   * Check consistency of a database before storing objects.
-  * Rich set of efficient read/write/delete/clone operations.
+  * Rich set of efficient read/write/delete/clone/move operations.
   * Various low-level and high-level utilities for DynamoDB.
 * Automatically encoding/decoding your beautiful JSON data to and fro DynamoDB internal format.
   * Supports [AWS.DynamoDB](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/DynamoDB.html) clients.
@@ -20,13 +20,16 @@ Helps with:
 * Supports vagaries of mass read/write/delete operations correctly handling throughput-related errors using the recommended exponential back-off algorithm.
   * Supports transactions and batch requests.
 * Implements **efficiently on the server**:
-  * **Paging** (in offset/limit terms) and **sorting** on an index (both ascending and descending).
-  * **Subsetting** AKA **projection** (read operations can return a subset required of fields instead of the whole shebang which can be huge especially for mass read operations &mdash; think lists and tables).
-  * **Searching** AKA **filtering** (filters results looking for a substring in a predefined set of fields).
-  * **Patching** (only necessary fields are transferred to be updated/deleted).
-  * **Cloning** (making updated copies in a database).
-* Thoroughly asynchronous.
+  * **Paging** (in offset/limit terms) and **sorting** on an index (ascending and descending) to interface with list/table visual components.
+  * **Subsetting** AKA **projection**: read operations can return a subset required of fields instead of the whole shebang which can be huge especially for mass read operations &mdash; think lists and tables.
+  * **Searching** AKA **filtering**: filters results looking for a substring in a predefined set of fields.
+  * **Patching**: only necessary fields are transferred to be updated/deleted.
+  * **Cloning**: making updated copies in a database.
+  * **Moving**: effectively renaming objects.
+* Thoroughly asynchronous. No callbacks.
 * Working with multiple databases at the same time potentially using different credentials.
+
+Extensively documented: see [the wiki](https://github.com/uhop/dynamodb-toolkit/wiki).
 
 # Adapter
 
