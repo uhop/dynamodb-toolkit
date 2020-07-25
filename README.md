@@ -43,6 +43,8 @@ The main module includes the following operations:
   * `patch(item [, params])` based on `patchByKey(key, item [, force [, params]])`
   * `clone(item, mapFn [, force [, params [, returnRaw]]])`
     * AKA `cloneByKey(key, mapFn [, force [, params [, returnRaw]]])`
+  * `move(item, mapFn [, force [, params [, returnRaw]]])`
+    * AKA `moveByKey(key, mapFn [, force [, params [, returnRaw]]])`
 * Batch/transaction helpers:
   * `makeGet(key [, fields [, params]])`
   * `makePost(item)`
@@ -62,6 +64,9 @@ The main module includes the following operations:
   * `cloneAllByParams(params, mapFn [, returnRaw])`
   * `cloneByKeys(keys, mapFn [, returnRaw])`
   * `cloneAll(options, mapFn, item [, index [, returnRaw]])`
+  * `moveAllByParams(params, mapFn [, returnRaw])`
+  * `moveByKeys(keys, mapFn [, returnRaw])`
+  * `moveAll(options, mapFn, item [, index [, returnRaw]])`
 * Alternative generic implementations formulated in terms of other methods:
   * `genericGetByKeys(keys [, fields [, params [, returnRaw]]])`
   * `genericPutAll(items)`
@@ -69,6 +74,8 @@ The main module includes the following operations:
   * `genericDeleteByKeys(keys)`
   * `genericCloneAllByParams(params, mapFn [, returnRaw])`
   * `genericCloneByKeys(keys, mapFn [, returnRaw])`
+  * `genericMoveAllByParams(params, mapFn [, returnRaw])`
+  * `genericMoveByKeys(keys, mapFn [, returnRaw])`
 * Utilities:
   * `makeParams(options [, project [, params [, skipSelect]]])` &mdash; prepares a DynamoDB `params`.
   * `cloneParams(params)` &mdash; a shallow copy of `params` with forcing a table name.

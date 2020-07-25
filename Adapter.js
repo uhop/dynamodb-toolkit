@@ -252,6 +252,22 @@ class Adapter {
     return this.cloneByKey(item, mapFn, force, params, returnRaw);
   }
 
+  async moveByKey(key, mapFn, force, params, returnRaw) {
+    const item = await this.getByKey(key, null, this.cleanGetParams(params), returnRaw);
+    if (typeof item == 'undefined') return false;
+    const clonedItem = mapFn(item),
+      writeBatch = await (force ? this.makePut(clonedItem, true, params) : this.makePost(clonedItem)),
+      writeChecks = await this.checkConsistency(writeBatch),
+      deleteBatch = await this.makeDelete(key, params),
+      deleteChecks = await this.checkConsistency(deleteBatch);
+    await applyTransaction(this.client, writeChecks, writeBatch, deleteChecks, deleteBatch);
+    return true;
+  }
+
+  async move(item, mapFn, force, params, returnRaw) {
+    return this.moveByKey(item, mapFn, force, params, returnRaw);
+  }
+
   // mass operations
 
   makeParams(options, project, params, skipSelect) {
@@ -357,6 +373,30 @@ class Adapter {
     return this.cloneAllByParams(params, mapFn, returnRaw);
   }
 
+  async moveAllByParams(params, mapFn, returnRaw) {
+    params = this.cloneParams(params);
+    params = this.addKeyFields(params, true);
+    const fn = item => this.toDynamo(mapFn(this.fromDynamo(item, null, returnRaw))),
+      result = await copyList.viaKeys(this.client, params, fn);
+    await deleteList(this.client, params);
+    return result;
+  }
+
+  async moveByKeys(keys, mapFn, returnRaw) {
+    const rawKeys = keys.map(key => this.toDynamoKey(key)),
+      fn = item => this.toDynamo(mapFn(this.fromDynamo(item, null, returnRaw))),
+      result = await copyList.byKeys(this.client, this.table, rawKeys, fn);
+    await deleteList.byKeys(this.client, this.table, rawKeys);
+    return result;
+  }
+
+  async moveAll(options, mapFn, item, index, returnRaw) {
+    const params = this.makeListParams(options, false, item, index),
+      result = await this.cloneAllByParams(params, mapFn, returnRaw);
+    await this.deleteAllByParams(params);
+    return result;
+  }
+
   // generic implementations
 
   // async get(item, fields, params) { /* see above */ }
@@ -365,10 +405,13 @@ class Adapter {
 
   // async cloneByKey(key, mapFn, force, params) { /* see above */ }
   // async clone(item, mapFn, force, params) { /* see above */ }
+  // async moveByKey(key, mapFn, force, params) { /* see above */ }
+  // async move(item, mapFn, force, params) { /* see above */ }
 
   // async getAll(options, item, index) { /* see above */ }
   // async deleteAll(options, item, index) { /* see above */ }
   // async cloneAll(options, mapFn, item, index) { /* see above */ }
+  // async moveAll(options, mapFn, item, index) { /* see above */ }
 
   async genericGetByKeys(keys, fields, params, returnRaw) {
     params = this.cloneParams(params);
@@ -430,6 +473,29 @@ class Adapter {
     for (let i = 0; i < keys.length; ++i) {
       const key = keys[i];
       const result = await this.cloneByKey(key, mapFn, true, null, returnRaw);
+      processed += typeof result == 'number' ? result : result ? 1 : 0;
+    }
+    return processed;
+  }
+
+  async genericMoveAllByParams(params, mapFn, returnRaw) {
+    params = this.cloneParams(params);
+    params = this.addKeyFields(params, true);
+    let processed = 0;
+    while (params) {
+      const result = await readList.getItems(this.client, params),
+        items = result.items.map(item => this.fromDynamo(item, null, this.isDocClient ? 'raw' : 'db-raw'));
+      processed += await this.moveByKeys(items, mapFn, returnRaw);
+      params = result.nextParams;
+    }
+    return processed;
+  }
+
+  async genericMoveByKeys(keys, mapFn, returnRaw) {
+    let processed = 0;
+    for (let i = 0; i < keys.length; ++i) {
+      const key = keys[i];
+      const result = await this.moveByKey(key, mapFn, true, null, returnRaw);
       processed += typeof result == 'number' ? result : result ? 1 : 0;
     }
     return processed;
