@@ -89,6 +89,15 @@ class KoaAdapter {
     return this.doClone(ctx, this.augmentCloneFromContext(ctx));
   }
 
+  async doMove(ctx, mapFn) {
+    const done = await this.adapter.moveByKey(this.augmentItemFromContext({}, ctx), mapFn, isTrue(ctx.query, 'force'));
+    ctx.status = done ? 204 : 404;
+  }
+
+  async move(ctx) {
+    return this.doMove(ctx, this.augmentCloneFromContext(ctx));
+  }
+
   // mass operations
 
   makeOptions(ctx) {
@@ -134,6 +143,22 @@ class KoaAdapter {
   }
 
   async cloneByNames(ctx) {
+    return this.doCloneByNames(ctx, this.augmentCloneFromContext(ctx));
+  }
+
+  async doMoveAll(ctx, mapFn) {
+    ctx.body = {processed: await this.adapter.moveAll(this.makeOptions(ctx), mapFn, this.augmentItemFromContext({}, ctx))};
+  }
+
+  async moveAll(ctx) {
+    return this.doMoveAll(ctx, this.augmentCloneFromContext(ctx));
+  }
+
+  async doMoveByNames(ctx, mapFn) {
+    ctx.body = {processed: await this.adapter.moveByKeys(this.extractKeys(ctx, true), mapFn)};
+  }
+
+  async moveByNames(ctx) {
     return this.doCloneByNames(ctx, this.augmentCloneFromContext(ctx));
   }
 }

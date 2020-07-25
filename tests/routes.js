@@ -101,6 +101,8 @@ router
   .put('/-load', async ctx => koaAdapter.load(ctx))
   .put('/-clone', async ctx => koaAdapter.cloneAll(ctx))
   .put('/-clone-by-names', async ctx => koaAdapter.cloneByNames(ctx))
+  .put('/-move', async ctx => koaAdapter.moveAll(ctx))
+  .put('/-move-by-names', async ctx => koaAdapter.moveByNames(ctx))
   .get('/-by-names', async ctx => koaAdapter.getByNames(ctx))
   .delete('/-by-names', async ctx => koaAdapter.deleteByNames(ctx))
 
@@ -110,6 +112,7 @@ router
   .put('/:planet', async ctx => koaAdapter.put(ctx))
   .patch('/:planet', async ctx => koaAdapter.patch(ctx))
   .delete('/:planet', async ctx => koaAdapter.delete(ctx))
-  .put('/:planet/-clone', async ctx => koaAdapter.clone(ctx));
+  .put('/:planet/-clone', async ctx => koaAdapter.clone(ctx))
+  .put('/:planet/-move', async ctx => koaAdapter.move(ctx));
 
 module.exports = router;
