@@ -7,11 +7,11 @@ No-dependencies opinionated micro-library for [AWS DynamoDB](https://aws.amazon.
 to build small efficient RESTful APIs and high-performance command-line utilities with a simple intuitive API.
 
 * Designed to work with existing code. Your legacy code can be gradually improved. No special requirements for database tables or indices!
-* Battle-proven. Used in production of mission-critical applications.
+* Battle-proven. Used in mission-critical applications.
 * Provides a flexible way preparing your data objects for storing and reviving them back:
   * Supports complex indexing: design your own queries!
   * Validate objects before storing.
-  * Check consistency of a database before storing objects.
+  * Check the consistency of a database before storing objects.
   * Rich set of efficient read/write/delete/clone/move operations.
   * Various low-level and high-level utilities for DynamoDB.
 * Automatically encoding/decoding your beautiful JSON data to and fro DynamoDB internal format.
@@ -119,7 +119,7 @@ Extensively documented: see [the wiki](https://github.com/uhop/dynamodb-toolkit/
 Included utilities help to deal with:
 
 * Helping to create clients with all necessary settings.
-* Various operations on parameters (`params`) including: adding projections, filtering.
+* Various operations on parameters (`params`) including adding projections, filtering.
 * Batching operations for efficiency.
 * Transactions.
 * Preparing patches.
@@ -269,7 +269,7 @@ const koaAdapter = new KoaAdapter(adapter, {
 });
 ```
 
-Most operations were trivial. Some operations takes more than a couple of lines for the flexibility sake.
+Most operations were trivial. Some operations take more than a couple of lines for flexibility's sake.
 
 ## Define the routing table
 
