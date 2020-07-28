@@ -36,7 +36,6 @@ const adapter = new Adapter({
   prepareKey(item, index) {
     const key = {name: item.name};
     if (index) {
-      key.IndexName = index;
       key['-t'] = 1;
     }
     return key;
