@@ -89,7 +89,7 @@ class Adapter {
   revive(rawItem, fields) {
     // reconstitute a database object
     // remove some technical fields if required
-    if (fields) return subsetObject(item, fields);
+    if (fields) return subsetObject(rawItem, fields);
     return rawItem;
   }
 
