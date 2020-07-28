@@ -159,7 +159,7 @@ class KoaAdapter {
   }
 
   async moveByNames(ctx) {
-    return this.doCloneByNames(ctx, this.augmentCloneFromContext(ctx));
+    return this.doMoveByNames(ctx, this.augmentCloneFromContext(ctx));
   }
 }
 
