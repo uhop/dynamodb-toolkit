@@ -2,7 +2,7 @@
 
 const normalizeFields = require('./normalizeFields');
 
-const filtering = (filter, searchable, {fields, prefix = '-search-', params = {}, isDocClient} = {}) => {
+const filtering = (filter, searchable, {fields, prefix = '-search-', params = {}, isDocClient, preserveCase} = {}) => {
   if (!filter) return params;
 
   let searchKeys = Object.keys(searchable);
@@ -27,7 +27,8 @@ const filtering = (filter, searchable, {fields, prefix = '-search-', params = {}
     ...params.ExpressionAttributeNames
   });
 
-  const value = (filter + '').toLowerCase();
+  let value = filter + '';
+  if (!preserveCase) value = value.toLowerCase();
   params.ExpressionAttributeValues = params.ExpressionAttributeValues || {};
   params.ExpressionAttributeValues[':flt' + offset] = isDocClient ? value : {S: value};
 
