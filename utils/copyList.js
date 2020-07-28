@@ -25,11 +25,12 @@ const copyList = async (client, params) => {
 };
 
 copyList.viaKeys = async (client, params, mapFn, keyFn = identity) => {
+  const tableName = params.TableName;
   let keys = [];
   while(params) {
     params = await readList(client, params, async data => (keys = keys.concat(data.Items.map(keyFn).filter(identity))));
   }
-  return copyList.byKeys(client, params.TableName, keys, mapFn);
+  return copyList.byKeys(client, tableName, keys, mapFn);
 };
 
 copyList.byKeys = copyListByKeys;

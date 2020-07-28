@@ -34,11 +34,12 @@ const moveList = async (client, params, mapFn, keyFn = identity) => {
 };
 
 moveList.viaKeys = async (client, params, mapFn, keyFn = identity) => {
+  const tableName = params.TableName;
   let keys = [];
   while (params) {
     params = await readList(client, params, async data => (keys = keys.concat(data.Items.map(keyFn).filter(identity))));
   }
-  return moveList.byKeys(client, params.TableName, keys, mapFn);
+  return moveList.byKeys(client, tableName, keys, mapFn);
 };
 
 moveList.byKeys = moveListByKeys;
