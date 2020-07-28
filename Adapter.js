@@ -89,7 +89,7 @@ class Adapter {
   revive(rawItem, fields) {
     // reconstitute a database object
     // remove some technical fields if required
-    if (fields) return subsetObject(item, fields);
+    if (fields) return subsetObject(rawItem, fields);
     return rawItem;
   }
 
@@ -377,23 +377,20 @@ class Adapter {
     params = this.cloneParams(params);
     params = this.addKeyFields(params, true);
     const fn = item => this.toDynamo(mapFn(this.fromDynamo(item, null, returnRaw))),
-      result = await copyList.viaKeys(this.client, params, fn);
-    await deleteList(this.client, params);
+      result = await moveList.viaKeys(this.client, params, fn);
     return result;
   }
 
   async moveByKeys(keys, mapFn, returnRaw) {
     const rawKeys = keys.map(key => this.toDynamoKey(key)),
       fn = item => this.toDynamo(mapFn(this.fromDynamo(item, null, returnRaw))),
-      result = await copyList.byKeys(this.client, this.table, rawKeys, fn);
-    await deleteList.byKeys(this.client, this.table, rawKeys);
+      result = await moveList.byKeys(this.client, this.table, rawKeys, fn);
     return result;
   }
 
   async moveAll(options, mapFn, item, index, returnRaw) {
     const params = this.makeListParams(options, false, item, index),
-      result = await this.cloneAllByParams(params, mapFn, returnRaw);
-    await this.deleteAllByParams(params);
+      result = await this.moveAllByParams(params, mapFn, returnRaw);
     return result;
   }
 
@@ -461,7 +458,7 @@ class Adapter {
     let processed = 0;
     while (params) {
       const result = await readList.getItems(this.client, params),
-        items = result.items.map(item => this.fromDynamo(item, null, this.isDocClient ? 'raw' : 'db-raw'));
+        items = result.items.map(item => this.restrictKey(new Adapter.DbRaw(item)));
       processed += await this.cloneByKeys(items, mapFn, returnRaw);
       params = result.nextParams;
     }
@@ -484,7 +481,7 @@ class Adapter {
     let processed = 0;
     while (params) {
       const result = await readList.getItems(this.client, params),
-        items = result.items.map(item => this.fromDynamo(item, null, this.isDocClient ? 'raw' : 'db-raw'));
+        items = result.items.map(item => this.restrictKey(new Adapter.DbRaw(item)));
       processed += await this.moveByKeys(items, mapFn, returnRaw);
       params = result.nextParams;
     }
@@ -534,17 +531,17 @@ class Adapter {
     return addProjection(params, this.keyFields.join(','), null, skipSelect);
   }
 
-  convertTo(item, ignoreSpecialTypes) {
-    return convertTo(this.converter, item, ignoreSpecialTypes ? null : this.specialTypes, this.converterOptions);
-  }
-
   convertFrom(item, ignoreSpecialTypes) {
     return convertFrom(this.converter, item, ignoreSpecialTypes ? null : this.specialTypes, this.converterOptions);
   }
 
+  convertTo(item, ignoreSpecialTypes) {
+    return convertTo(this.converter, item, ignoreSpecialTypes ? null : this.specialTypes, this.converterOptions);
+  }
+
   fromDynamo(item, fields, returnRaw) {
     if (this.isDocClient) {
-      if (returnRaw === 'db-raw') return new Adapter.DbRaw(this.convertFrom(item));
+      if (returnRaw === 'db-raw') return new Adapter.DbRaw(this.convertTo(item));
       if (returnRaw === 'raw') return new Adapter.Raw(item);
       return this.revive(item, fields);
     }
