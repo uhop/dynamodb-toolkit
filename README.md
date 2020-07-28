@@ -31,24 +31,55 @@ to build small efficient RESTful APIs and high-performance command-line utilitie
 
 Extensively documented: see [the wiki](https://github.com/uhop/dynamodb-toolkit/wiki).
 
+## Example
+
+```js
+const Adapter = require('dynamodb-toolkit');
+
+const AWS = require('aws-sdk');
+AWS.config.update({region: 'us-east-2'});
+
+const adapter = new Adapter({
+  client: new AWS.DynamoDB(),
+  table: 'test',
+  keyFields: ['name']
+});
+
+// ...
+
+const planet = await adapter.get({name: 'Alderaan'});
+await adapter.patch({name: planet.name, diameter: planet.diameter * 2});
+// ...
+await adapter.clone({name: planet.name}, planet => {
+  const newPlanet = {...planet, name: planet.name + ' Two'};
+  return newPlanet;
+});
+await adapter.delete({name: planet.name});
+```
+
 # Adapter
+
+## What you have to define yourself
+
+* Data properties:
+  * `keyFields` &mdash; a **required** list of keys starting with the partition key.
+* Methods:
+  * `prepare(item [, isPatch])` &mdash; prepares an item to be stored in a database. It can add or transform properties.
+  * `revive(rawItem [, fields])` &mdash; transforms an item after reading it from a database. Its counterpart is `prepare()`.
 
 ## What you may want to define yourself
 
 * Data properties:
-  * `keyFields` &mdash; a **required** list of keys starting with the partition key.
   * `specialTypes` &mdash; an optional dictionary, which arrays should be stored as DynamoDB sets.
   * `projectionFieldMap` &mdash; an optional dictionary to map top-level properties to different fields.
     * Frequently used with hierarchical indices.
   * `searchable` &mdash; an optional dictionary of searchable top-level fields.
   * `searchablePrefix` &mdash; an optional prefix to create technical searchable fields.
 * Methods:
-  * `prepare(item [, isPatch])` &mdash; prepares an item to be stored in a database. It can add or transform properties.
   * `prepareKey(key [, index])` &mdash; prepares a database key.
   * `restrictKey(rawKey [, index])` &mdash; removes unwanted properties from a key. Different indices may have different set of properties.
   * `prepareListParams(item [, index])` &mdash; creates `params` for a given item and an index to list related items.
   * `updateParams(params, options)` &mdash; updates `params` for different writing operations.
-  * `revive(rawItem [, fields])` &mdash; transforms an item after reading it from a database. Its counterpart is `prepare()`.
   * `validateItem(item [, isPatch])` &mdash; asynchronously validates an item.
   * `checkConsistency(batch)` &mdash; asynchronously produces an additional batch of operations to check for consistency before updating a database.
 
@@ -74,7 +105,7 @@ Extensively documented: see [the wiki](https://github.com/uhop/dynamodb-toolkit/
   * `makeDelete(key [, params])`
   * `makeCheck(key [, params])`
   * `makePatch(key, item [, params])`
-* Mass operation building blocks:
+* Mass operations:
   * `scanAllByParams(params [, fields [, returnRaw]])`
   * `getAllByParams(params [, options [, returnRaw]])`
   * `getByKeys(keys [, fields [, params [, returnRaw]]])`
@@ -114,9 +145,9 @@ Extensively documented: see [the wiki](https://github.com/uhop/dynamodb-toolkit/
   * `toDynamoRaw(item)` &mdash; converts to a client-specific format.
   * `validateItems(items [, isPatch])` &mdash; asynchronously validates all items.
 
-# Utilities
+# Stand-alone utilities
 
-Included utilities help to deal with:
+Included utility functions:
 
 * Helping to create clients with all necessary settings.
 * Various operations on parameters (`params`) including adding projections, filtering.
@@ -132,103 +163,9 @@ The library provides a helper for [Koa](https://koajs.com/) to write HTTP REST s
 extracts POST/PUT JSON bodies, sends responses encoded as JSON with proper HTTP status codes, and prepares parameters for
 mass operations.
 
-# Example
+## Example
 
-This is the annotated [tests/routes.js](https://github.com/uhop/dynamodb-toolkit/blob/master/tests/routes.js),
-which provides a rich REST API for the planets of the Star Wars universe from [SWAPI](https://swapi.co/).
-
-## Include dependencies
-
-```js
-const fs = require('fs');
-const path = require('path');
-const zlib = require('zlib');
-
-const Router = require('koa-router');
-
-const AWS = require('aws-sdk');
-
-const Adapter = require('dynamodb-toolkit');
-const KoaAdapter = require('dynamodb-toolkit/helpers/KoaAdapter');
-const makeClient = require('dynamodb-toolkit/utils/makeClient');
-const subsetObject = require('dynamodb-toolkit/utils/subsetObject');
-```
-
-## Create a DynamoDB client
-
-```js
-const client = makeClient(AWS, {docClient: false});
-```
-
-## Define a DynamoDB adapter
-
-```js
-const adapter = new Adapter({
-  client,
-  table: 'test',
-  keyFields: ['name'],
-  searchable: {name: 1, climate: 1, terrain: 1}, // searchable fields
-
-  prepare(item, isPatch) {
-    // convert to an item which will be stored in a database
-    // we can add some technical fields, e.g., fields to search on
-    const data = Object.keys(item).reduce((acc, key) => {
-      if (key.charAt(0) !== '-') {
-        acc[key] = item[key];
-        if (this.searchable[key] === 1) {
-          acc['-search-' + key] = (item[key] + '').toLowerCase();
-        }
-      }
-      return acc;
-    }, {});
-    if (isPatch) {
-      delete data.name; // remove the key field
-    } else {
-      data['-t'] = 1; // create the technical field for an index
-    }
-    return data;
-  },
-
-  prepareKey(item, index) {
-    // make a key for our database
-    const key = {name: item.name};
-    if (index) { // we have only one index
-      // our index requires an artificial field
-      key.IndexName = index;
-      key['-t'] = 1;
-    }
-    return key;
-  },
-
-  prepareListParams(_, index) {
-    // prepare params for a list of items
-    index = index || '-t-name-index';
-    return {
-      IndexName: index,
-      KeyConditionExpression: '#t = :t',
-      ExpressionAttributeNames: {'#t': '-t'},
-      ExpressionAttributeValues: this.toDynamoRaw({':t': 1})
-    };
-  },
-
-  revive(item, fields) {
-    // convert back to our original item returning only requested fields
-    if (fields) return subsetObject(item, fields);
-    // custom subsetting: remove all technical fields
-    return Object.keys(item).reduce((acc, key) => {
-      if (key.charAt(0) !== '-') {
-        acc[key] = item[key];
-      }
-      return acc;
-    }, {});
-  }
-});
-```
-
-We mostly defined how to transform our object to something we keep in a database and back.
-By default these operations just return their `item` parameter so we don't need to specify them if we don't want any transformations.
-
-## Define a Koa adapter
+Define a Koa adapter:
 
 ```js
 const koaAdapter = new KoaAdapter(adapter, {
@@ -251,12 +188,14 @@ const koaAdapter = new KoaAdapter(adapter, {
     let index, descending;
     if (ctx.query.sort) {
       let sortName = ctx.query.sort;
-      descending = ctx.query.sort.charAt(0) == '-';
-      descending && (sortName = ctx.query.sort.substr(1));
+      descending = ctx.query.sort[0] == '-';
+      if (descending) {
+        sortName = sortName.substr(1);
+      }
       index = this.sortableIndices[sortName];
     }
     const options = this.makeOptions(ctx);
-    descending && (options.descending = true);
+    options.descending = !!descending;
     ctx.body = await this.adapter.getAll(options, null, index);
   },
 
@@ -271,9 +210,7 @@ const koaAdapter = new KoaAdapter(adapter, {
 
 Most operations were trivial. Some operations take more than a couple of lines for flexibility's sake.
 
-## Define the routing table
-
-Now we can define a rich API using existing operations already provided to us:
+Define the routing table:
 
 ```js
 const router = new Router();
