@@ -8,6 +8,7 @@ const prepareUpdate = require('./utils/prepareUpdate');
 const paginateList = require('./utils/paginateList');
 const deleteList = require('./utils/deleteList');
 const copyList = require('./utils/copyList');
+const moveList = require('./utils/moveList');
 const readList = require('./utils/readList');
 const writeList = require('./utils/writeList');
 const filtering = require('./utils/filtering');
