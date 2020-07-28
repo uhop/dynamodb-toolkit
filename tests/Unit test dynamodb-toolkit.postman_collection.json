@@ -1233,7 +1233,7 @@
 			"response": []
 		},
 		{
-			"name": "Delete a planet the clone",
+			"name": "Delete the clone",
 			"event": [
 				{
 					"listen": "test",
@@ -1304,6 +1304,130 @@
 			"response": []
 		},
 		{
+			"name": "Move a planet",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "0e545fe7-6863-44a2-a5aa-2ca3da2a3a5c",
+						"exec": [
+							"pm.test(\"response must be valid and empty\", () => {",
+							"     pm.response.to.have.status(204);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "PUT",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake/-move",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake",
+						"-move"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get the original planet #3",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "ef8ce23f-690a-444e-a87d-49150a4d501e",
+						"exec": [
+							"pm.test(\"response should be 404\", () => {",
+							"     pm.response.to.have.status(404);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake?consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake"
+					],
+					"query": [
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get the moved planet #4",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "00322333-c679-4aa7-88a2-31e1e9ae0f5f",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"the item should be AAA Fake with 3 fields\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json).to.eql({",
+							"      \"name\": \"AAA Fake COPY\",",
+							"      \"climate\": \"temperate\",",
+							"      \"terrain\": \"lakes\",",
+							"      \"people\": \"beautiful\",",
+							"      \"diameter\": 12345,",
+							"      \"config\": {\"a\": \"one\", \"c\": \"three\"}",
+							"    });",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/AAA%20Fake%20COPY?consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"AAA%20Fake%20COPY"
+					],
+					"query": [
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
 			"name": "Delete a planet",
 			"event": [
 				{
@@ -1323,13 +1447,13 @@
 				"method": "DELETE",
 				"header": [],
 				"url": {
-					"raw": "localhost:3000/AAA%20Fake",
+					"raw": "localhost:3000/AAA%20Fake%20COPY",
 					"host": [
 						"localhost"
 					],
 					"port": "3000",
 					"path": [
-						"AAA%20Fake"
+						"AAA%20Fake%20COPY"
 					]
 				}
 			},
@@ -1356,13 +1480,13 @@
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "localhost:3000/AAA%20Fake?consistent=1",
+					"raw": "localhost:3000/AAA%20Fake%20COPY?consistent=1",
 					"host": [
 						"localhost"
 					],
 					"port": "3000",
 					"path": [
-						"AAA%20Fake"
+						"AAA%20Fake%20COPY"
 					],
 					"query": [
 						{
@@ -1560,6 +1684,156 @@
 						{
 							"key": "names",
 							"value": "Cerea%20COPY,Endor%20COPY"
+						},
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Move planets by names",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "8040849f-5f56-40f0-8c50-f23829a964ad",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"response must clone 2 items\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.processed).to.eql(4);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "PUT",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/-move-by-names/?names=Cerea,Endor",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"-move-by-names",
+						""
+					],
+					"query": [
+						{
+							"key": "names",
+							"value": "Cerea,Endor"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get moved planets by name #3",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "6c040b9b-6e9b-445e-bc2b-6bfabab032f8",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"2 items should be returned\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.length).to.eql(2);",
+							"    json.sort((a, b) => a.name < b.name ? -1 : b.name < a.name ? 1 : 0);",
+							"    pm.expect(json[0].name).to.eql(\"Cerea COPY\");",
+							"    pm.expect(json[1].name).to.eql(\"Endor COPY\");",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/-by-names?names=Cerea%20COPY,Endor%20COPY&consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"-by-names"
+					],
+					"query": [
+						{
+							"key": "names",
+							"value": "Cerea%20COPY,Endor%20COPY"
+						},
+						{
+							"key": "consistent",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get original planets by name #4",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"id": "4cd28cdc-e8c9-40cd-b698-9648072ad4cd",
+						"exec": [
+							"pm.test(\"response must be valid and have a body\", () => {",
+							"     pm.response.to.be.ok;",
+							"     pm.response.to.be.withBody;",
+							"     pm.response.to.be.json;",
+							"});",
+							"",
+							"pm.test(\"no items should be returned\", () => {",
+							"    const json = pm.response.json();",
+							"    pm.expect(json.length).to.eql(0);",
+							"});",
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "localhost:3000/-by-names?names=Cerea,Endor&consistent=1",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"-by-names"
+					],
+					"query": [
+						{
+							"key": "names",
+							"value": "Cerea,Endor"
 						},
 						{
 							"key": "consistent",
