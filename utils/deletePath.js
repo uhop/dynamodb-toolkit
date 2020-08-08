@@ -2,15 +2,20 @@
 
 const deletePath = (o, path, separator = '.') => {
   if (typeof path == 'string') path = path.split(separator);
-  for (let i = 0; i < path.length - 1; ++i) {
+  const last = path.length - 1;
+  for (let i = 0; i < last; ++i) {
     const part = path[i];
     if (o.hasOwnProperty(part)) {
-      o = o[part];
-    } else {
-      return false;
+      const c = o[part];
+      if (c && (typeof c == 'object' || typeof c == 'function')) {
+        o = c;
+        continue;
+      }
     }
+    return false;
   }
-  return delete o[path[path.length - 1]];
+  return delete o[path[last]];
 };
+
 
 module.exports = deletePath;

@@ -2,15 +2,19 @@
 
 const setPath = (o, path, value, separator = '.') => {
   if (typeof path == 'string') path = path.split(separator);
-  for (let i = 0; i < path.length - 1; ++i) {
+  const last = path.length - 1;
+  for (let i = 0; i < last; ++i) {
     const part = path[i];
     if (o.hasOwnProperty(part)) {
-      o = o[part];
-    } else {
-      o = o[part] = {};
+      const c = o[part];
+      if (c && (typeof c == 'object' || typeof c == 'function')) {
+        o = c;
+        continue;
+      }
     }
+    o = o[part] = {};
   }
-  return (o[path[path.length - 1]] = value);
+  return (o[path[last]] = value);
 };
 
 module.exports = setPath;
