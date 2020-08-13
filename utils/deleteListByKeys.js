@@ -4,8 +4,10 @@
 
 const applyBatch = require('./applyBatch');
 
-const deleteListByKeys = async (client, tableName, keys) => {
-  return applyBatch(client, keys.filter(key => key).map(key => ({action: 'delete', params: {TableName: tableName, Key: key}})));
-};
+const deleteListByKeys = async (client, tableName, keys) =>
+  applyBatch(
+    client,
+    keys.filter(key => key).map(key => ({action: 'delete', params: {TableName: tableName, Key: key}}))
+  );
 
 module.exports = deleteListByKeys;
