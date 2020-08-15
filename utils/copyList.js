@@ -9,10 +9,10 @@ const copyListByKeys = require('./copyListByKeys');
 
 const identity = x => x;
 
-const copyList = async (client, params) => {
+const copyList = async (client, params, mapFn) => {
   const tableName = params.TableName;
   let processed = 0;
-  while(params) {
+  while (params) {
     params = await readList(client, params, async data => {
       const items = data.Items;
       for (let offset = 0; offset < items.length; offset += 25) {
@@ -27,7 +27,7 @@ const copyList = async (client, params) => {
 copyList.viaKeys = async (client, params, mapFn, keyFn = identity) => {
   const tableName = params.TableName;
   let keys = [];
-  while(params) {
+  while (params) {
     params = await readList(client, params, async data => (keys = keys.concat(data.Items.map(keyFn).filter(identity))));
   }
   return copyList.byKeys(client, tableName, keys, mapFn);
