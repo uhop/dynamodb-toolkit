@@ -9,7 +9,6 @@ const defaultOptions = {convertEmptyValues: false, wrapNumbers: false};
 
 const setDynamoPath = (o, path, value, separator = '.') => {
   if (typeof path == 'string') path = path.split(separator);
-  let type = 'M';
   for (let i = 0; i < path.length - 1; ++i) {
     const part = path[i];
     if (!o.hasOwnProperty(part)) return;
