@@ -8,13 +8,15 @@ const readList = require('./readList');
 
 const deleteListByKeys = require('./deleteListByKeys');
 
-const deleteList = async (client, params) => {
+const identity = x => x;
+
+const deleteList = async (client, params, keyFn = identity) => {
   params = cleanParams(cloneParams(params));
   let processed = 0;
-  while(params) {
+  while (params) {
     params = await readList(client, params, async data => {
       if (data.Items.length) {
-        processed += await deleteListByKeys(client, params.TableName, data.Items);
+        processed += await deleteListByKeys(client, params.TableName, data.Items.map(keyFn).filter(identity));
       }
     });
   }
