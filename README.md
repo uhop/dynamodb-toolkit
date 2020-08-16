@@ -162,7 +162,7 @@ Included utility functions:
 
 # Koa
 
-The library provides a helper for [Koa](https://koajs.com/) to write HTTP REST servers; [KoaAdapter](https://github.com/uhop/dynamodb-toolkit/wiki/KoaAdapter). It takes care of query parameters,
+The library provides a helper for [Koa](https://koajs.com/) to write HTTP REST servers: [KoaAdapter](https://github.com/uhop/dynamodb-toolkit/wiki/KoaAdapter). It takes care of query parameters,
 extracts POST/PUT JSON bodies, sends responses encoded as JSON with proper HTTP status codes, and prepares parameters for
 mass operations.
 
