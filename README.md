@@ -59,91 +59,94 @@ await adapter.delete({name: planet.name});
 
 # Adapter
 
+The full documentation: [Adapter](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter). Here is a cheatsheet:
+
 ## What you have to define yourself
 
 * Data properties:
-  * `keyFields` &mdash; a **required** list of keys starting with the partition key.
+  * [keyFields](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#keyfields) &mdash; a **required** list of keys starting with the partition key.
 * Methods:
-  * `prepare(item [, isPatch])` &mdash; prepares an item to be stored in a database. It can add or transform properties.
-  * `revive(rawItem [, fields])` &mdash; transforms an item after reading it from a database. Its counterpart is `prepare()`.
+  * [prepare(item [, isPatch])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#prepareitem--ispatch) &mdash; prepares an item to be stored in a database. It can add or transform properties.
+  * [revive(rawItem [, fields])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#reviverawitem--fields) &mdash; transforms an item after reading it from a database. Its counterpart is `prepare()`.
 
 ## What you may want to define yourself
 
 * Data properties:
-  * `specialTypes` &mdash; an optional dictionary, which arrays should be stored as DynamoDB sets.
-  * `projectionFieldMap` &mdash; an optional dictionary to map top-level properties to different fields.
+  * [specialTypes](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#specialtypes) &mdash; an optional dictionary, which arrays should be stored as DynamoDB sets.
+  * [projectionFieldMap](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#projectionfieldmap) &mdash; an optional dictionary to map top-level properties to different fields.
     * Frequently used with hierarchical indices.
-  * `searchable` &mdash; an optional dictionary of searchable top-level fields.
-  * `searchablePrefix` &mdash; an optional prefix to create technical searchable fields.
+  * [searchable](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#searchable) &mdash; an optional dictionary of searchable top-level fields.
+  * [searchablePrefix](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#searchableprefix) &mdash; an optional prefix to create technical searchable fields.
 * Methods:
-  * `prepareKey(key [, index])` &mdash; prepares a database key.
-  * `restrictKey(rawKey [, index])` &mdash; removes unwanted properties from a key. Different indices may have different set of properties.
-  * `prepareListParams(item [, index])` &mdash; creates `params` for a given item and an index to list related items.
-  * `updateParams(params, options)` &mdash; updates `params` for different writing operations.
-  * `validateItem(item [, isPatch])` &mdash; asynchronously validates an item.
-  * `checkConsistency(batch)` &mdash; asynchronously produces an additional batch of operations to check for consistency before updating a database.
+  * [prepareKey(key [, index])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#preparekeykey--index) &mdash; prepares a database key.
+  * [restrictKey(rawKey [, index])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#restrictkeyrawkey--index) &mdash; removes unwanted properties from a key. Different indices may have different set of properties.
+  * [prepareListParams(item [, index])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#preparelistparamsitem--index) &mdash; creates `params` for a given item and an index to list related items.
+  * [updateParams(params, options)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#updateparamsparams--options) &mdash; updates `params` for different writing operations.
+  * [validateItem(item [, isPatch])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#async-validateitemitem--ispatch) &mdash; asynchronously validates an item.
+  * [checkConsistency(batch)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#async-checkconsistencybatch) &mdash; asynchronously produces an additional batch of operations to check for consistency before updating a database.
 
 ## What you immediately get
 
-* Standard REST:
-  * `get(key [, fields [, params [, returnRaw]]])`
-    * AKA `getByKey(key [, fields [, params [, returnRaw]]])`
-  * `post(item)`
-  * `put(item [, force [, params]])`
-  * `delete(key [, params])`
-    * AKA `deleteByKey(key [, params])`
+* Standard REST (CRUD):
+  * [get(key [, fields [, params [, returnRaw]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-getkey--fields--params--returnraw)
+    * AKA [getByKey(key [, fields [, params [, returnRaw]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-getbykeykey--fields--params--returnraw)
+  * [post(item)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-postitem)
+  * [put(item [, force [, params]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-putitem--force--params)
+  * [delete(key [, params])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-deletekey--params)
+    * AKA [deleteByKey(key [, params])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-deletebykeykey--params)
 * Special operations:
-  * `patch(item [, params])` based on `patchByKey(key, item [, force [, params]])`
-  * `clone(item, mapFn [, force [, params [, returnRaw]]])`
-    * AKA `cloneByKey(key, mapFn [, force [, params [, returnRaw]]])`
-  * `move(item, mapFn [, force [, params [, returnRaw]]])`
-    * AKA `moveByKey(key, mapFn [, force [, params [, returnRaw]]])`
+  * [patch(item [, params])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-patchitem--params)
+    * AKA [patchByKey(key, item [, force [, params]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-patchbykeykey-item--params)
+  * [clone(item, mapFn [, force [, params [, returnRaw]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-cloneitem-mapfn--force--params--returnraw)
+    * AKA [cloneByKey(key, mapFn [, force [, params [, returnRaw]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-clonebykeykey-mapfn--force--params--returnraw)
+  * [move(item, mapFn [, force [, params [, returnRaw]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-moveitem-mapfn--force--params--returnraw)
+    * AKA [moveByKey(key, mapFn [, force [, params [, returnRaw]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-movebykeykey-mapfn--force--params--returnraw)
 * Batch/transaction helpers:
-  * `makeGet(key [, fields [, params]])`
-  * `makePost(item)`
-  * `makePut(item [, force [, params]])`
-  * `makeDelete(key [, params])`
-  * `makeCheck(key [, params])`
-  * `makePatch(key, item [, params])`
+  * [makeGet(key [, fields [, params]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-batch-methods#async-makegetkey--fields--params)
+  * [makePost(item)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-batch-methods#async-makepostitem)
+  * [makePut(item [, force [, params]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-batch-methods#async-makeputitem--force--params)
+  * [makeDelete(key [, params])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-batch-methods#async-makedeletekey--params)
+  * [makeCheck(key [, params])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-batch-methods#async-makecheckkey-params)
+  * [makePatch(key, item [, params])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-batch-methods#async-makepatchkey-item--params)
 * Mass operations:
-  * `scanAllByParams(params [, fields [, returnRaw]])`
-  * `getAllByParams(params [, options [, returnRaw]])`
-  * `getByKeys(keys [, fields [, params [, returnRaw]]])`
-  * `getAll(options, item [, index [, returnRaw]])`
-  * `putAll(items)`
-  * `deleteAllByParams(params)`
-  * `deleteByKeys(keys)`
-  * `deleteAll(options, item [, index])`
-  * `cloneAllByParams(params, mapFn [, returnRaw])`
-  * `cloneByKeys(keys, mapFn [, returnRaw])`
-  * `cloneAll(options, mapFn, item [, index [, returnRaw]])`
-  * `moveAllByParams(params, mapFn [, returnRaw])`
-  * `moveByKeys(keys, mapFn [, returnRaw])`
-  * `moveAll(options, mapFn, item [, index [, returnRaw]])`
+  * [scanAllByParams(params [, fields [, returnRaw]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-scanallbyparamsparams--fields--returnraw)
+  * [getAllByParams(params [, options [, returnRaw]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-getallbyparamsparams--options--returnraw)
+  * [getByKeys(keys [, fields [, params [, returnRaw]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-getbykeyskeys--fields--params--returnraw)
+  * [getAll(options, item [, index [, returnRaw]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-getalloptions-item--index--returnraw)
+  * [putAll(items)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-putallitems)
+  * [deleteAllByParams(params)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-deleteallbyparamsparams)
+  * [deleteByKeys(keys)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-deletebykeyskeys)
+  * [deleteAll(options, item [, index])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-deletealloptions-item--index)
+  * [cloneAllByParams(params, mapFn [, returnRaw])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-cloneallbyparamsparams-mapfn--returnraw)
+  * [cloneByKeys(keys, mapFn [, returnRaw])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-clonebykeyskeys-mapfn--returnraw)
+  * [cloneAll(options, mapFn, item [, index [, returnRaw]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-clonealloptions-mapfn-item--index--returnraw)
+  * [moveAllByParams(params, mapFn [, returnRaw])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-moveallbyparamsparams-mapfn--returnraw)
+  * [moveByKeys(keys, mapFn [, returnRaw])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-movebykeyskeys-mapfn--returnraw)
+  * [moveAll(options, mapFn, item [, index [, returnRaw]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-movealloptions-mapfn-item--index--returnraw)
 * Alternative generic implementations formulated in terms of other methods:
-  * `genericGetByKeys(keys [, fields [, params [, returnRaw]]])`
-  * `genericPutAll(items)`
-  * `genericDeleteAllByParams(params)`
-  * `genericDeleteByKeys(keys)`
-  * `genericCloneAllByParams(params, mapFn [, returnRaw])`
-  * `genericCloneByKeys(keys, mapFn [, returnRaw])`
-  * `genericMoveAllByParams(params, mapFn [, returnRaw])`
-  * `genericMoveByKeys(keys, mapFn [, returnRaw])`
+  * [genericGetByKeys(keys [, fields [, params [, returnRaw]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericgetbykeyskeys--fields--params--returnraw)
+  * [genericPutAll(items)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericputallitems)
+  * [genericDeleteAllByParams(params)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericdeleteallbyparamsparams)
+  * [genericDeleteByKeys(keys)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericdeletebykeyskeys)
+  * [genericCloneAllByParams(params, mapFn [, returnRaw])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericcloneallbyparamsparams-mapfn--returnraw)
+  * [genericCloneByKeys(keys, mapFn [, returnRaw])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericclonebykeyskeys-mapfn--returnraw)
+  * [genericMoveAllByParams(params, mapFn [, returnRaw])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericmoveallbyparamsparams-mapfn--returnraw)
+  * [genericMoveByKeys(keys, mapFn [, returnRaw])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericmovebykeyskeys-mapfn--returnraw)
 * Utilities:
-  * `makeParams(options [, project [, params [, skipSelect]]])` &mdash; prepares a DynamoDB `params`.
-  * `cloneParams(params)` &mdash; a shallow copy of `params` with forcing a table name.
-  * `cleanGetParams(params)` &mdash; removes `ConditionExpression` from `params`.
-  * `checkExistence(params [, invert])` &mdash; generates an (non-)existence of an item.
-  * `makeListParams(options, project, item [, index])` &mdash; prepares `params` to list items.
-  * `addKeyFields(params [, skipSelect])` &mdash; adds a projection of key fields to `params`.
-  * `convertTo(item [, ignoreSpecialTypes])` &mdash; converts to the DynamoDB internal format.
-  * `convertFrom(item [, ignoreSpecialTypes])` &mdash; converts from the DynamoDB internal format.
-  * `fromDynamo(item [, fields [, returnRaw]])` &mdash; converts to a given format. Runs user-defined transformations.
-  * `toDynamo(item)` &mdash; converts any supported format to a given DynamoDB client. Runs user-defined transformations.
-  * `toDynamoKey(key [, index])` &mdash; converts an item to a valid DynamoDB key. Runs user-defined transformations.
-  * `fromDynamoRaw(item)` &mdash; converts from a client-specific format.
-  * `toDynamoRaw(item)` &mdash; converts to a client-specific format.
-  * `validateItems(items [, isPatch])` &mdash; asynchronously validates all items.
+  * [makeParams(options [, project [, params [, skipSelect]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#makeparamsoptions--project--params--skipselect) &mdash; prepares a DynamoDB `params`.
+  * [cloneParams(params)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#cloneparamsparams) &mdash; a shallow copy of `params` with forcing a table name.
+  * [cleanGetParams(params)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#cleangetparamsparams) &mdash; removes `ConditionExpression` from `params`.
+  * [checkExistence(params [, invert])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#checkexistenceparams--invert) &mdash; generates an (non-)existence of an item.
+  * [makeListParams(options, project, item [, index])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#makelistparamsoptions-project-item--index) &mdash; prepares `params` to list items.
+  * [addKeyFields(params [, skipSelect])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#addkeyfieldsparams--skipselect) &mdash; adds a projection of key fields to `params`.
+  * [convertFrom(item [, ignoreSpecialTypes])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#convertfromitem--ignorespecialtypes) &mdash; converts from the DynamoDB internal format.
+  * [convertTo(item [, ignoreSpecialTypes])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#converttoitem--ignorespecialtypes) &mdash; converts to the DynamoDB internal format.
+  * [fromDynamo(item [, fields [, returnRaw]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#fromdynamoitem--fields--returnraw) &mdash; converts to a given format. Runs user-defined transformations.
+  * [toDynamo(item)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#todynamoitem) &mdash; converts any supported format to a given DynamoDB client. Runs user-defined transformations.
+  * [toDynamoKey(key [, index])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#todynamokeykey--index) &mdash; converts an item to a valid DynamoDB key. Runs user-defined transformations.
+  * [fromDynamoRaw(item)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#fromdynamorawitem) &mdash; converts from a client-specific format.
+  * [toDynamoRaw(item)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#todynamorawitem) &mdash; converts to a client-specific format.
+  * [validateItems(items [, isPatch])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-utilities#async-validateitemsitems--ispatch) &mdash; asynchronously validates all items.
 
 # Stand-alone utilities
 
@@ -155,11 +158,11 @@ Included utility functions:
 * Transactions.
 * Preparing patches.
 * Mass operations: reading by keys, list with pagination, copying, deleting, iterating over, getting totals, writing.
-* More.
+* See [the wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for more details.
 
 # Koa
 
-The library provides a helper for [Koa](https://koajs.com/) to write HTTP REST servers. It takes care of query parameters,
+The library provides a helper for [Koa](https://koajs.com/) to write HTTP REST servers; [KoaAdapter](https://github.com/uhop/dynamodb-toolkit/wiki/KoaAdapter). It takes care of query parameters,
 extracts POST/PUT JSON bodies, sends responses encoded as JSON with proper HTTP status codes, and prepares parameters for
 mass operations.
 
