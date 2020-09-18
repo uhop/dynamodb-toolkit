@@ -6,6 +6,12 @@ const normalizeFields = require('./normalizeFields');
 
 const isInteger = /^\d+$/;
 
+const removeDups = (dict = {}) => key => {
+  if (dict[key] === 1) return false;
+  dict[key] = 1;
+  return true;
+};
+
 const addProjection = (params, fields, projectionFieldMap, skipSelect, separator = '.') => {
   if (!fields) return params;
   fields = normalizeFields(fields, projectionFieldMap);
@@ -14,6 +20,7 @@ const addProjection = (params, fields, projectionFieldMap, skipSelect, separator
     uniqueNames = {};
   let keyCounter = Object.keys(names).length;
   const projection = fields
+    .filter(removeDups())
     .reduce((acc, key) => {
       const path = key.split(separator).map(key => {
         if (isInteger.test(key)) return key;
