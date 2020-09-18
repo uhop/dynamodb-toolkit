@@ -250,8 +250,9 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 2.1.1 *Bugfix in `addProjection()` to avoid duplicates.*
 - 2.1.0 *Added `moveXXX()` operations, some minor implementation improvements.*
-- 2.0.1 *Bug fix in the default implementation of `revive()`.*
+- 2.0.1 *Bugfix in the default implementation of `revive()`.*
 - 2.0.0 *Minor API change, better support for paths, support for `AWS.DynamoDB.DocumentClient`, and so on.*
 - 1.16.0 *Switched conversion to `AWS.DynamoDB.Convert`, added `getPath()` and `setPath()` utilities.*
 - 1.15.1 *Added `seq()` for sequential asynchronous operations.*
