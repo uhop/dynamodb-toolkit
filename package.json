@@ -23,11 +23,11 @@
   },
   "homepage": "https://github.com/uhop/dynamodb-toolkit#readme",
   "devDependencies": {
-    "aws-sdk": "^2.715.0",
+    "aws-sdk": "^2.761.0",
     "colors": "^1.4.0",
     "koa": "^2.13.0",
     "koa-body": "^4.2.0",
-    "koa-router": "^9.1.0"
+    "koa-router": "^9.4.0"
   },
   "files": [
     "/*.js",
