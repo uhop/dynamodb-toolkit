@@ -373,7 +373,6 @@ class Adapter {
         items.map(item => this.restrictKey(item)),
         indirectParam
       );
-      items = items.filter(item => item);
     }
     let transformFn;
     if (returnRaw === 'db-raw' || returnRaw === 'raw') {
