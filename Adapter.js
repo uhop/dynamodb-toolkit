@@ -325,8 +325,8 @@ class Adapter {
 
   async getAllByParams(params, options, returnRaw, ignoreIndirection) {
     const isIndirect = !ignoreIndirection && params && params.IndexName && this.isIndirectIndex(params.IndexName),
-      activeFields = isIndirect ? this.keyFields : fields,
-      activeOptions = {...options, fields: activeFields};
+      activeOptions = {...options};
+    isIndirect && (activeOptions.fields = this.keyFields);
     params = cleanParams(this.cloneParams(params));
     const result = await paginateList(this.client, params, activeOptions);
     if (isIndirect && result.data.length) {
