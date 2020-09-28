@@ -360,7 +360,7 @@ class Adapter {
     let items = await readList.byKeys(
       this.client,
       this.table,
-      keys.map(key => this.toDynamoKey(key, params.IndexName)),
+      keys.map(key => this.toDynamoKey(key, activeParams.IndexName)),
       activeParams
     );
     if (isIndirect && items.length) {
