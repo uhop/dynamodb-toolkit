@@ -10,6 +10,7 @@ const deleteList = require('./utils/deleteList');
 const copyList = require('./utils/copyList');
 const moveList = require('./utils/moveList');
 const readList = require('./utils/readList');
+const readOrderedListByKeys = require('./utils/readOrderedListByKeys');
 const writeList = require('./utils/writeList');
 const filtering = require('./utils/filtering');
 const cleanParams = require('./utils/cleanParams');
@@ -92,6 +93,10 @@ class Adapter {
     // remove some technical fields if required
     if (fields) return subsetObject(rawItem, fields);
     return rawItem;
+  }
+
+  isIndirectIndex(index) {
+    return false;
   }
 
   async validateItem(item, isPatch) {
@@ -177,16 +182,23 @@ class Adapter {
 
   // general API
 
-  async getByKey(key, fields, params, returnRaw) {
-    const batch = await this.makeGet(key, fields, params);
-    const action = this.isDocClient ? 'get' : 'getItem';
-    const data = await this.client[action](batch.params).promise();
+  async getByKey(key, fields, params, returnRaw, ignoreIndirection) {
+    const isIndirect = !ignoreIndirection && params && params.IndexName && this.isIndirectIndex(params.IndexName),
+      batch = await this.makeGet(key, isIndirect ? this.keyFields : fields, params),
+      action = this.isDocClient ? 'get' : 'getItem';
+    let data = await this.client[action](batch.params).promise();
     if (!data.Item) return; // undefined
+    if (isIndirect) {
+      const indirectParam = this.cloneParams(params);
+      indirectParam && delete indirectParam.IndexName;
+      const indirectBatch = await this.makeGet(this.markAsRaw(this.restrictKey(data.Item)), fields, params);
+      data = await this.client[action](indirectBatch.params).promise();
+    }
     return this.fromDynamo(data.Item, fields, returnRaw);
   }
 
-  async get(item, fields, params, returnRaw) {
-    return this.getByKey(item, fields, params, returnRaw);
+  async get(item, fields, params, returnRaw, ignoreIndirection) {
+    return this.getByKey(item, fields, params, returnRaw, ignoreIndirection);
   }
 
   async post(item) {
@@ -283,9 +295,25 @@ class Adapter {
     });
   }
 
-  async scanAllByParams(params, fields, returnRaw) {
-    params = this.cloneParams(params);
-    const result = await readList.getItems(this.client, params);
+  async scanAllByParams(params, fields, returnRaw, ignoreIndirection) {
+    const isIndirect = !ignoreIndirection && params && params.IndexName && this.isIndirectIndex(params.IndexName),
+      activeFields = isIndirect ? this.keyFields : fields;
+    let activeParams = this.cloneParams(params);
+    activeFields && addProjection(activeParams, activeFields, this.projectionFieldMap, true);
+    activeParams = cleanParams(activeParams);
+    const result = await readList.getItems(this.client, activeParams);
+    if (isIndirect && result.items.length) {
+      let indirectParam = this.cloneParams(params);
+      indirectParam && delete indirectParam.IndexName;
+      indirectParam = cleanParams(indirectParam);
+      result.items = await readOrderedListByKeys(
+        this.client,
+        this.table,
+        result.items.map(item => this.restrictKey(item)),
+        indirectParam
+      );
+      result.items = result.items.filter(item => item);
+    }
     let transformFn;
     if (returnRaw === 'db-raw' || returnRaw === 'raw') {
       transformFn = item => this.fromDynamo(item, null, returnRaw);
@@ -295,9 +323,24 @@ class Adapter {
     return {nextParams: result.nextParams, items: result.items.map(transformFn)};
   }
 
-  async getAllByParams(params, options, returnRaw) {
-    params = this.cloneParams(params);
-    const result = await paginateList(this.client, params, options);
+  async getAllByParams(params, options, returnRaw, ignoreIndirection) {
+    const isIndirect = !ignoreIndirection && params && params.IndexName && this.isIndirectIndex(params.IndexName),
+      activeFields = isIndirect ? this.keyFields : fields,
+      activeOptions = {...options, fields: activeFields};
+    params = cleanParams(this.cloneParams(params));
+    const result = await paginateList(this.client, params, activeOptions);
+    if (isIndirect && result.data.length) {
+      let indirectParam = this.cloneParams(params);
+      indirectParam && delete indirectParam.IndexName;
+      indirectParam = cleanParams(indirectParam);
+      result.data = await readOrderedListByKeys(
+        this.client,
+        this.table,
+        result.data.map(item => this.restrictKey(item)),
+        indirectParam
+      );
+      result.data = result.data.filter(item => item);
+    }
     let transformFn;
     if (returnRaw === 'db-raw' || returnRaw === 'raw') {
       transformFn = item => this.fromDynamo(item, null, returnRaw);
@@ -308,15 +351,30 @@ class Adapter {
     return result;
   }
 
-  async getByKeys(keys, fields, params, returnRaw) {
-    params = this.cloneParams(params);
-    fields && addProjection(params, fields, this.projectionFieldMap, true);
-    const items = await readList.byKeys(
+  async getByKeys(keys, fields, params, returnRaw, ignoreIndirection) {
+    const isIndirect = !ignoreIndirection && params && params.IndexName && this.isIndirectIndex(params.IndexName),
+      activeFields = isIndirect ? this.keyFields : fields;
+    let activeParams = this.cloneParams(params);
+    activeFields && addProjection(activeParams, activeFields, this.projectionFieldMap, true);
+    activeParams = cleanParams(activeParams);
+    let items = await readList.byKeys(
       this.client,
       this.table,
       keys.map(key => this.toDynamoKey(key, params.IndexName)),
-      cleanParams(params)
+      activeParams
     );
+    if (isIndirect && items.length) {
+      let indirectParam = this.cloneParams(params);
+      indirectParam && delete indirectParam.IndexName;
+      indirectParam = cleanParams(indirectParam);
+      items = await readList.byKeys(
+        this.client,
+        this.table,
+        items.map(item => this.restrictKey(item)),
+        indirectParam
+      );
+      items = items.filter(item => item);
+    }
     let transformFn;
     if (returnRaw === 'db-raw' || returnRaw === 'raw') {
       transformFn = item => this.fromDynamo(item, null, returnRaw);
@@ -326,9 +384,9 @@ class Adapter {
     return items.map(transformFn);
   }
 
-  async getAll(options, item, index, returnRaw) {
+  async getAll(options, item, index, returnRaw, ignoreIndirection) {
     const params = this.makeListParams(options, true, item, index);
-    return this.getAllByParams(params, options, returnRaw);
+    return this.getAllByParams(params, options, returnRaw, ignoreIndirection);
   }
 
   async putAll(items) {
@@ -580,6 +638,10 @@ class Adapter {
 
   toDynamoRaw(item) {
     return this.isDocClient ? item : this.convertTo(item, true);
+  }
+
+  markAsRaw(rawItem) {
+    return new (this.isDocClient ? Adapter.Raw : Adapter.DbRaw)(rawItem);
   }
 
   async validateItems(items, isPatch) {
