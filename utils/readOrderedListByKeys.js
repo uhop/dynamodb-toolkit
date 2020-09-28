@@ -27,11 +27,11 @@ const readOrderedListByKeys = async (client, tableName, keys, params) => {
       const partitionValue = key[partitionKey],
         partitionKeyValue = partitionValue instanceof Buffer ? partitionValue.toString('base64') : partitionValue;
       let value = dict[partitionKeyValue];
-      if (typeof value != 'object') return null;
+      if (typeof value != 'object') return undefined;
       const sortValue = key[sortKey],
         sortKeyValue = sortValue instanceof Buffer ? sortValue.toString('base64') : sortValue;
       value = value[sortKeyValue];
-      return typeof value == 'object' ? value : null;
+      return typeof value == 'object' ? value : undefined;
     });
   }
   // one key:
@@ -46,7 +46,7 @@ const readOrderedListByKeys = async (client, tableName, keys, params) => {
     const partitionValue = key[partitionKey],
       partitionKeyValue = partitionValue instanceof Buffer ? partitionValue.toString('base64') : partitionValue,
       value = dict[partitionKeyValue];
-    return typeof value == 'object' ? value : null;
+    return typeof value == 'object' ? value : undefined;
   });
 };
 
