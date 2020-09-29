@@ -77,6 +77,7 @@ The full documentation: [Adapter](https://github.com/uhop/dynamodb-toolkit/wiki/
     * Frequently used with hierarchical indices.
   * [searchable](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#searchable) &mdash; an optional dictionary of searchable top-level fields.
   * [searchablePrefix](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#searchableprefix) &mdash; an optional prefix to create technical searchable fields.
+  * [indirectIndices]() &mdash; an optional dictionary, which sets what indices contain key fields instead of actual items.
 * Methods:
   * [prepareKey(key [, index])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#preparekeykey--index) &mdash; prepares a database key.
   * [restrictKey(rawKey [, index])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#restrictkeyrawkey--index) &mdash; removes unwanted properties from a key. Different indices may have different set of properties.
@@ -88,8 +89,8 @@ The full documentation: [Adapter](https://github.com/uhop/dynamodb-toolkit/wiki/
 ## What you immediately get
 
 * Standard REST (CRUD):
-  * [get(key [, fields [, params [, returnRaw]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-getkey--fields--params--returnraw)
-    * AKA [getByKey(key [, fields [, params [, returnRaw]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-getbykeykey--fields--params--returnraw)
+  * [get(key [, fields [, params [, returnRaw [, ignoreIndirection]]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-getkey--fields--params--returnraw--ignoreindirection)
+    * AKA [getByKey(key [, fields [, params [, returnRaw [, ignoreIndirection]]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-getbykeykey--fields--params--returnraw--ignoreindirection)
   * [post(item)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-postitem)
   * [put(item [, force [, params]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-putitem--force--params)
   * [delete(key [, params])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-CRUD-methods#async-deletekey--params)
@@ -109,10 +110,10 @@ The full documentation: [Adapter](https://github.com/uhop/dynamodb-toolkit/wiki/
   * [makeCheck(key [, params])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-batch-methods#async-makecheckkey-params)
   * [makePatch(key, item [, params])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-batch-methods#async-makepatchkey-item--params)
 * Mass operations:
-  * [scanAllByParams(params [, fields [, returnRaw]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-scanallbyparamsparams--fields--returnraw)
-  * [getAllByParams(params [, options [, returnRaw]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-getallbyparamsparams--options--returnraw)
-  * [getByKeys(keys [, fields [, params [, returnRaw]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-getbykeyskeys--fields--params--returnraw)
-  * [getAll(options, item [, index [, returnRaw]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-getalloptions-item--index--returnraw)
+  * [scanAllByParams(params [, fields [, returnRaw [, ignoreIndirection]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-scanallbyparamsparams--fields--returnraw--ignoreindirection)
+  * [getAllByParams(params [, options [, returnRaw [, ignoreIndirection]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-getallbyparamsparams--options--returnraw--ignoreindirection)
+  * [getByKeys(keys [, fields [, params [, returnRaw [, ignoreIndirection]]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-getbykeyskeys--fields--params--returnraw--ignoreindirection)
+  * [getAll(options, item [, index [, returnRaw [, ignoreIndirection]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-getalloptions-item--index--returnraw--ignoreindirection)
   * [putAll(items)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-putallitems)
   * [deleteAllByParams(params)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-deleteallbyparamsparams)
   * [deleteByKeys(keys)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-deletebykeyskeys)
@@ -124,7 +125,7 @@ The full documentation: [Adapter](https://github.com/uhop/dynamodb-toolkit/wiki/
   * [moveByKeys(keys, mapFn [, returnRaw])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-movebykeyskeys-mapfn--returnraw)
   * [moveAll(options, mapFn, item [, index [, returnRaw]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-mass-methods#async-movealloptions-mapfn-item--index--returnraw)
 * Alternative generic implementations formulated in terms of other methods:
-  * [genericGetByKeys(keys [, fields [, params [, returnRaw]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericgetbykeyskeys--fields--params--returnraw)
+  * [genericGetByKeys(keys [, fields [, params [, returnRaw [, ignoreIndirection]]]])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericgetbykeyskeys--fields--params--returnraw--ignoreindirection)
   * [genericPutAll(items)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericputallitems)
   * [genericDeleteAllByParams(params)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericdeleteallbyparamsparams)
   * [genericDeleteByKeys(keys)](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-generic-methods#async-genericdeletebykeyskeys)
@@ -250,6 +251,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 2.2.0 *Added `readOrderedListByKeys()` and indirection to Adapter's GET-like methods.*
 - 2.1.1 *Bugfix in `addProjection()` to avoid duplicates.*
 - 2.1.0 *Added `moveXXX()` operations, some minor implementation improvements.*
 - 2.0.1 *Bugfix in the default implementation of `revive()`.*
