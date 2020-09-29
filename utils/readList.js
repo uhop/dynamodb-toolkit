@@ -1,11 +1,10 @@
 'use strict';
 
-const readListByKeys = require('./readListByKeys');
-
 // iteratively copy a list of items by keys
 
 const cleanParams = require('./cleanParams');
 const cloneParams = require('./cloneParams');
+const readListByKeys = require('./readListByKeys');
 
 const readList = async (client, params, fn) => {
   params = cleanParams(cloneParams(params));
