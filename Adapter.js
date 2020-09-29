@@ -42,6 +42,7 @@ class Adapter {
     this.projectionFieldMap = {};
     this.searchable = {};
     this.searchablePrefix = '-search-';
+    this.indirectIndices = {};
     // overlay
     Object.assign(this, options);
     // add calculated fields
@@ -93,10 +94,6 @@ class Adapter {
     // remove some technical fields if required
     if (fields) return subsetObject(rawItem, fields);
     return rawItem;
-  }
-
-  isIndirectIndex(index) {
-    return false;
   }
 
   async validateItem(item, isPatch) {
@@ -183,7 +180,7 @@ class Adapter {
   // general API
 
   async getByKey(key, fields, params, returnRaw, ignoreIndirection) {
-    const isIndirect = !ignoreIndirection && params && params.IndexName && this.isIndirectIndex(params.IndexName),
+    const isIndirect = !ignoreIndirection && params && params.IndexName && this.indirectIndices[params.IndexName] === 1,
       batch = await this.makeGet(key, isIndirect ? this.keyFields : fields, params),
       action = this.isDocClient ? 'get' : 'getItem';
     let data = await this.client[action](batch.params).promise();
@@ -296,7 +293,7 @@ class Adapter {
   }
 
   async scanAllByParams(params, fields, returnRaw, ignoreIndirection) {
-    const isIndirect = !ignoreIndirection && params && params.IndexName && this.isIndirectIndex(params.IndexName),
+    const isIndirect = !ignoreIndirection && params && params.IndexName && this.indirectIndices[params.IndexName] === 1,
       activeFields = isIndirect ? this.keyFields : fields;
     let activeParams = this.cloneParams(params);
     activeFields && addProjection(activeParams, activeFields, this.projectionFieldMap, true);
@@ -304,7 +301,8 @@ class Adapter {
     const result = await readList.getItems(this.client, activeParams);
     if (isIndirect && result.items.length) {
       let indirectParam = this.cloneParams(params);
-      indirectParam && delete indirectParam.IndexName;
+      delete indirectParam.IndexName;
+      fields && addProjection(indirectParam, fields, this.projectionFieldMap, true);
       indirectParam = cleanParams(indirectParam);
       result.items = await readOrderedListByKeys(
         this.client,
@@ -324,14 +322,15 @@ class Adapter {
   }
 
   async getAllByParams(params, options, returnRaw, ignoreIndirection) {
-    const isIndirect = !ignoreIndirection && params && params.IndexName && this.isIndirectIndex(params.IndexName),
+    const isIndirect = !ignoreIndirection && params && params.IndexName && this.indirectIndices[params.IndexName] === 1,
       activeOptions = {...options};
     isIndirect && (activeOptions.fields = this.keyFields);
     params = cleanParams(this.cloneParams(params));
     const result = await paginateList(this.client, params, activeOptions);
     if (isIndirect && result.data.length) {
       let indirectParam = this.cloneParams(params);
-      indirectParam && delete indirectParam.IndexName;
+      delete indirectParam.IndexName;
+      options && options.fields && addProjection(indirectParam, options.fields, this.projectionFieldMap, true);
       indirectParam = cleanParams(indirectParam);
       result.data = await readOrderedListByKeys(
         this.client,
@@ -352,7 +351,7 @@ class Adapter {
   }
 
   async getByKeys(keys, fields, params, returnRaw, ignoreIndirection) {
-    const isIndirect = !ignoreIndirection && params && params.IndexName && this.isIndirectIndex(params.IndexName),
+    const isIndirect = !ignoreIndirection && params && params.IndexName && this.indirectIndices[params.IndexName] === 1,
       activeFields = isIndirect ? this.keyFields : fields;
     let activeParams = this.cloneParams(params);
     activeFields && addProjection(activeParams, activeFields, this.projectionFieldMap, true);
@@ -365,7 +364,8 @@ class Adapter {
     );
     if (isIndirect && items.length) {
       let indirectParam = this.cloneParams(params);
-      indirectParam && delete indirectParam.IndexName;
+      delete indirectParam.IndexName;
+      fields && addProjection(indirectParam, fields, this.projectionFieldMap, true);
       indirectParam = cleanParams(indirectParam);
       items = await readList.byKeys(
         this.client,
@@ -468,13 +468,13 @@ class Adapter {
   // async cloneAll(options, mapFn, item, index) { /* see above */ }
   // async moveAll(options, mapFn, item, index) { /* see above */ }
 
-  async genericGetByKeys(keys, fields, params, returnRaw) {
+  async genericGetByKeys(keys, fields, params, returnRaw, ignoreIndirection) {
     params = this.cloneParams(params);
     fields && addProjection(params, fields, this.projectionFieldMap, true);
     const results = [];
     for (let i = 0; i < keys.length; ++i) {
       const key = keys[i],
-        result = await this.getByKey(key, null, params, returnRaw);
+        result = await this.getByKey(key, null, params, returnRaw, ignoreIndirection);
       typeof result != 'undefined' && results.push(result);
     }
     return results;
