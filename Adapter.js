@@ -303,6 +303,7 @@ class Adapter {
       let indirectParam = this.cloneParams(params);
       delete indirectParam.IndexName;
       fields && addProjection(indirectParam, fields, this.projectionFieldMap, true);
+      addProjection(indirectParam, this.keyFields, null, true);
       indirectParam = cleanParams(indirectParam);
       result.items = await readOrderedListByKeys(
         this.client,
@@ -322,16 +323,19 @@ class Adapter {
   }
 
   async getAllByParams(params, options, returnRaw, ignoreIndirection) {
-    const isIndirect = !ignoreIndirection && params && params.IndexName && this.indirectIndices[params.IndexName] === 1,
-      activeOptions = {...options};
-    isIndirect && (activeOptions.fields = this.keyFields);
-    params = cleanParams(this.cloneParams(params));
-    const result = await paginateList(this.client, params, activeOptions);
+    const isIndirect = !ignoreIndirection && params && params.IndexName && this.indirectIndices[params.IndexName] === 1;
+    let activeParams = this.cloneParams(params);
+    if (isIndirect) {
+      delete activeParams.ProjectionExpression;
+      addProjection(activeParams, this.keyFields, null, true);
+    }
+    activeParams = cleanParams(activeParams);
+    const result = await paginateList(this.client, activeParams, options);
     if (isIndirect && result.data.length) {
       let indirectParam = this.cloneParams(params);
       delete indirectParam.IndexName;
-      options && options.fields && addProjection(indirectParam, options.fields, this.projectionFieldMap, true);
       indirectParam = cleanParams(indirectParam);
+      addProjection(indirectParam, this.keyFields, null, true);
       result.data = await readOrderedListByKeys(
         this.client,
         this.table,
