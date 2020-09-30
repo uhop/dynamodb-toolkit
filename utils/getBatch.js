@@ -1,6 +1,8 @@
 'use strict';
 
 const batchGet = require('./batchGet');
+const cleanParams = require('./cleanParams');
+const cloneParams = require('./cloneParams');
 
 const LIMIT = 100;
 
@@ -35,6 +37,7 @@ const getBatch = async (client, ...requests) => {
   };
 
   const runBatch = async () => {
+    Object.keys(batch).forEach(tableName => (batch[tableName] = cleanParams(cloneParams(batch[tableName]))));
     const responses = await doBatch(client, batch);
     size = 0;
     batch = {};
