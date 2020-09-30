@@ -17,6 +17,8 @@ const addProjection = (params, fields, projectionFieldMap, skipSelect, separator
   fields = normalizeFields(fields, projectionFieldMap);
   if (!fields) return params;
   const names = params.ExpressionAttributeNames || {},
+    keys = Object.keys(names),
+    reversedNames = keys.reduce((acc, key) => ((acc['#' + names[key]] = key), acc), {}),
     uniqueNames = {};
   let keyCounter = Object.keys(names).length;
   const projection = fields
@@ -24,7 +26,7 @@ const addProjection = (params, fields, projectionFieldMap, skipSelect, separator
     .reduce((acc, key) => {
       const path = key.split(separator).map(key => {
         if (isInteger.test(key)) return key;
-        let alias = uniqueNames['#' + key];
+        let alias = uniqueNames['#' + key] || reversedNames['#' + key];
         if (!alias) {
           alias = uniqueNames['#' + key] = '#pj' + keyCounter++;
           names[alias] = key;
@@ -34,7 +36,7 @@ const addProjection = (params, fields, projectionFieldMap, skipSelect, separator
       acc.push(path.reduce((acc, part) => acc + (acc ? (isInteger.test(part) ? '[' + part + ']' : '.' + part) : part), ''));
       return acc;
     }, [])
-    .join(', ');
+    .join(',');
   if (projection) {
     Object.keys(names).length && (params.ExpressionAttributeNames = names);
     if (params.ProjectionExpression) {
@@ -43,6 +45,9 @@ const addProjection = (params, fields, projectionFieldMap, skipSelect, separator
       params.ProjectionExpression = projection;
     }
     !skipSelect && params.ProjectionExpression && (params.Select = 'SPECIFIC_ATTRIBUTES');
+  }
+  if (params.ProjectionExpression) {
+    params.ProjectionExpression = params.ProjectionExpression.split(/\s*,\s*/).filter(removeDups()).join(',');
   }
   return params;
 };
