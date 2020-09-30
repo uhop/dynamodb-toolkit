@@ -4,8 +4,8 @@ const backoff = require('./backoff');
 const sleep = require('./sleep');
 
 const batchGet = async (client, params) => {
-  const action = typeof client.createSet == 'function' ? 'batchGet' : 'batchGetItem';
-  const responses = {};
+  const action = typeof client.createSet == 'function' ? 'batchGet' : 'batchGetItem',
+    responses = {};
   for (const delay of backoff()) {
     try {
       const data = await client[action](params).promise();
