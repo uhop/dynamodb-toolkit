@@ -77,7 +77,7 @@ The full documentation: [Adapter](https://github.com/uhop/dynamodb-toolkit/wiki/
     * Frequently used with hierarchical indices.
   * [searchable](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#searchable) &mdash; an optional dictionary of searchable top-level fields.
   * [searchablePrefix](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#searchableprefix) &mdash; an optional prefix to create technical searchable fields.
-  * [indirectIndices]() &mdash; an optional dictionary, which sets what indices contain key fields instead of actual items.
+  * [indirectIndices](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#indirectindices) &mdash; an optional dictionary, which sets what indices contain key fields instead of actual items.
 * Methods:
   * [prepareKey(key [, index])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#preparekeykey--index) &mdash; prepares a database key.
   * [restrictKey(rawKey [, index])](https://github.com/uhop/dynamodb-toolkit/wiki/Adapter:-settings#restrictkeyrawkey--index) &mdash; removes unwanted properties from a key. Different indices may have different set of properties.
