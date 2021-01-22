@@ -251,6 +251,7 @@ See [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) for the full documenta
 
 # Versions
 
+- 2.3.0 *Added `__separator` to a patch object.*
 - 2.2.0 *Added `readOrderedListByKeys()` and indirection to Adapter's GET-like methods.*
 - 2.1.1 *Bugfix in `addProjection()` to avoid duplicates.*
 - 2.1.0 *Added `moveXXX()` operations, some minor implementation improvements.*

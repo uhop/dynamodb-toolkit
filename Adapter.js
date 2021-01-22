@@ -140,7 +140,8 @@ class Adapter {
   }
 
   async makePatch(key, item, params) {
-    const deleteProps = item.__delete;
+    const deleteProps = item.__delete,
+      separator = typeof item.__separator == 'string' && item.__separator;
     if (this.isDocClient) {
       if (item instanceof Adapter.DbRaw) {
         item = this.convertFrom(item);
@@ -165,7 +166,8 @@ class Adapter {
     params = this.checkExistence(params);
     this.keyFields.forEach(field => delete item[field]);
     delete item.__delete;
-    params = prepareUpdate(item, deleteProps, params);
+    delete item.__separator;
+    params = prepareUpdate(item, deleteProps, params, separator || undefined);
     params = cleanParams(this.updateParams(params, {name: 'patch'}));
     return {action: 'patch', params};
   }

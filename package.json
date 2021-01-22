@@ -1,6 +1,6 @@
 {
   "name": "dynamodb-toolkit",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Helpers for AWS DynamoDB to build efficient web applications",
   "main": "index.js",
   "scripts": {
@@ -23,11 +23,11 @@
   },
   "homepage": "https://github.com/uhop/dynamodb-toolkit#readme",
   "devDependencies": {
-    "aws-sdk": "^2.761.0",
+    "aws-sdk": "^2.830.0",
     "colors": "^1.4.0",
-    "koa": "^2.13.0",
+    "koa": "^2.13.1",
     "koa-body": "^4.2.0",
-    "koa-router": "^9.4.0"
+    "koa-router": "^10.0.0"
   },
   "files": [
     "/*.js",

@@ -976,7 +976,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n  \"terrain\": \"lakes\",\n  \"config.c\": \"three\",\n  \"people\": \"beautiful\"\n}"
+					"raw": "{\n  \"terrain\": \"lakes\",\n  \"config/c\": \"three\",\n  \"people\": \"beautiful\",\n  \"__separator\": \"/\"\n}"
 				},
 				"url": {
 					"raw": "localhost:3000/AAA%20Fake",
