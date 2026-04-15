@@ -4,7 +4,8 @@
       "Bash(npm start:*)",
       "Bash(npm run:*)",
       "Bash(npm install:*)",
-      "Bash(npm pack:*)"
+      "Bash(npm pack:*)",
+      "WebSearch"
     ]
   }
 }
