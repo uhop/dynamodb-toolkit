@@ -1,0 +1,181 @@
+# dynamodb-toolkit
+
+> No-dependency CommonJS micro-library for AWS DynamoDB. Builds REST handlers (Koa) and high-throughput CLI jobs on top of either `AWS.DynamoDB` or `AWS.DynamoDB.DocumentClient`.
+
+## Install
+
+```
+npm i dynamodb-toolkit
+```
+
+The consumer also installs `aws-sdk` (the library does not depend on it).
+
+## Quick start
+
+```js
+const Adapter = require('dynamodb-toolkit');
+const AWS = require('aws-sdk');
+AWS.config.update({region: 'us-east-2'});
+
+const adapter = new Adapter({
+  client: new AWS.DynamoDB(),
+  table: 'planets',
+  keyFields: ['name']
+});
+
+const planet = await adapter.get({name: 'Alderaan'});
+await adapter.patch({name: planet.name, diameter: planet.diameter * 2});
+await adapter.delete({name: planet.name});
+```
+
+## Adapter
+
+### Constructor options
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `client` | object | **Required.** `AWS.DynamoDB` or `AWS.DynamoDB.DocumentClient`. |
+| `table` | string | **Required.** Base table name. |
+| `keyFields` | string[] | **Required.** Partition key first, then sort key. |
+| `specialTypes` | object | `{field: 1}` — arrays stored as DynamoDB Sets, not Lists. |
+| `projectionFieldMap` | object | Alias → real field for projections. |
+| `searchable` | object | Fields that get a `searchablePrefix + field` lowercase mirror for substring filtering. |
+| `searchablePrefix` | string | Default `'-search-'`. |
+| `indirectIndices` | object | `{IndexName: 1}` — the index projects keys only; reads do a second batchGet. |
+| `converter` | object | Override the default `utils/converter` (mirrors `AWS.DynamoDB.Converter`). |
+| `converterOptions` | object | Passed to `converter.input`/`output`. |
+
+Extension hooks (override via subclass or constructor):
+
+- `prepare(item, isPatch)` — pre-write transform.
+- `revive(rawItem, fields)` — post-read transform.
+- `prepareKey(key, index)` / `restrictKey(rawKey, index)` — key shaping.
+- `prepareListParams(item, index)` — base params for `*All` operations.
+- `updateParams(params, options)` — mutate params before any write. `options.name` is one of `'post'|'put'|'patch'|'delete'`; `options.force` is set for `put`.
+- `async validateItem(item, isPatch)` — throw to abort.
+- `async checkConsistency(batch)` — return additional `make*()` items to run in the same transaction.
+
+### Marker classes
+
+- `Adapter.Raw` — caller-shaped JSON; skip `prepare()` but still convert wire format if needed.
+- `Adapter.DbRaw` — already in DynamoDB wire format; skip both.
+- `Adapter.adapt(options)` — alias for `new Adapter(options)`.
+
+### CRUD
+
+- `await adapter.get(key, fields?, params?, returnRaw?, ignoreIndirection?)` — alias `getByKey`.
+- `await adapter.post(item)` — fails if key exists.
+- `await adapter.put(item, force?, params?)` — `force=true` overwrites; otherwise asserts existence.
+- `await adapter.patch(item, params?)` — alias `patchByKey(key, item, params?)`. Honors `item.__delete` (array of paths to REMOVE) and `item.__separator` (path separator, default `.`).
+- `await adapter.delete(key, params?)` — alias `deleteByKey`.
+- `await adapter.clone(item, mapFn, force?, params?, returnRaw?)` — read → mapFn → write.
+- `await adapter.move(item, mapFn, force?, params?, returnRaw?)` — clone + delete in one transaction.
+
+`returnRaw`: `'raw'` returns an `Adapter.Raw`, `'db-raw'` returns an `Adapter.DbRaw`, anything else runs `revive()`.
+
+### Batch builders
+
+Each returns `{action, params}` (or `{action, adapter, params}` for `makeGet`). Compose with `applyTransaction` / `applyBatch`.
+
+- `await adapter.makeGet(key, fields?, params?)`
+- `await adapter.makeCheck(key, params?)`
+- `await adapter.makePost(item)`
+- `await adapter.makePut(item, force?, params?)`
+- `await adapter.makePatch(key, item, params?)`
+- `await adapter.makeDelete(key, params?)`
+
+### Mass operations (native)
+
+- `await adapter.scanAllByParams(params, fields?, returnRaw?, ignoreIndirection?)` → `{nextParams, items}`.
+- `await adapter.getAllByParams(params, options?, returnRaw?, ignoreIndirection?)` → paginated `{data, ...}`.
+- `await adapter.getByKeys(keys, fields?, params?, returnRaw?, ignoreIndirection?)` → array.
+- `await adapter.getAll(options, item?, index?, returnRaw?, ignoreIndirection?)`.
+- `await adapter.putAll(items)`.
+- `await adapter.deleteAllByParams(params)`.
+- `await adapter.deleteByKeys(keys)`.
+- `await adapter.deleteAll(options, item?, index?)`.
+- `await adapter.cloneAllByParams(params, mapFn, returnRaw?)`.
+- `await adapter.cloneByKeys(keys, mapFn, returnRaw?)`.
+- `await adapter.cloneAll(options, mapFn, item?, index?, returnRaw?)`.
+- `await adapter.moveAllByParams(params, mapFn, returnRaw?)`.
+- `await adapter.moveByKeys(keys, mapFn, returnRaw?)`.
+- `await adapter.moveAll(options, mapFn, item?, index?, returnRaw?)`.
+
+### Mass operations (generic)
+
+Sequential, item-by-item versions; slower but lower resource use:
+
+`genericGetByKeys`, `genericPutAll`, `genericDeleteAllByParams`, `genericDeleteByKeys`, `genericCloneAllByParams`, `genericCloneByKeys`, `genericMoveAllByParams`, `genericMoveByKeys`.
+
+### Utilities (instance)
+
+- `cloneParams(params)` — shallow clone, forces `TableName`.
+- `cleanGetParams(params)` — clone + drop `ConditionExpression`.
+- `checkExistence(params, invert?)` — adds `attribute_exists`/`attribute_not_exists` on the partition key.
+- `makeParams(options, project?, params?, skipSelect?)` — applies `consistent`, `descending`, `fields`, `filter`.
+- `makeListParams(options, project, item, index?)`.
+- `addKeyFields(params, skipSelect?)`.
+- `convertFrom(item, ignoreSpecialTypes?)` / `convertTo(item, ignoreSpecialTypes?)`.
+- `fromDynamo(item, fields?, returnRaw?)` / `toDynamo(item)` / `toDynamoKey(key, index?)`.
+- `fromDynamoRaw(item)` / `toDynamoRaw(item)`.
+- `markAsRaw(rawItem)` — wrap in the right marker class for the current client mode.
+- `await validateItems(items, isPatch?)`.
+
+## KoaAdapter
+
+```js
+const KoaAdapter = require('dynamodb-toolkit/helpers/KoaAdapter');
+const koa = new KoaAdapter(adapter, overlay);
+```
+
+Methods (all `(ctx) => Promise<void>`):
+
+- Item: `get`, `post`, `put`, `patch`, `delete`, `clone`, `move`.
+- Mass: `getAll`, `getByNames`, `deleteAll`, `deleteByNames`, `cloneAll`, `cloneByNames`, `moveAll`, `moveByNames`.
+
+Hooks: `augmentItemFromContext(item, ctx)`, `augmentCloneFromContext(ctx)`, `extractKeys(ctx, forceQuery?)`, `namesToKeys(ctx, names)`, `makeOptions(ctx)`, `makeParams(ctx, project?, params?)`.
+
+Query parameters consumed by `makeOptions`: `fields`, `filter`, `offset`, `limit`, `consistent`. `force` is read separately on `put`/`clone`/`move`. `204` for successful writes; `404` for missing items on `get`/`clone`/`move`.
+
+## Standalone utilities
+
+```js
+const applyTransaction = require('dynamodb-toolkit/utils/applyTransaction');
+const applyBatch       = require('dynamodb-toolkit/utils/applyBatch');
+const prepareUpdate    = require('dynamodb-toolkit/utils/prepareUpdate');
+const addProjection    = require('dynamodb-toolkit/utils/addProjection');
+const filtering        = require('dynamodb-toolkit/utils/filtering');
+const makeClient       = require('dynamodb-toolkit/utils/makeClient');
+// ...etc, one file per export.
+```
+
+Most operate on a `params` object compatible with the AWS SDK call shapes (`get`, `put`, `update`, `delete`, `query`, `scan`, `batchGet`, `batchWrite`, `transactWrite`, `transactGet`).
+
+## Patching convention
+
+```js
+await adapter.patch({
+  name: 'Alderaan',
+  diameter: 12500,
+  __delete: ['climate', 'meta.tag'],
+  __separator: '.'
+});
+```
+
+`__delete` lists paths to `REMOVE`. `__separator` (default `'.'`) splits keys for nested paths; pure-digit segments become array indices. The key field is stripped from the patch automatically.
+
+## Test server
+
+The repo includes a Koa server for hand testing:
+
+```bash
+HOST=localhost PORT=3000 npm start
+```
+
+`tests/routes.js` wires an Adapter against a table named `test` keyed on `name`. `PUT /-load` reloads the Star Wars planets fixture (`tests/data.json.gz`). The Postman collection `tests/Unit test dynamodb-toolkit.postman_collection.json` exercises every endpoint.
+
+## Links
+
+- Wiki: https://github.com/uhop/dynamodb-toolkit/wiki
+- npm: https://www.npmjs.com/package/dynamodb-toolkit
+- Full LLM reference: https://github.com/uhop/dynamodb-toolkit/blob/master/llms-full.txt

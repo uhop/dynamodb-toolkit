@@ -22,6 +22,7 @@
     "url": "https://github.com/uhop/dynamodb-toolkit/issues"
   },
   "homepage": "https://github.com/uhop/dynamodb-toolkit#readme",
+  "funding": "https://github.com/sponsors/uhop",
   "devDependencies": {
     "aws-sdk": "^2.830.0",
     "colors": "^1.4.0",

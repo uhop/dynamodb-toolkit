@@ -1,0 +1,366 @@
+# dynamodb-toolkit — Full Reference
+
+> No-dependency CommonJS micro-library for AWS DynamoDB. Targets either `AWS.DynamoDB` or `AWS.DynamoDB.DocumentClient` (auto-detected via `typeof client.createSet == 'function'`). Provides the `Adapter` class, the `KoaAdapter` HTTP wrapper, and a set of standalone utilities for batch/transaction/pagination/patching/projection.
+
+This file is the long-form companion to `llms.txt`. Read `llms.txt` first for the API summary; this file documents semantics, edge cases, and the full standalone utility API.
+
+## 1. Adapter
+
+`Adapter` (`Adapter.js`) is the central class. One Adapter typically maps to one logical entity (often one table). All write paths funnel through `make*()` builders and all reads honor `indirectIndices`.
+
+### 1.1 Constructor
+
+```js
+const Adapter = require('dynamodb-toolkit');
+
+const adapter = new Adapter({
+  client,                          // required: AWS.DynamoDB or AWS.DynamoDB.DocumentClient
+  table: 'planets',                // required: base table name
+  keyFields: ['name'],             // required: partition key first, then sort key
+  specialTypes: {tags: 1},         // optional: arrays stored as DynamoDB Sets, not Lists
+  projectionFieldMap: {},          // optional: alias → real field for projections
+  searchable: {name: 1},           // optional: fields with '-search-<name>' lowercase mirrors
+  searchablePrefix: '-search-',    // optional: default '-search-'
+  indirectIndices: {},             // optional: {IndexName: 1} for key-only GSIs
+  converter: customConverter,      // optional: override utils/converter
+  converterOptions: {convertEmptyValues: true},  // optional
+  prepare(item, isPatch) { ... },
+  revive(rawItem, fields) { ... },
+  validateItem(item, isPatch) { ... },
+  checkConsistency(batch) { ... }
+});
+
+// or the static helper:
+const adapter = Adapter.make(options);
+// Adapter.adapt is an alias of Adapter.make.
+```
+
+The constructor stores `this.isDocClient = typeof this.client.createSet == 'function'`. Most internal branches consult this flag to choose between `put`/`putItem`, etc.
+
+### 1.2 Marker classes
+
+- `Adapter.Raw` — caller-shaped JSON, possibly with technical fields. Skips `prepare()` but is still passed through `convertTo()` when the client is the raw `AWS.DynamoDB` (not the DocumentClient).
+- `Adapter.DbRaw` — already in DynamoDB wire format (`{S: ...}` etc). Skips both `prepare()` and conversion.
+
+Both have a static `make(source)` factory.
+
+`adapter.markAsRaw(rawItem)` returns the right marker for the current client mode (`Raw` for DocumentClient, `DbRaw` for raw DynamoDB).
+
+### 1.3 User-defined hooks (defaults shown)
+
+```js
+prepare(item, isPatch)        // returns item (identity)
+prepareKey(key, index)        // returns this.restrictKey(this.prepare(key), index)
+restrictKey(rawKey, index)    // returns subset of rawKey with this.keyFields
+prepareListParams(item, index) // returns {}
+updateParams(params, options) // returns params (identity); options: {name, force}
+revive(rawItem, fields)       // subsetObject(rawItem, fields) if fields else rawItem
+async validateItem(item, isPatch)  // no-op; throw to abort
+async checkConsistency(batch)      // returns null; return more batch items to add a transaction
+```
+
+`updateParams` is called from `makePost` (`{name: 'post'}`), `makePut` (`{name: 'put', force}`), `makePatch` (`{name: 'patch'}`), and `makeDelete` (`{name: 'delete'}`).
+
+### 1.4 Batch builders
+
+Each returns a batch descriptor consumable by `applyTransaction` / `applyBatch`.
+
+```js
+await adapter.makeGet(key, fields, params)
+// returns {action: 'get', adapter, params}
+
+await adapter.makeCheck(key, params)
+// returns {action: 'check', params}
+
+await adapter.makePost(item)
+// runs validateItem (unless item is Raw); adds existence check; returns {action: 'put', params}
+
+await adapter.makePut(item, force, params)
+// runs validateItem (unless Raw); existence check unless force; returns {action: 'put', params}
+
+await adapter.makePatch(key, item, params)
+// extracts item.__delete and item.__separator; runs validateItem (unless Raw/DbRaw);
+// removes key fields from item; calls prepareUpdate; returns {action: 'patch', params}
+
+await adapter.makeDelete(key, params)
+// returns {action: 'delete', params}
+```
+
+`makePatch` honors marker classes for the `item`:
+- `DbRaw` + DocumentClient → unmarshalls via `convertFrom`.
+- `DbRaw` + raw client → passes through.
+- `Raw` + DocumentClient → passes through.
+- `Raw` + raw client → marshals via `convertTo`.
+- Plain object → `validateItem`, then `prepare(item, true)`, then conversion if needed.
+
+### 1.5 CRUD methods
+
+```js
+await adapter.get(item, fields, params, returnRaw, ignoreIndirection)
+// alias: getByKey(key, fields, params, returnRaw, ignoreIndirection)
+// returns the item, or undefined if not found
+
+await adapter.post(item)
+// inserts; throws if the partition key already exists
+
+await adapter.put(item, force, params)
+// upserts; without force, throws unless the item exists (by partition key)
+
+await adapter.patch(item, params)
+// alias: patchByKey(key, item, params); modifies the item identified by its key fields
+
+await adapter.delete(key, params)
+// alias: deleteByKey(key, params)
+
+await adapter.clone(item, mapFn, force, params, returnRaw)
+// alias: cloneByKey(key, mapFn, force, params, returnRaw)
+// reads → mapFn(item) → post (or put when force=true). Returns true on success, false if not found.
+
+await adapter.move(item, mapFn, force, params, returnRaw)
+// alias: moveByKey(key, mapFn, force, params, returnRaw)
+// like clone, but deletes the source in the same transaction as the write.
+```
+
+For each write, `checkConsistency(batch)` is consulted. If it returns truthy, `applyTransaction(client, checks, batch)` runs the whole thing as `transactWriteItems`. Otherwise the single op runs directly.
+
+### 1.6 `returnRaw` semantics
+
+- omitted / falsy → run `revive(rawItem, fields)`.
+- `'raw'` → return `new Adapter.Raw(...)` after un-marshalling if needed.
+- `'db-raw'` → return `new Adapter.DbRaw(...)` in wire format.
+
+Use `'raw'` / `'db-raw'` when piping reads back into writes to avoid re-running `prepare`/`revive`.
+
+### 1.7 Indirect indices
+
+`indirectIndices: {IndexName: 1}` declares a GSI whose projected items are key-only. Affected reads:
+
+1. First call queries the index with only `keyFields` projected.
+2. Returned keys are reshaped via `restrictKey()` and run through `readOrderedListByKeys` against the base table to fetch full attributes.
+3. `ignoreIndirection: true` bypasses the second hop.
+
+This logic lives in `getByKey`, `getByKeys`, `scanAllByParams`, and `getAllByParams`.
+
+### 1.8 Mass operations (native)
+
+Use DynamoDB batch/transaction APIs for throughput.
+
+```js
+await adapter.scanAllByParams(params, fields, returnRaw, ignoreIndirection)
+// returns {nextParams, items}; pass nextParams back in to continue.
+
+await adapter.getAllByParams(params, options, returnRaw, ignoreIndirection)
+// paginated read with offset/limit; returns {data, ...} from paginateList.
+
+await adapter.getByKeys(keys, fields, params, returnRaw, ignoreIndirection)
+// batchGet over keys; returns array.
+
+await adapter.getAll(options, item, index, returnRaw, ignoreIndirection)
+// builds params via makeListParams, then getAllByParams.
+
+await adapter.putAll(items)
+// writeList: chunked batchWrite with backoff.
+
+await adapter.deleteAllByParams(params)
+await adapter.deleteByKeys(keys)
+await adapter.deleteAll(options, item, index)
+
+await adapter.cloneAllByParams(params, mapFn, returnRaw)
+await adapter.cloneByKeys(keys, mapFn, returnRaw)
+await adapter.cloneAll(options, mapFn, item, index, returnRaw)
+
+await adapter.moveAllByParams(params, mapFn, returnRaw)
+await adapter.moveByKeys(keys, mapFn, returnRaw)
+await adapter.moveAll(options, mapFn, item, index, returnRaw)
+```
+
+### 1.9 Mass operations (generic)
+
+Sequential, item-by-item versions. Slower but lower memory and trivially correct under unusual schemas:
+
+`genericGetByKeys`, `genericPutAll`, `genericDeleteAllByParams`, `genericDeleteByKeys`, `genericCloneAllByParams`, `genericCloneByKeys`, `genericMoveAllByParams`, `genericMoveByKeys`. All return the count of processed items where applicable.
+
+### 1.10 Utility methods
+
+```js
+adapter.cloneParams(params)
+// shallow clone of params with TableName forced to this.table.
+
+adapter.cleanGetParams(params)
+// cloneParams + delete ConditionExpression + cleanParams.
+
+adapter.checkExistence(params, invert)
+// adds attribute_exists(<partition key>) or attribute_not_exists; ANDs with any existing ConditionExpression.
+
+adapter.makeParams(options, project, params, skipSelect)
+// applies options: consistent → ConsistentRead, descending → ScanIndexForward=false,
+// fields (string|array) → ProjectionExpression, filter → FilterExpression via filtering().
+
+adapter.makeListParams(options, project, item, index)
+// → makeParams(options, project, prepareListParams(item, index))
+
+adapter.addKeyFields(params, skipSelect)
+// adds keyFields to ProjectionExpression.
+
+adapter.convertFrom(item, ignoreSpecialTypes)
+adapter.convertTo(item, ignoreSpecialTypes)
+// wire-format conversion; honors specialTypes unless ignoreSpecialTypes.
+
+adapter.fromDynamo(item, fields, returnRaw)
+adapter.toDynamo(item)
+adapter.toDynamoKey(key, index)
+adapter.fromDynamoRaw(item)
+adapter.toDynamoRaw(item)
+adapter.markAsRaw(rawItem)
+
+await adapter.validateItems(items, isPatch)
+```
+
+## 2. KoaAdapter
+
+`KoaAdapter` (`helpers/KoaAdapter.js`) is a thin HTTP wrapper:
+
+```js
+const KoaAdapter = require('dynamodb-toolkit/helpers/KoaAdapter');
+
+const koa = new KoaAdapter(adapter, {
+  sortableIndices: {name: '-t-name-index'},
+  augmentItemFromContext(item, ctx) { ... },
+  augmentCloneFromContext(ctx) { return item => ({...item, ...}); },
+  async getAll(ctx) { ... }   // override per-route handlers
+});
+```
+
+If the first arg is not already an `Adapter`, it's treated as Adapter constructor options and `new Adapter(...)` is called.
+
+### 2.1 Hooks
+
+- `augmentItemFromContext(item, ctx)` — defaults to `Object.assign(item, ctx.params)`.
+- `augmentCloneFromContext(ctx)` — defaults to `item => ({...item, ...ctx.request.body})`.
+- `extractKeys(ctx, forceQuery)` — returns an array of keys. Reads `ctx.request.body` for `PUT`/`POST` (must be an array of names, else throws). Otherwise reads `ctx.query.names` (comma-separated, else throws).
+- `namesToKeys(ctx, names)` — defaults to `name => ({name})`. Override for compound keys.
+- `makeOptions(ctx)` — `{consistent, filter, fields, offset, limit}` from `ctx.query`.
+- `makeParams(ctx, project, params)` → `adapter.makeParams(makeOptions(ctx), project, params)`.
+
+### 2.2 Handlers
+
+Each is `async (ctx) => Promise<void>`. Successful writes set `ctx.status = 204`; missing items on read/clone/move set `ctx.status = 404`.
+
+Item: `get`, `post`, `put`, `patch`, `delete`, `clone`, `move`, `doClone(ctx, mapFn)`, `doMove(ctx, mapFn)`.
+
+Mass: `getAll`, `getByNames`, `deleteAll`, `deleteByNames`, `cloneAll`, `cloneByNames`, `moveAll`, `moveByNames`, plus `doCloneAll`, `doCloneByNames`, `doMoveAll`, `doMoveByNames`.
+
+`force` (for `put`/`clone`/`move`) and `consistent` (for `get`/`getByNames`) are read from the query string via `helpers/isTrue.js` (`yes|true|1|on`).
+
+### 2.3 Routing example
+
+See `tests/routes.js` for the canonical Koa wiring against the Star Wars planets dataset.
+
+## 3. Patching
+
+`prepareUpdate(patch, deleteProps, params, separator = '.')`:
+
+- Builds `UpdateExpression` `SET` clauses from `patch`'s own keys.
+- Splits each key on `separator` for nested paths. Pure-digit segments are passed through as array indices and **not** aliased.
+- Builds `REMOVE` clauses from `deleteProps` (an array of paths).
+- Reuses any existing `ExpressionAttributeNames` / `ExpressionAttributeValues`, deduping aliases as `#upk<n>` / `:upv<n>`.
+- Returns the mutated `params`.
+
+`makePatch()` extracts `item.__delete` and `item.__separator` before calling `prepareUpdate`. Key fields are removed from the patch automatically.
+
+```js
+await adapter.patch({
+  name: 'Alderaan',           // key field — stripped automatically
+  diameter: 12500,
+  'meta.tag': 'destroyed',    // dotted path → meta.tag
+  __delete: ['climate'],      // REMOVE climate
+  __separator: '.'            // optional, default '.'
+});
+```
+
+## 4. Standalone utilities
+
+Each file in `utils/` exports one main symbol. Import as `require('dynamodb-toolkit/utils/<name>')`.
+
+### Client
+
+- `makeClient(AWS, pragmas, options)` — returns `new AWS.DynamoDB.DocumentClient` if `pragmas.docClient`, else `new AWS.DynamoDB`. Pulls region/credentials from the AWS shared config/credentials files via `getProfileName()` unless `pragmas.profile` overrides. `pragmas.warn` enables console warnings.
+  - `makeClient.getOptions(AWS, pragmas)` — just resolves the options without constructing.
+- `createClient(AWS, profile, warn)` — thin wrapper: `makeClient(AWS, {profile, warn})`.
+- `getProfileName()` — returns `process.env.AWS_PROFILE` or `process.env.AWS_DEFAULT_PROFILE`.
+
+### Conversion
+
+- `converter` — `{input, output, marshall, unmarshall}` mirroring `AWS.DynamoDB.Converter`. Supports `convertEmptyValues` and `useArraysForSets`.
+- `convertTypes` — `{convertTo, convertFrom}` honoring a `specialTypes` map (which arrays are Sets).
+
+### Batches and transactions
+
+- `applyBatch(client, ...requests)` — chunked `batchWriteItem`; LIMIT 25 per call. Accepts batch descriptors `{action: 'put'|'delete', params}` (singletons or arrays). Returns the count.
+- `applyTransaction(client, ...requests)` — `transactWriteItems` builder. Accepts `'put'|'delete'|'patch'|'check'` actions. Falls through silently when no items remain.
+- `batchWrite(client, params)` / `batchGet(client, params)` — single-call wrappers with `backoff()` retries on unprocessed items.
+- `getBatch(client, params)` — low-level batch reader used by `readListByKeys`.
+- `getTransaction(client, ...requests)` — `transactGetItems` builder.
+- `backoff(fn, attempt)` / `backoff.delay(attempt)` — exponential backoff used by all retrying utilities.
+
+### Mass reads
+
+- `readList(client, params)` — runs scan/query, returns `{items, nextParams}`.
+  - `readList.getItems(client, params)` is the same; the export is a function with an attached helper.
+- `readList.byKeys(client, table, keys, params)` — batchGet adapter that returns items in arbitrary order.
+- `readListByKeys(client, table, keys, params)` — like above, exported separately.
+- `readOrderedListByKeys(client, table, keys, params)` — preserves caller key order; used for indirect-index reads.
+- `paginateList(client, params, options)` — offset/limit pagination, returns `{data, ...}`. `options` accepts `offset`, `limit`, `fields`.
+- `paginateListNoLimit(client, params, options)` — variant without an upper bound.
+- `iterateList(client, params)` — async iterator yielding pages.
+- `getTotal(client, params)` — returns the Count via `Select=COUNT`.
+
+### Mass writes
+
+- `writeList(client, table, items, mapFn?)` — chunked `batchWrite` with backoff; `mapFn(item)` may transform each.
+- `deleteList(client, params)` — scans and deletes everything matching params.
+  - `deleteList.byKeys(client, table, keys)` — batched delete by key.
+- `copyList(client, params, mapFn)` and `copyList.viaKeys(client, params, mapFn)` and `copyList.byKeys(client, table, keys, mapFn)` — read → mapFn → write.
+- `moveList(client, params, mapFn)` / `moveList.viaKeys(...)` / `moveList.byKeys(...)` — read → mapFn → write → delete originals.
+
+### Params helpers
+
+- `addProjection(params, fields, projectionFieldMap?, skipSelect?)` — adds `ProjectionExpression`, dedupes attribute aliases, sets `Select=SPECIFIC_ATTRIBUTES` unless `skipSelect`.
+- `cleanParams(params)` — drops empty `Expression*` members.
+- `cloneParams(params)` — shallow clone using own-property check.
+- `combineParams(a, b)` — merges two params, deduping attribute aliases.
+- `filtering(filter, searchable, {fields, isDocClient, params})` — builds a `FilterExpression` for searchable substring matching.
+- `normalizeFields(fields)` — `'a,b,c' | ['a','b']` → `['a','b','c']`.
+- `subsetObject(obj, fields)` — returns a new object containing only listed fields.
+
+### Patching helpers
+
+- `prepareUpdate(patch, deleteProps, params, separator)` — see §3.
+- `applyPatch(item, patch, deleteProps, separator)` — same semantics as `prepareUpdate` but operates on an in-memory object.
+- `getPath(obj, path, separator?)` / `setPath(obj, path, value, separator?)` / `deletePath(obj, path, separator?)` — dotted-path object access.
+
+### Misc
+
+- `random` — small random helpers.
+- `seq(promiseFns)` — runs an array of `() => Promise` sequentially.
+- `sleep(ms)` — `await sleep(1000)`.
+
+## 5. Test server
+
+`tests/server.js` boots a Koa server on `localhost:3000` (env `HOST`, `PORT`). `tests/routes.js` wires an `Adapter` against table `test` keyed on `name`, plus a `KoaAdapter` overlay with `sortableIndices` and a `load` endpoint that re-imports `tests/data.json.gz` (Star Wars planets).
+
+```bash
+HOST=localhost PORT=3000 npm start
+# then in another terminal:
+curl -X PUT http://localhost:3000/-load
+curl http://localhost:3000/Alderaan
+```
+
+The Postman collection at `tests/Unit test dynamodb-toolkit.postman_collection.json` exercises every endpoint. There is no `npm test`; run the collection in Postman or `newman` against the running server.
+
+## 6. Conventions
+
+- **CommonJS only.** `require` / `module.exports`. Files start with `'use strict';`.
+- **Zero runtime dependencies.** The consumer supplies `aws-sdk`.
+- **Prettier:** 160 char width, single quotes, no bracket spacing, no trailing commas, arrow parens "avoid".
+- The wiki at https://github.com/uhop/dynamodb-toolkit/wiki is the user-facing reference. Page filenames use `:` for the section separator (e.g., `Adapter:-CRUD-methods.md`).

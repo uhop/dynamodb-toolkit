@@ -1,0 +1,55 @@
+<!-- Canonical source: AGENTS.md — keep this file in sync -->
+# dynamodb-toolkit — AI Agent Rules
+
+## Project identity
+
+`dynamodb-toolkit` is a no-dependency, opinionated CommonJS micro-library for AWS DynamoDB. It builds REST handlers (via `KoaAdapter`) and high-throughput command-line jobs (via `Adapter` and standalone utilities). The npm package is `dynamodb-toolkit`. Targets either `AWS.DynamoDB` or `AWS.DynamoDB.DocumentClient` — the Adapter detects which via `typeof client.createSet == 'function'`.
+
+## Critical rules
+
+- **CommonJS only.** `require`/`module.exports`. No ESM (`import`/`export`), no TypeScript. Every source file starts with `'use strict';`.
+- **Zero runtime dependencies.** Anything in `package.json` `dependencies` is wrong. `aws-sdk`, `colors`, and the `koa*` packages are dev-only — they support the test server, not the library.
+- The consumer supplies the AWS SDK client. Do not import `aws-sdk` from `Adapter.js`, `helpers/`, or `utils/` (except `makeClient.js`/`createClient.js`, which receive `AWS` as a parameter).
+- **Do not modify `wiki/`** unless explicitly asked — it's a separate git submodule.
+- **Do not add comments or remove comments** unless explicitly asked.
+- **Do not introduce a build step, transpiler, or bundler.** The package ships source as-is.
+
+## Code style
+
+- Prettier: 160 char width, single quotes, no bracket spacing (`{a,b}` not `{ a, b }`), no trailing commas, arrow parens "avoid" (see `.prettierrc`).
+- 2-space indentation (see `.editorconfig`).
+- `async`/`await` for I/O; promises returned, no callbacks.
+- Adapter methods are mostly `async`. Internal helpers in `utils/` are usually plain functions.
+
+## Architecture quick reference
+
+- `index.js` re-exports `Adapter` from `Adapter.js`. Consumers do `const Adapter = require('dynamodb-toolkit')`.
+- `Adapter.Raw` and `Adapter.DbRaw` are marker classes that bypass `prepare()` / `convertTo()`.
+- Write paths funnel through `make*()` builders that return `{action, params}`. CRUD methods consult `checkConsistency()` and may upgrade single ops to `applyTransaction()` when extra checks are needed.
+- Mass operations come in two flavors: native (batch/transaction APIs) and `generic*` (sequential, item-by-item).
+- `KoaAdapter` translates Koa contexts to Adapter calls. `204` for successful writes, `404` for missing items.
+- `indirectIndices` marks GSIs that project keys only — reads against those do a second batchGet via `readOrderedListByKeys`.
+
+## Verification
+
+- `npm start` — start the Koa test server on `localhost:3000` (env `HOST`, `PORT`).
+- `npm run debug` — same with `--inspect-brk`.
+- Tests are a Postman collection at `tests/Unit test dynamodb-toolkit.postman_collection.json`. Run it against the running server (Postman or `newman`).
+- There is no `npm test`, no lint script, no type-check script.
+
+## File layout
+
+- Entry: `index.js`
+- Core class: `Adapter.js`
+- Framework adapters: `helpers/KoaAdapter.js`
+- Utilities: `utils/*.js` (one named export per file)
+- Test server: `tests/server.js` + `tests/routes.js`
+- Wiki: `wiki/` (git submodule)
+
+## When reading the codebase
+
+- Start with `ARCHITECTURE.md` for the layout and module dependency overview.
+- `Adapter.js` is the heart of the library. Read it before touching CRUD or mass ops.
+- `tests/routes.js` is the canonical example of subclassing `KoaAdapter` (sortable indices, bulk fixtures, custom `getAll`).
+- `prepareUpdate.js` documents the `__delete` / `__separator` patch convention and dotted-path semantics.
+- The wiki at https://github.com/uhop/dynamodb-toolkit/wiki has the published API reference.
