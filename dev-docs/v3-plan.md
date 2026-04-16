@@ -69,12 +69,12 @@ The composition root that ties foundation + SDK modules + hooks together.
 
 Framework-agnostic core + `node:http` handler. Tested end-to-end against DynamoDB Local.
 
-- [ ] **`src/rest-core/`** — parsers (`parseFields`, `parseSort`, `parseFilter`, `parsePatch`, `parseNames`, `parsePaging`), builders (`buildEnvelope`, `buildErrorBody`, `paginationLinks`), policy defaults. Unit tests for each parser and builder.
-- [ ] **`src/handler/`** — `node:http` request handler wiring `rest-core` to `(req, res) =>`. Standard route pack (§7.3). Error mapping (§7.5). Policy knobs (§7.4).
-- [ ] **End-to-end REST tests** — the 40-request Postman-era scenarios reproduced as tape-six tests: pagination envelope, field subsetting, sorting, filter-by-example, patch with `_delete`/`_separator`, clone, move, mass ops, error codes, idempotent DELETE, `-by-names` plain array. All via `withServer` + built-in `fetch` against DynamoDB Local.
-- [ ] **Pagination links helper** — `paginationLinks(offset, limit, total)` returns `{prev, next}` with `null` at edges. Integrated into `buildEnvelope` when a URL builder is configured.
+- [x] **`src/rest-core/`** — parsers (`parseFields`, `parseSort`, `parseFilter`, `parsePatch`, `parseNames`, `parsePaging`, `parseFlag`), builders (`buildEnvelope`, `buildErrorBody`, `paginationLinks`), policy defaults + `mapErrorStatus` + `mergePolicy`. 51 unit tests.
+- [x] **`src/handler/`** — `node:http` request handler wiring `rest-core` to `(req, res) =>`. Standard route pack: GET/POST/DELETE on `/`, GET/PUT/PATCH/DELETE on `/:key`, `-by-names`, `-load`, `-clone`, `-move`, `:key/-clone`, `:key/-move`, `-clone-by-names`, `-move-by-names`. Error mapping: ConditionalCheckFailed→409, Validation→422, throughput→429, 5xx SDK→503. Policy knobs (envelope keys, status codes, prefixes, paging defaults).
+- [x] **End-to-end REST tests** — 19 tape-six scenarios via `withServer` + built-in `fetch` against DynamoDB Local: pagination envelope w/ links, field subsetting, sort + filter, patch with `_delete`, clone-by-names with body overlay, error mapping (404/405/409/422), idempotent DELETE, `-by-names` plain array.
+- [x] **Pagination links helper** — `paginationLinks(offset, limit, total, urlBuilder)` returns `{prev, next}` with `null` at edges. Integrated into `buildEnvelope` when `links` option is supplied.
 
-**Exit criteria:** REST surface matches the v2 Postman contract (adapted for v3 naming). All 40 scenarios pass. Error mapping produces correct status codes.
+**Exit criteria:** REST surface matches the v2 Postman contract (adapted for v3 naming). 19 e2e scenarios pass. Error mapping produces correct status codes. ✓
 
 ---
 

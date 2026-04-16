@@ -1,2 +1,4 @@
 // HTTP handler — node:http request handler wiring rest-core to (req, res) =>.
-// Populated in Phase 5.
+
+export {createHandler, type HandlerOptions, type RequestHandler} from './handler.js';
+export {matchRoute, type MatchedRoute} from './match-route.js';
