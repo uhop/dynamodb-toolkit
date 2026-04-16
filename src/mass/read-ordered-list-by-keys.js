@@ -14,8 +14,8 @@ export const readOrderedListByKeys = async (client, tableName, keys, params) => 
   if (sortKey) {
     // Composite key: build nested dict
     for (const item of items) {
-      const pk = item[partitionKey];
-      const sk = item[sortKey];
+      const pk = '' + item[partitionKey];
+      const sk = '' + item[sortKey];
       if (!dict[pk]) dict[pk] = {};
       dict[pk][sk] = item;
     }
