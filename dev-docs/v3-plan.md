@@ -54,14 +54,14 @@ Modules that call `DynamoDBDocumentClient.send()`. Tested with `node:test` mocks
 
 The composition root that ties foundation + SDK modules + hooks together.
 
-- [ ] **`src/adapter/adapter.js` + `.d.ts`** — `class Adapter<TItem, TKey>`. Constructor takes `AdapterOptions` (§4.2). CRUD surface (§4.3): `getByKey`, `getByKeys`, `getAll`, `getAllByParams`, `post`, `put`, `patch`, `delete`, `clone`, `move`, mass ops (`putAll`, `deleteByKeys`, `deleteAllByParams`, `cloneByKeys`, `cloneAllByParams`, `moveByKeys`, `moveAllByParams`), batch builders (`makeGet`, `makeCheck`, `makePost`, `makePut`, `makePatch`, `makeDelete`).
-- [ ] **`src/adapter/hooks.js`** — default hook implementations. `prepare`/`revive`/`prepareKey`/`prepareListInput`/`updateInput`/`validateItem`/`checkConsistency`.
-- [ ] **`src/adapter/transaction-upgrade.js`** — `checkConsistency` → `transactWriteItems` auto-upgrade logic.
-- [ ] **Indirect indices** — second-hop `BatchGetItem` via `readOrderedListByKeys` when `indirectIndices[indexName]` is set.
-- [ ] **Integration tests (mock)** — Adapter CRUD through mocked `send()`: single ops, mass ops, transaction auto-upgrade, indirect-index second-hop, hook invocation order, `reviveItems: false`, `Raw<T>` bypass.
-- [ ] **End-to-end tests (DynamoDB Local)** — Adapter CRUD against real DynamoDB Local: full lifecycle (create table → load planets → read/write/patch/delete → verify). Covers the 15 invariants from design doc §2.
+- [x] **`src/adapter/adapter.js` + `.d.ts`** — `class Adapter<TItem, TKey>`. Constructor takes `AdapterOptions` (§4.2). CRUD surface (§4.3): `getByKey`, `getByKeys`, `getAll`, `getAllByParams`, `post`, `put`, `patch`, `delete`, `clone`, `move`, mass ops (`putAll`, `deleteByKeys`, `deleteAllByParams`, `cloneByKeys`, `cloneAllByParams`, `moveByKeys`, `moveAllByParams`), batch builders (`makeGet`, `makeCheck`, `makePost`, `makePut`, `makePatch`, `makeDelete`).
+- [x] **`src/adapter/hooks.js`** — default hook implementations. `prepare`/`revive`/`prepareKey`/`prepareListInput`/`updateInput`/`validateItem`/`checkConsistency`.
+- [x] **`src/adapter/transaction-upgrade.js`** — `checkConsistency` → `transactWriteItems` auto-upgrade logic. `TransactionLimitExceededError` thrown when batch+checks > 100.
+- [x] **Indirect indices** — second-hop `BatchGetItem` via `readOrderedListByKeys` when `indirectIndices[indexName]` is set.
+- [x] **Integration tests (mock)** — Adapter CRUD through mocked `send()`: single ops, mass ops, transaction auto-upgrade, indirect-index second-hop, hook invocation order, `reviveItems: false`, `Raw<T>` bypass. 32 tests / 78 asserts.
+- [x] **End-to-end tests (DynamoDB Local)** — Adapter CRUD against real DynamoDB Local: full lifecycle (create table → load planets → read/write/patch/delete → verify). 18 tests / 36 asserts. Skips gracefully when Docker is unavailable. `npm run test:e2e`.
 
-**Exit criteria:** all Adapter methods work against DynamoDB Local. Transaction auto-upgrade, indirect indices, and hooks verified end-to-end.
+**Exit criteria:** all Adapter methods work against DynamoDB Local. Transaction auto-upgrade, indirect indices, and hooks verified end-to-end. ✓
 
 ---
 

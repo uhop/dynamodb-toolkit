@@ -29,7 +29,9 @@ async function waitForReady(port, timeoutMs = STARTUP_TIMEOUT_MS) {
         headers: {'Content-Type': 'application/x-amz-json-1.0', 'X-Amz-Target': 'DynamoDB_20120810.ListTables'},
         body: '{}'
       });
-      if (res.ok) return;
+      // Any HTTP response means the server is listening; the call itself is unauthenticated
+      // and DynamoDB Local replies with 400 MissingAuthenticationToken — that's "alive".
+      if (res.status > 0) return;
     } catch {
       // not ready yet
     }

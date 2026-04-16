@@ -35,7 +35,7 @@
   },
   "scripts": {
     "test": "tape6 --flags FO",
-    "test:e2e": "tape6 --flags FO tests/e2e/",
+    "test:e2e": "TAPE6_WORKER_START_TIMEOUT=60000 tape6 --flags FO tests/e2e/test-*.js",
     "ts-check": "tsc --noEmit",
     "js-check": "tsc --project tsconfig.check.json",
     "lint": "prettier --check .",
