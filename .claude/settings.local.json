@@ -1,11 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(npm start:*)",
-      "Bash(npm run:*)",
-      "Bash(npm install:*)",
-      "Bash(npm pack:*)",
-      "WebSearch"
-    ]
+    "allow": ["Bash(npm start:*)", "Bash(npm run:*)", "Bash(npm install:*)", "Bash(npm pack:*)", "WebSearch", "Read(//tmp/**)"]
   }
 }
