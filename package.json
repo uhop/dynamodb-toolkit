@@ -1,6 +1,6 @@
 {
   "name": "dynamodb-toolkit",
-  "version": "3.0.0-alpha.0",
+  "version": "3.0.0",
   "description": "Helpers for AWS DynamoDB to build efficient web applications",
   "type": "module",
   "exports": {

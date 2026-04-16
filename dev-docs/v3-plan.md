@@ -80,15 +80,15 @@ Framework-agnostic core + `node:http` handler. Tested end-to-end against DynamoD
 
 ## Phase 6: Documentation and release
 
-- [ ] **v3 wiki pages** — write on a scratch branch of the wiki repo. Cover: getting started, Adapter API, expressions, batch/mass ops, REST layer, hooks, migration guide, SDK v2→v3 cheat sheet.
-- [ ] **Wiki cutover** — tag `v2.3-docs`, replace `main` with v3 pages, update `Home.md` pointer.
-- [ ] **Bump wiki submodule** in the main repo.
-- [ ] **Remove v2 code** — delete top-level `Adapter.js`, `index.js`, `helpers/`, `utils/`, `tests/server.js`, `tests/routes.js`, Postman collection, `tests/data.json.gz`. Keep `dev-docs/` as historical artifacts.
-- [ ] **Update `package.json`** — version `3.0.0`, verify `exports` map, `files`, `engines`.
-- [ ] **Update AI docs** — `AGENTS.md`, `llms.txt`, `llms-full.txt`, `CLAUDE.md` pointers. Run `ai-docs-update` skill.
-- [ ] **Update `README.md`** — new API examples, v2 tag pointer, badge updates.
-- [ ] **Release check** — run `release-check` skill. Verify npm tarball excludes `tests/`, `wiki/`, `dev-docs/`, AI rule files.
-- [ ] **Publish** — `npm publish`, git tag `3.0.0` (bare semver, no `v` prefix — see cross-project convention), GitHub release.
+- [x] **v3 wiki pages** — drafted on `v3-docs` scratch branch of the wiki submodule (22 pages). NOT pushed; awaiting cutover.
+- [ ] **Wiki cutover** (USER) — tag `v2.3-docs` from current wiki `main`, replace `main` with `v3-docs`, push both.
+- [ ] **Bump wiki submodule** (USER) — in the main repo, in the same PR that ships v3.
+- [x] **Remove v2 code** — top-level `Adapter.js`, `index.js`, `ARCHITECTURE.md`, `helpers/`, `utils/`, `prompts/`, `tests/server.js`, `tests/routes.js`, `tests/data.json.gz`, Postman collection. `dev-docs/` retained as historical artifacts.
+- [x] **Update `package.json`** — version `3.0.0`, exports map verified (7 entries), `files: ["src"]`, `engines.node: ">=20"`, peer deps on `@aws-sdk/client-dynamodb` + `@aws-sdk/lib-dynamodb` `^3.0.0`.
+- [x] **Update AI docs** — `AGENTS.md`, `llms.txt`, `llms-full.txt` rewritten for v3. `CLAUDE.md` and `.github/COPILOT-INSTRUCTIONS.md` already point at AGENTS.md. `.cursorrules` / `.windsurfrules` / `.clinerules` byte-identical (rewritten + synced).
+- [x] **Update `README.md`** — new install + quick-start examples, REST handler example, sub-export table, migration callout, v2 tag pointer.
+- [x] **Release check** — `npm pack --dry-run` ships only `src/` + `README.md` + `package.json` (106 files / 28.4 kB). All tests + ts-check + js-check + prettier pass.
+- [ ] **Publish** (USER) — `npm publish`, git tag `3.0.0` (bare semver, no `v` prefix), GitHub release.
 
 **Exit criteria:** 3.0.0 published to npm. Wiki live with v3 docs. v2 docs preserved as `v2.3-docs` tag.
 

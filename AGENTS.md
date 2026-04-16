@@ -1,9 +1,8 @@
-# AGENTS.md — dynamodb-toolkit
+# AGENTS.md — dynamodb-toolkit (v3)
 
-> `dynamodb-toolkit` is a no-dependency, opinionated micro-library for AWS DynamoDB. It builds compact RESTful APIs and high-performance command-line utilities on top of either `AWS.DynamoDB` or `AWS.DynamoDB.DocumentClient`.
+> `dynamodb-toolkit` is a zero-runtime-dependency, opinionated, ESM-only micro-library for AWS DynamoDB. v3 builds on the AWS JS SDK v3 (`@aws-sdk/client-dynamodb` + `@aws-sdk/lib-dynamodb`). It ships an `Adapter` class, expression builders, batch + transaction chunking, mass operations, and a framework-agnostic REST core + `node:http` handler.
 
-For project structure, module dependencies, and the architecture overview see [ARCHITECTURE.md](./ARCHITECTURE.md).
-For detailed usage docs and API references see the [wiki](https://github.com/uhop/dynamodb-toolkit/wiki).
+For published API docs see the [wiki](https://github.com/uhop/dynamodb-toolkit/wiki). For the v3 design rationale and rejected alternatives see `dev-docs/v3-design.md`.
 
 ## Setup
 
@@ -19,104 +18,111 @@ If you cloned without `--recursive`, run `git submodule update --init` to popula
 
 ## Commands
 
-- **Install:** `npm install`
-- **Start test server:** `npm start` (runs `node tests/server.js` on `localhost:3000`)
-- **Debug test server:** `npm run debug` (runs with `--inspect-brk`)
-- **Run tests:** Import `tests/Unit test dynamodb-toolkit.postman_collection.json` into Postman or run with `newman` against the running server.
+| Command                             | What it does                                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `npm install`                       | Install dependencies                                                                                  |
+| `npm test`                          | Run unit + integration suite via tape-six (no Docker required)                                        |
+| `npm run test:e2e`                  | Run end-to-end suite against DynamoDB Local (requires Docker)                                         |
+| `npm run ts-check`                  | Strict `tsc --noEmit` over `.ts`/`.d.ts` files                                                        |
+| `npm run js-check`                  | `tsc --project tsconfig.check.json` — JS lint via type-checker (catches unused vars, undeclared refs) |
+| `npm run lint` / `npm run lint:fix` | Prettier check / fix                                                                                  |
 
-There is no `npm test`, `npm run lint`, or `npm run ts-check`. The project is small and the test layer is the Postman collection driving the Koa server.
+There is no separate build step. The published tarball ships `src/` as-is.
 
 ## Project structure
 
 ```
 dynamodb-toolkit/
-├── index.js                  # Entry point: re-exports Adapter
-├── Adapter.js                # Main Adapter class (CRUD, batch, mass, generic, utility methods)
-├── helpers/                  # Framework-specific adapters
-│   ├── KoaAdapter.js         # Koa wrapper around Adapter
-│   └── isTrue.js             # Query-string helpers (isTrue, isConsistent)
-├── utils/                    # Standalone DynamoDB utilities
-│   ├── makeClient.js         # Build AWS.DynamoDB or DocumentClient with profile/region
-│   ├── createClient.js       # Thin wrapper over makeClient
-│   ├── converter.js          # AWS.DynamoDB.Converter clone (input/output/marshall/unmarshall)
-│   ├── convertTypes.js       # convertTo/convertFrom honoring `specialTypes`
-│   ├── applyBatch.js         # batchWriteItem with chunking (LIMIT 25)
-│   ├── applyTransaction.js   # transactWriteItems builder
-│   ├── batchGet.js           # batchGetItem with retries
-│   ├── batchWrite.js         # batchWriteItem with retries
-│   ├── backoff.js            # Exponential backoff helper
-│   ├── paginateList.js       # Offset/limit pagination over scan/query
-│   ├── paginateListNoLimit.js
-│   ├── readList.js           # Scan/query → items + nextParams; readList.byKeys
-│   ├── readListByKeys.js
-│   ├── readOrderedListByKeys.js
-│   ├── writeList.js          # Mass put with batching + backoff
-│   ├── deleteList.js         # Mass delete by params or keys
-│   ├── copyList.js           # Mass copy via params or keys with mapFn
-│   ├── moveList.js           # Mass move (copy + delete) via params or keys
-│   ├── iterateList.js        # Async iterator over scan/query
-│   ├── getBatch.js           # Low-level batch reader
-│   ├── getTotal.js           # Count items via Select=COUNT
-│   ├── getTransaction.js     # transactGetItems builder
-│   ├── prepareUpdate.js      # Build UpdateExpression from a patch + delete props
-│   ├── addProjection.js      # Add ProjectionExpression / merge attribute names
-│   ├── filtering.js          # Build FilterExpression for searchable fields
-│   ├── cleanParams.js        # Drop empty Expression* members
-│   ├── cloneParams.js        # Shallow-clone a DynamoDB params object
-│   ├── combineParams.js      # Merge two params, deduping attribute aliases
-│   ├── normalizeFields.js    # Normalize a fields list (string|array → array)
-│   ├── subsetObject.js       # Pick a subset of fields from an object
-│   ├── getPath.js / setPath.js / deletePath.js  # Dotted-path object access
-│   ├── applyPatch.js         # Apply a patch object to an in-memory item
-│   ├── getProfileName.js     # Resolve AWS_PROFILE / AWS_DEFAULT_PROFILE
-│   ├── random.js             # Tiny random helpers
-│   ├── seq.js                # Sequential async runner
-│   └── sleep.js              # `await sleep(ms)`
+├── src/                       # Published code (ESM .js + .d.ts sidecars)
+│   ├── index.js / index.d.ts  # Main entry — re-exports Adapter, Raw, raw, error class, types
+│   ├── adapter/               # Adapter class, hooks defaults, transaction-upgrade dispatcher
+│   ├── expressions/           # buildUpdate, addProjection, buildFilter, buildFilterByExample,
+│   │                          #   buildCondition, cleanParams, cloneParams
+│   ├── batch/                 # applyBatch, applyTransaction, getBatch, getTransaction, backoff
+│   ├── mass/                  # paginateList, iterateList, readList(.byKeys),
+│   │                          #   readOrderedListByKeys, writeList, deleteList, copyList,
+│   │                          #   moveList, getTotal
+│   ├── paths/                 # getPath, setPath, deletePath, applyPatch, normalizeFields,
+│   │                          #   subsetObject
+│   ├── rest-core/             # Framework-agnostic REST: parsers/, builders/, policy
+│   ├── handler/               # node:http (req, res) handler + matchRoute + standard route pack
+│   ├── raw.js / raw.d.ts      # Raw<T> bypass marker + raw() helper
+│   └── sleep.js / seq.js / random.js (+ sidecars)
 ├── tests/
-│   ├── server.js             # Koa test server (port 3000, env HOST/PORT)
-│   ├── routes.js             # Adapter + KoaAdapter wired against table 'test'
-│   ├── data.json.gz          # Star Wars planets fixture (loaded via PUT /-load)
-│   └── Unit test dynamodb-toolkit.postman_collection.json
-└── wiki/                     # GitHub wiki (git submodule)
+│   ├── test-*.js              # Unit + mock-based integration (default `npm test`)
+│   ├── e2e/                   # End-to-end against DynamoDB Local (`npm run test:e2e`)
+│   ├── helpers/               # withServer, dynamodb-local, matchCommand
+│   └── fixtures/              # planets, table-schema
+├── dev-docs/                  # v3 survey, design doc, implementation plan
+└── wiki/                      # Published wiki — git submodule
 ```
+
+The published tarball includes only `src/` plus `README.md` + `package.json` (npm defaults). Tests, AI rule files, dev-docs, and wiki stay out.
 
 ## Code style
 
-- **CommonJS** throughout. Files start with `'use strict';`. Use `require`/`module.exports`.
-- **Node 10+** target — uses `async`/`await`, spread, arrow functions, no ESM, no TypeScript.
-- **Prettier** enforced indirectly via `.prettierrc`: 160 char width, single quotes, no bracket spacing, no trailing commas, arrow parens "avoid".
-- 2-space indentation (see `.editorconfig`).
-- Comma-first style is **not** used; trailing commas are forbidden.
-- Adapter methods are mostly `async` and return promises.
+- **ESM only** — `import` / `export`, `"type": "module"` in `package.json`. No CommonJS, no transpiler.
+- **`.js` + hand-written `.d.ts` sidecars** — not true TypeScript. Both files live next to each other (`foo.js` ↔ `foo.d.ts`).
+- **Node 20+** target. Also runs on the latest Bun and Deno.
+- **No `node:*` runtime imports in `src/`.** Type-only `import type {...} from 'node:http'` in `.d.ts` is fine; runtime code stays portable. (`tests/` may use `node:*` freely.)
+- **No `any` in `.d.ts`.** Use proper shapes or `unknown`.
+- **Arrow functions + FP style preferred** for standalone helpers; classes only when long-lived state earns one (`Adapter`, `Raw`, `TransactionLimitExceededError`).
+- **Prettier** enforces formatting (`.prettierrc`). Run `npm run lint:fix` before commits.
+- **Default to no comments.** Add a one-line comment only when the WHY is non-obvious.
+- **Two tsconfig files:** `tsconfig.json` strict (for `.d.ts` sidecars), `tsconfig.check.json` lenient + `checkJs` (catches unused vars / undeclared refs in `.js`).
 
 ## Architecture
 
-- `Adapter` is the central class. Construct one per logical entity (typically per table), passing `client`, `table`, `keyFields`, and optional overrides.
-- `Adapter` wraps either `AWS.DynamoDB` or `AWS.DynamoDB.DocumentClient`. It auto-detects via `typeof client.createSet == 'function'` and stores the result in `this.isDocClient`.
-- All write paths funnel through `make*()` builders (`makeGet`, `makePost`, `makePut`, `makePatch`, `makeDelete`, `makeCheck`) that return `{action, params}` batch descriptors. CRUD methods optionally call `checkConsistency()` and route through `applyTransaction()` when extra checks exist.
-- Mass operations come in two flavors:
-  - **Native:** use DynamoDB batch/transaction APIs for throughput (`getByKeys`, `putAll`, `deleteByKeys`, `cloneByKeys`, `moveByKeys`, `*ByParams`).
-  - **Generic:** sequential, item-by-item versions prefixed `generic*` — slower but lower resource use and easier to reason about.
-- `KoaAdapter` is a thin HTTP wrapper that maps Koa contexts to Adapter calls. It sets `ctx.body` / `ctx.status` and reads query parameters (`fields`, `filter`, `offset`, `limit`, `consistent`, `force`, `sort`).
-- `Raw` and `DbRaw` marker classes (exposed as `Adapter.Raw` and `Adapter.DbRaw`) bypass `prepare()`/`convertTo()` so callers can feed pre-shaped items.
+`Adapter` is the composition root over orthogonal modules — it owns long-lived state (client, table, keyFields, hooks) but delegates real work to:
+
+- `expressions/` for `UpdateExpression` / `ProjectionExpression` / `FilterExpression` / `ConditionExpression`.
+- `batch/` for chunked `BatchWriteItem` / `TransactWriteItems` / `BatchGetItem` / `TransactGetItems` with `UnprocessedItems` retry + exponential backoff.
+- `mass/` for paginated reads, mass writes, ordered batch reads.
+- `paths/` for nested-path get/set/delete/patch on plain JS objects.
+
+Each module is independently importable via the `exports` map; consumers can use them without instantiating `Adapter` if they only want low-level helpers.
+
+Write paths funnel through `make*()` builders that return discriminated `BatchDescriptor`s — `{action: 'put'|'patch'|'delete'|'check'|'get', params}`. CRUD methods call `hooks.checkConsistency(descriptor)`; if it returns an array, the dispatcher upgrades the single op to a `TransactWriteItems` call. Throws `TransactionLimitExceededError` when the combined batch exceeds `TRANSACTION_LIMIT` (100).
+
+`indirectIndices` marks GSIs that project keys only — reads against those automatically do a second-hop `BatchGetItem` against the base table via `readOrderedListByKeys`.
+
+`Raw<T>` is the only bypass marker (the v2 `Raw` / `DbRaw` pair collapsed). `raw(item)` wraps; `instanceof Raw` detects. On writes a `Raw<T>` skips `prepare` and `validateItem`. On reads with `{reviveItems: false}`, results come back wrapped in `Raw<T>`.
 
 ## User-defined extension points
 
-Subclass or pass via the constructor `options`:
+Pass via the constructor `options.hooks` or override the corresponding methods on a subclass:
 
-- `prepare(item, isPatch)` — transform an item before writing (add technical fields, derived columns).
-- `revive(rawItem, fields)` — inverse of `prepare`; clean up after reads.
-- `prepareKey(key, index)` / `restrictKey(rawKey, index)` — shape DynamoDB keys for the base table or a specific index.
-- `prepareListParams(item, index)` — base params for `*All` mass operations (e.g., `IndexName`, `KeyConditionExpression`).
-- `updateParams(params, options)` — last-chance hook to add conditions before any write.
-- `validateItem(item, isPatch)` — async validator; throw to abort.
-- `checkConsistency(batch)` — async producer of extra `make*` items to run in the same transaction.
+| Hook                                | Default                         | When called                                                                     |
+| ----------------------------------- | ------------------------------- | ------------------------------------------------------------------------------- |
+| `prepare(item, isPatch?)`           | identity                        | Before every write to add technical fields, derived columns, search mirrors     |
+| `prepareKey(key, index?)`           | identity                        | Before every key-only operation; default keeps just `keyFields`                 |
+| `prepareListInput(example, index?)` | `() => ({})`                    | Provides extra DynamoDB params for list/scan/query (KeyCondition, IndexName, …) |
+| `updateInput(input, op)`            | identity                        | Last-chance hook to mutate the SDK Command input before dispatch                |
+| `revive(rawItem, fields?)`          | `subsetObject(rawItem, fields)` | After every read; strips technical fields, applies field subsetting             |
+| `validateItem(item, isPatch?)`      | `async () => {}`                | Async validator; throw to abort the write                                       |
+| `checkConsistency(batch)`           | `async () => null`              | Returns extra `make*` descriptors to bundle in the same `TransactWriteItems`    |
 
-## Key conventions
+## Critical rules
 
-- **Zero runtime dependencies.** Anything in `package.json` `dependencies` is wrong. The `aws-sdk`, `colors`, `koa*` packages are dev-only and used by the test server.
-- The package only ships `*.js`, `utils/`, `helpers/` — see `package.json` `files`. Wiki, tests, and the Postman collection are not published.
-- Wiki documentation lives in the `wiki/` submodule. Page filenames use `:` and `-` (e.g., `Adapter:-CRUD-methods.md`); `Home.md` is the entry point.
-- The package is published as CommonJS. `index.js` is `module.exports = require('./Adapter.js')` — consumers do `const Adapter = require('dynamodb-toolkit')`.
-- `searchablePrefix` defaults to `-search-`; `prepare()` typically writes `-search-<field>` lowercase copies for substring filtering.
-- `'-t'` and `'-search-*'` are the conventional technical-field prefixes used in tests; not enforced by the library, but `revive()` examples in the wiki strip the leading `-`.
+- **Zero runtime dependencies.** Anything in `package.json` `dependencies` is wrong. The SDK is a `peerDependencies` entry; `tape-six` / `prettier` / `typescript` / `@types/node` / `@aws-sdk/*` (for local dev) are `devDependencies`.
+- **Do not modify `wiki/`** unless explicitly asked — it's a separate git submodule.
+- **Do not add or remove comments** unless explicitly asked.
+- **Do not introduce a build step, transpiler, or bundler.** The package ships source as-is.
+- **Do not import from `aws-sdk` (v2) anywhere.** v3 is built exclusively on `@aws-sdk/*`.
+- **Do not import `node:*` modules at runtime in `src/`.** Type-only imports in `.d.ts` are fine. Tests may use `node:*` freely.
+
+## Testing posture
+
+- **Unit + integration (`npm test`)** uses tape-six with `node:test`'s `mock` API on `DynamoDBDocumentClient.prototype.send`. No Docker required. Covers expression builders, paths, batch/mass logic, Adapter CRUD via mocks.
+- **End-to-end (`npm run test:e2e`)** spawns `amazon/dynamodb-local` via Docker, creates a randomly-suffixed table, exercises the full Adapter + REST handler against the real engine, then tears down. Skips gracefully when Docker is unavailable. The script bakes in `TAPE6_WORKER_START_TIMEOUT=60000` to allow Docker startup.
+- **No third-party HTTP testing libs.** REST e2e uses `tests/helpers/withServer.js` (a 20-line `node:http` lifecycle helper) plus the built-in `fetch`.
+
+## When reading the codebase
+
+- `dev-docs/v3-design.md` is the authoritative design doc — read it first for rationale.
+- `dev-docs/v3-survey.md` enumerates every v2 capability with an SDK v3 verdict.
+- `dev-docs/v3-plan.md` tracks implementation phases and exit criteria.
+- `src/adapter/adapter.js` is the composition root — read it before touching CRUD or mass ops.
+- `src/handler/handler.js` is the standard REST route pack — see for the URL contract.
+- `src/expressions/` is where `UpdateExpression` / `FilterExpression` / `ConditionExpression` building lives; `update.js` documents the patch + array-op semantics.
+- The wiki at https://github.com/uhop/dynamodb-toolkit/wiki has the published API reference (and a `v2.3-docs` git tag preserves the v2 documentation).

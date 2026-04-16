@@ -3,53 +3,64 @@
 
 ## Project identity
 
-`dynamodb-toolkit` is a no-dependency, opinionated CommonJS micro-library for AWS DynamoDB. It builds REST handlers (via `KoaAdapter`) and high-throughput command-line jobs (via `Adapter` and standalone utilities). The npm package is `dynamodb-toolkit`. Targets either `AWS.DynamoDB` or `AWS.DynamoDB.DocumentClient` — the Adapter detects which via `typeof client.createSet == 'function'`.
+`dynamodb-toolkit` is a zero-runtime-dependency, opinionated, **ESM-only** micro-library for AWS DynamoDB. v3 builds on the AWS JS SDK v3 (`@aws-sdk/client-dynamodb` + `@aws-sdk/lib-dynamodb`). It ships an `Adapter` class, expression builders, batch + transaction chunking, mass operations, and a framework-agnostic REST core + `node:http` handler. The npm package is `dynamodb-toolkit`.
 
 ## Critical rules
 
-- **CommonJS only.** `require`/`module.exports`. No ESM (`import`/`export`), no TypeScript. Every source file starts with `'use strict';`.
-- **Zero runtime dependencies.** Anything in `package.json` `dependencies` is wrong. `aws-sdk`, `colors`, and the `koa*` packages are dev-only — they support the test server, not the library.
-- The consumer supplies the AWS SDK client. Do not import `aws-sdk` from `Adapter.js`, `helpers/`, or `utils/` (except `makeClient.js`/`createClient.js`, which receive `AWS` as a parameter).
+- **ESM only.** `import`/`export`. No CommonJS, no transpiler. `"type": "module"` in `package.json`.
+- **`.js` + hand-written `.d.ts` sidecars** — not true TypeScript. Both files live next to each other.
+- **Zero runtime dependencies.** Anything in `package.json` `dependencies` is wrong. The SDK is a `peerDependencies` entry.
+- **No `node:*` runtime imports in `src/`.** Type-only `import type {…} from 'node:http'` in `.d.ts` is fine; runtime code stays portable across Node, Bun, and Deno.
+- **No `any` in `.d.ts`.** Use proper shapes or `unknown`.
+- **Do not import from `aws-sdk` (v2) anywhere.** v3 is exclusively `@aws-sdk/*`.
 - **Do not modify `wiki/`** unless explicitly asked — it's a separate git submodule.
-- **Do not add comments or remove comments** unless explicitly asked.
+- **Do not add or remove comments** unless explicitly asked.
 - **Do not introduce a build step, transpiler, or bundler.** The package ships source as-is.
 
 ## Code style
 
-- Prettier: 160 char width, single quotes, no bracket spacing (`{a,b}` not `{ a, b }`), no trailing commas, arrow parens "avoid" (see `.prettierrc`).
+- Prettier: see `.prettierrc`. Run `npm run lint:fix` before commits.
 - 2-space indentation (see `.editorconfig`).
+- Arrow functions + FP style preferred; classes only when long-lived state earns one (`Adapter`, `Raw`, `TransactionLimitExceededError`).
 - `async`/`await` for I/O; promises returned, no callbacks.
-- Adapter methods are mostly `async`. Internal helpers in `utils/` are usually plain functions.
+- Default to no comments. Add a one-line comment only when the WHY is non-obvious.
 
 ## Architecture quick reference
 
-- `index.js` re-exports `Adapter` from `Adapter.js`. Consumers do `const Adapter = require('dynamodb-toolkit')`.
-- `Adapter.Raw` and `Adapter.DbRaw` are marker classes that bypass `prepare()` / `convertTo()`.
-- Write paths funnel through `make*()` builders that return `{action, params}`. CRUD methods consult `checkConsistency()` and may upgrade single ops to `applyTransaction()` when extra checks are needed.
-- Mass operations come in two flavors: native (batch/transaction APIs) and `generic*` (sequential, item-by-item).
-- `KoaAdapter` translates Koa contexts to Adapter calls. `204` for successful writes, `404` for missing items.
-- `indirectIndices` marks GSIs that project keys only — reads against those do a second batchGet via `readOrderedListByKeys`.
+- `src/index.js` re-exports `Adapter`, `Raw`, `raw`, `TransactionLimitExceededError`, and SDK type names. Consumers do `import {Adapter} from 'dynamodb-toolkit'`.
+- The Adapter is a composition root over `expressions/`, `batch/`, `mass/`, `paths/`. Each is independently importable via the `exports` map.
+- `Raw<T>` is the only bypass marker (the v2 `Raw` / `DbRaw` pair collapsed). `raw(item)` wraps; on writes it skips `prepare` + `validateItem`; on reads with `{reviveItems: false}` results come back wrapped.
+- Write paths funnel through `make*()` builders that return `{action, params}` discriminators. CRUD methods consult `hooks.checkConsistency()` and may upgrade single ops to `transactWriteItems` when extra checks exist. `TRANSACTION_LIMIT` is 100.
+- `indirectIndices` marks GSIs that project keys only — reads against those automatically do a second-hop `BatchGetItem` via `readOrderedListByKeys`.
+- The REST surface splits into `dynamodb-toolkit/rest-core` (parsers/builders/policy, framework-agnostic) and `dynamodb-toolkit/handler` (`(req, res) =>` for `node:http`).
 
 ## Verification
 
-- `npm start` — start the Koa test server on `localhost:3000` (env `HOST`, `PORT`).
-- `npm run debug` — same with `--inspect-brk`.
-- Tests are a Postman collection at `tests/Unit test dynamodb-toolkit.postman_collection.json`. Run it against the running server (Postman or `newman`).
-- There is no `npm test`, no lint script, no type-check script.
+- `npm test` — unit + mock-based integration via tape-six. No Docker required.
+- `npm run test:e2e` — end-to-end against `amazon/dynamodb-local` (Docker). Bakes in `TAPE6_WORKER_START_TIMEOUT=60000` for the Docker startup.
+- `npm run ts-check` — strict `tsc --noEmit` over `.d.ts`.
+- `npm run js-check` — `tsc --project tsconfig.check.json` (allowJs + checkJs + noUnusedLocals/Parameters) — catches unused vars and undeclared refs in `.js`.
+- `npm run lint` / `npm run lint:fix` — Prettier check / fix.
 
 ## File layout
 
-- Entry: `index.js`
-- Core class: `Adapter.js`
-- Framework adapters: `helpers/KoaAdapter.js`
-- Utilities: `utils/*.js` (one named export per file)
-- Test server: `tests/server.js` + `tests/routes.js`
+- Entry: `src/index.js` / `src/index.d.ts`
+- Adapter + hooks + transaction-upgrade: `src/adapter/`
+- Expression builders: `src/expressions/`
+- Batch/transaction chunking: `src/batch/`
+- Mass ops + pagination: `src/mass/`
+- Path helpers: `src/paths/`
+- REST core: `src/rest-core/`
+- HTTP handler: `src/handler/`
+- Bare files: `src/raw.js`, `src/sleep.js`, `src/seq.js`, `src/random.js`
+- Tests: `tests/test-*.js` (unit), `tests/e2e/test-*.js` (Docker), `tests/helpers/`, `tests/fixtures/`
+- Design docs: `dev-docs/v3-survey.md`, `dev-docs/v3-design.md`, `dev-docs/v3-plan.md`
 - Wiki: `wiki/` (git submodule)
 
 ## When reading the codebase
 
-- Start with `ARCHITECTURE.md` for the layout and module dependency overview.
-- `Adapter.js` is the heart of the library. Read it before touching CRUD or mass ops.
-- `tests/routes.js` is the canonical example of subclassing `KoaAdapter` (sortable indices, bulk fixtures, custom `getAll`).
-- `prepareUpdate.js` documents the `__delete` / `__separator` patch convention and dotted-path semantics.
-- The wiki at https://github.com/uhop/dynamodb-toolkit/wiki has the published API reference.
+- Start with `dev-docs/v3-design.md` for the authoritative rationale.
+- `src/adapter/adapter.js` is the composition root — read it before touching CRUD or mass ops.
+- `src/handler/handler.js` is the standard REST route pack — see for the URL contract.
+- `src/expressions/update.js` documents the patch + array-op semantics.
+- The wiki at https://github.com/uhop/dynamodb-toolkit/wiki has the published API reference. The `v2.3-docs` git tag in the wiki repo preserves v2 documentation.
