@@ -87,14 +87,14 @@ const adapter = new Adapter({
 
 ### Method families
 
-| Family               | Methods                                                                                     | Notes                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Batch builders       | `makeGet`, `makeCheck`, `makePost`, `makePut`, `makePatch`, `makeDelete`                    | Return `{action, params}` (and sometimes `adapter`). Used by CRUD + transactions.    |
-| CRUD                 | `get`/`getByKey`, `post`, `put`, `patch`/`patchByKey`, `delete`/`deleteByKey`               | Each consults `checkConsistency()` and may upgrade to `applyTransaction`.            |
-| CRUD compound        | `clone`/`cloneByKey`, `move`/`moveByKey`                                                    | Read → mapFn → write (move also deletes the source in one transaction).              |
-| Mass (native)        | `scanAllByParams`, `getAllByParams`, `getByKeys`, `getAll`, `putAll`, `deleteAll*`, `clone*`, `move*` | Use DynamoDB batch/transaction APIs. Honor `indirectIndices`.                |
-| Mass (generic)       | `genericGetByKeys`, `genericPutAll`, `genericDeleteAllByParams`, `genericDeleteByKeys`, `genericClone*`, `genericMove*` | Sequential, item-by-item — slower but trivially correct.                |
-| Utilities            | `cloneParams`, `cleanGetParams`, `checkExistence`, `makeListParams`, `addKeyFields`, `convertFrom`/`convertTo`, `fromDynamo`/`toDynamo`/`toDynamoKey`, `fromDynamoRaw`/`toDynamoRaw`, `markAsRaw`, `validateItems` | Building blocks reused by everything above. |
+| Family         | Methods                                                                                                                                                                                                            | Notes                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Batch builders | `makeGet`, `makeCheck`, `makePost`, `makePut`, `makePatch`, `makeDelete`                                                                                                                                           | Return `{action, params}` (and sometimes `adapter`). Used by CRUD + transactions. |
+| CRUD           | `get`/`getByKey`, `post`, `put`, `patch`/`patchByKey`, `delete`/`deleteByKey`                                                                                                                                      | Each consults `checkConsistency()` and may upgrade to `applyTransaction`.         |
+| CRUD compound  | `clone`/`cloneByKey`, `move`/`moveByKey`                                                                                                                                                                           | Read → mapFn → write (move also deletes the source in one transaction).           |
+| Mass (native)  | `scanAllByParams`, `getAllByParams`, `getByKeys`, `getAll`, `putAll`, `deleteAll*`, `clone*`, `move*`                                                                                                              | Use DynamoDB batch/transaction APIs. Honor `indirectIndices`.                     |
+| Mass (generic) | `genericGetByKeys`, `genericPutAll`, `genericDeleteAllByParams`, `genericDeleteByKeys`, `genericClone*`, `genericMove*`                                                                                            | Sequential, item-by-item — slower but trivially correct.                          |
+| Utilities      | `cloneParams`, `cleanGetParams`, `checkExistence`, `makeListParams`, `addKeyFields`, `convertFrom`/`convertTo`, `fromDynamo`/`toDynamo`/`toDynamoKey`, `fromDynamoRaw`/`toDynamoRaw`, `markAsRaw`, `validateItems` | Building blocks reused by everything above.                                       |
 
 ### Write pipeline
 

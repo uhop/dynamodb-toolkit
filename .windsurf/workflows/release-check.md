@@ -26,8 +26,8 @@ Run through this checklist before publishing a new version.
     - `HOST=localhost PORT=3000 npm start &`
     - Import or `newman run tests/Unit\ test\ dynamodb-toolkit.postman_collection.json`
     - Stop the server.
-    Skip this step if the change is doc-only.
+      Skip this step if the change is doc-only.
 12. Dry-run publish to verify package contents:
     - `npm pack --dry-run`
-    // turbo
+      // turbo
 13. Confirm the dry-run tarball does not contain `tests/`, `wiki/`, `AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`, `.windsurf*`, `.cursor*`, `.cline*`, `.claude/`, `.github/`, `prompts/`, `llms*.txt`. The library should ship as just `index.js`, `Adapter.js`, `utils/`, `helpers/`, `package.json`, `README.md`, plus whatever `npm` adds automatically (LICENSE if present).

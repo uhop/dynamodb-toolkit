@@ -37,23 +37,23 @@ For each v2 capability:
 
 These must survive the rewrite, even if their names and shapes change:
 
-| # | Invariant | v2 home | Why it stays |
-|---|---|---|---|
-| 1 | Schemaless Adapter over one logical entity (usually a table) | `Adapter.js` | Core mental model. |
-| 2 | User hooks for schema transforms: `prepare`, `revive`, `prepareKey`, `prepareListInput` (was `prepareListParams`) | `Adapter.js:58-97` | Primary extension point. On-disk shape ≠ wire shape for most non-trivial consumers. |
-| 3 | Async validation and consistency hooks: `validateItem`, `checkConsistency` | `Adapter.js` | Per-project business rules; transaction auto-upgrade depends on `checkConsistency`. |
-| 4 | Patch builder with dotted-path semantics (supports nested objects; pure-digit segments are array indices) | `utils/prepareUpdate.js` | DynamoDB `UpdateExpression` has no equivalent in the SDK. |
-| 5 | Projection builder with attribute-name de-dup and reuse | `utils/addProjection.js` | SDK builds nothing. |
-| 6 | Filter builder over searchable fields (substring, case-insensitive by default) | `utils/filtering.js`, `searchable` config | SDK builds nothing. |
-| 7 | Offset + limit pagination that *accumulates* through `FilterExpression` results | `utils/paginateList.js`, `paginateListNoLimit.js` | DynamoDB's `Limit` is pre-filter; SDK paginators don't fix this. |
-| 8 | Chunked `BatchWriteItem` / `BatchGetItem` / `TransactWriteItems` / `TransactGetItems` with `UnprocessedItems` / `UnprocessedKeys` retry and exponential backoff | `utils/applyBatch.js`, `applyTransaction.js`, `getBatch.js`, `getTransaction.js`, `backoff.js` | SDK's retry strategy does not resubmit unprocessed items. |
-| 9 | Indirect-index second-hop pattern (GSI with key-only projection + base-table BatchGet) | `indirectIndices` config, `readOrderedListByKeys` | Unique value; saves storage on sparse GSIs. |
-| 10 | Transaction auto-upgrade from single ops to `transactWriteItems` when `checkConsistency` returns extra actions | `Adapter.js` CRUD paths | Consistency guarantees without leaking transaction plumbing into the call site. |
-| 11 | Mass operations: `writeList`, `deleteList`, `copyList`, `moveList`, `readList` (+ `byKeys` / `viaKeys` variants) | `utils/*List.js` | Composed primitives; consumers would otherwise write them themselves. |
-| 12 | Ordered result preservation for `readListByKeys` (SDK returns `BatchGet` items in arbitrary order) | `utils/readOrderedListByKeys.js` | Small but consumer-valuable. |
-| 13 | REST surface: CRUD on noun URIs, `-`-prefixed method URIs, filter + sort + fields + pagination query params, patch with meta-keys, idempotent `DELETE`, `404` on single-item miss, `{processed: N}` on mass writes | `helpers/KoaAdapter.js`, `tests/routes.js`, Postman suite | De-facto REST contract. v3 keeps the functional surface; names and codes become policy knobs. |
-| 14 | Pagination envelope shape `{data, total, offset, limit}` as the default | `utils/paginateList.js:102-103`, Postman suite | Default; all envelope keys become policy knobs. |
-| 15 | `needTotal: false` opt-out at the utility layer, as a **designer-time** option | `utils/paginateList.js` | Plumb through to the Adapter and per-route Koa config in v3. Not a client-facing query param. |
+| #   | Invariant                                                                                                                                                                                                          | v2 home                                                                                        | Why it stays                                                                                  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 1   | Schemaless Adapter over one logical entity (usually a table)                                                                                                                                                       | `Adapter.js`                                                                                   | Core mental model.                                                                            |
+| 2   | User hooks for schema transforms: `prepare`, `revive`, `prepareKey`, `prepareListInput` (was `prepareListParams`)                                                                                                  | `Adapter.js:58-97`                                                                             | Primary extension point. On-disk shape ≠ wire shape for most non-trivial consumers.           |
+| 3   | Async validation and consistency hooks: `validateItem`, `checkConsistency`                                                                                                                                         | `Adapter.js`                                                                                   | Per-project business rules; transaction auto-upgrade depends on `checkConsistency`.           |
+| 4   | Patch builder with dotted-path semantics (supports nested objects; pure-digit segments are array indices)                                                                                                          | `utils/prepareUpdate.js`                                                                       | DynamoDB `UpdateExpression` has no equivalent in the SDK.                                     |
+| 5   | Projection builder with attribute-name de-dup and reuse                                                                                                                                                            | `utils/addProjection.js`                                                                       | SDK builds nothing.                                                                           |
+| 6   | Filter builder over searchable fields (substring, case-insensitive by default)                                                                                                                                     | `utils/filtering.js`, `searchable` config                                                      | SDK builds nothing.                                                                           |
+| 7   | Offset + limit pagination that _accumulates_ through `FilterExpression` results                                                                                                                                    | `utils/paginateList.js`, `paginateListNoLimit.js`                                              | DynamoDB's `Limit` is pre-filter; SDK paginators don't fix this.                              |
+| 8   | Chunked `BatchWriteItem` / `BatchGetItem` / `TransactWriteItems` / `TransactGetItems` with `UnprocessedItems` / `UnprocessedKeys` retry and exponential backoff                                                    | `utils/applyBatch.js`, `applyTransaction.js`, `getBatch.js`, `getTransaction.js`, `backoff.js` | SDK's retry strategy does not resubmit unprocessed items.                                     |
+| 9   | Indirect-index second-hop pattern (GSI with key-only projection + base-table BatchGet)                                                                                                                             | `indirectIndices` config, `readOrderedListByKeys`                                              | Unique value; saves storage on sparse GSIs.                                                   |
+| 10  | Transaction auto-upgrade from single ops to `transactWriteItems` when `checkConsistency` returns extra actions                                                                                                     | `Adapter.js` CRUD paths                                                                        | Consistency guarantees without leaking transaction plumbing into the call site.               |
+| 11  | Mass operations: `writeList`, `deleteList`, `copyList`, `moveList`, `readList` (+ `byKeys` / `viaKeys` variants)                                                                                                   | `utils/*List.js`                                                                               | Composed primitives; consumers would otherwise write them themselves.                         |
+| 12  | Ordered result preservation for `readListByKeys` (SDK returns `BatchGet` items in arbitrary order)                                                                                                                 | `utils/readOrderedListByKeys.js`                                                               | Small but consumer-valuable.                                                                  |
+| 13  | REST surface: CRUD on noun URIs, `-`-prefixed method URIs, filter + sort + fields + pagination query params, patch with meta-keys, idempotent `DELETE`, `404` on single-item miss, `{processed: N}` on mass writes | `helpers/KoaAdapter.js`, `tests/routes.js`, Postman suite                                      | De-facto REST contract. v3 keeps the functional surface; names and codes become policy knobs. |
+| 14  | Pagination envelope shape `{data, total, offset, limit}` as the default                                                                                                                                            | `utils/paginateList.js:102-103`, Postman suite                                                 | Default; all envelope keys become policy knobs.                                               |
+| 15  | `needTotal: false` opt-out at the utility layer, as a **designer-time** option                                                                                                                                     | `utils/paginateList.js`                                                                        | Plumb through to the Adapter and per-route Koa config in v3. Not a client-facing query param. |
 
 The capabilities listed above are **requirements** for v3. Everything else is fair game.
 
@@ -80,7 +80,7 @@ v3 collapses to **one shape**: plain JS with `Set` / `Buffer` where appropriate,
 The `Raw` / `DbRaw` marker class pair from v2 collapses to a single **`Raw<T>`** brand. Purpose unchanged: "I already built this object in the DB's expected shape; don't run `prepare` / `revive` on it."
 
 ```js
-import { raw } from 'dynamodb-toolkit';
+import {raw} from 'dynamodb-toolkit';
 await adapter.put(raw(itemFromAnotherAdapter));
 ```
 
@@ -152,7 +152,7 @@ interface AdapterOptions<TItem, TKey> {
   keyFields: (keyof TItem & string)[];
   projectionFieldMap?: Record<string, string>;
   searchable?: Record<string, 1 | true>;
-  searchablePrefix?: string;      // default '-search-'
+  searchablePrefix?: string; // default '-search-'
   indirectIndices?: Record<string, 1 | true>;
   hooks?: Partial<AdapterHooks<TItem>>;
 }
@@ -175,8 +175,8 @@ class Adapter<TItem, TKey> {
   getAllByParams(params: QueryOrScanInput, options?: ListOptions<TItem>): Promise<PaginatedResult<TItem>>;
 
   // Writes — single
-  post(item: TItem): Promise<void>;                            // create-only (checkExistence)
-  put(item: TItem, options?: PutOptions): Promise<void>;       // create-or-replace
+  post(item: TItem): Promise<void>; // create-only (checkExistence)
+  put(item: TItem, options?: PutOptions): Promise<void>; // create-or-replace
   patch(key: TKey, patch: Patch<TItem>, options?: PatchOptions): Promise<void>;
   delete(key: TKey, options?: DeleteOptions): Promise<void>;
   clone(key: TKey, mapFn?: (item: TItem) => TItem, options?: CloneOptions): Promise<TItem | undefined>;
@@ -245,17 +245,13 @@ All expression builders ship from `dynamodb-toolkit/expressions` and are **pure 
 
 ```ts
 interface PatchOptions {
-  delete?: string[];           // paths to REMOVE
-  separator?: string;          // path separator, default '.'
-  arrayOps?: ArrayOp[];        // optional: append, prepend, setAtIndex, removeAtIndex
+  delete?: string[]; // paths to REMOVE
+  separator?: string; // path separator, default '.'
+  arrayOps?: ArrayOp[]; // optional: append, prepend, setAtIndex, removeAtIndex
   conditions?: ConditionClause[];
 }
 
-function buildUpdate<TItem>(
-  patch: Patch<TItem>,
-  options?: PatchOptions,
-  params?: UpdateCommandInput
-): UpdateCommandInput;
+function buildUpdate<TItem>(patch: Patch<TItem>, options?: PatchOptions, params?: UpdateCommandInput): UpdateCommandInput;
 ```
 
 Programmatic callers use the options bag. The wire (KoaAdapter body parser) recognizes `_delete` / `_separator` meta-keys and translates them into the options bag before invoking `buildUpdate`. Meta-prefix is configurable (see §7).
@@ -264,12 +260,12 @@ Programmatic callers use the options bag. The wire (KoaAdapter body parser) reco
 
 ```js
 buildUpdate(
-  { name: 'Bespin' },
+  {name: 'Bespin'},
   {
     arrayOps: [
-      { op: 'append', path: 'moons', values: ['A'] },
-      { op: 'removeAtIndex', path: 'tags', index: 2 },
-    ],
+      {op: 'append', path: 'moons', values: ['A']},
+      {op: 'removeAtIndex', path: 'tags', index: 2}
+    ]
   }
 );
 ```
@@ -280,12 +276,12 @@ buildUpdate(
 
 DynamoDB's `UpdateExpression` natively supports four atomic array operations; all ship in v3:
 
-| `op` | DDB expression | Notes |
-|---|---|---|
-| `append` | `SET path = list_append(if_not_exists(path, :empty), :values)` | Adds to tail. |
-| `prepend` | `SET path = list_append(:values, if_not_exists(path, :empty))` | Adds to head. |
-| `setAtIndex` | `SET path[i] = :value` | Absolute-index write. |
-| `removeAtIndex` | `REMOVE path[i]` | Absolute-index delete. DDB leaves the slot empty (no shift). |
+| `op`            | DDB expression                                                 | Notes                                                        |
+| --------------- | -------------------------------------------------------------- | ------------------------------------------------------------ |
+| `append`        | `SET path = list_append(if_not_exists(path, :empty), :values)` | Adds to tail.                                                |
+| `prepend`       | `SET path = list_append(:values, if_not_exists(path, :empty))` | Adds to head.                                                |
+| `setAtIndex`    | `SET path[i] = :value`                                         | Absolute-index write.                                        |
+| `removeAtIndex` | `REMOVE path[i]`                                               | Absolute-index delete. DDB leaves the slot empty (no shift). |
 
 **Not shipped in v3 (deferred):**
 
@@ -318,12 +314,12 @@ New helper: `buildCondition(clauses, params)`. v2 inlined conditions via `update
 
 ```ts
 type ConditionClause =
-  | { path: string; op: '=' | '<>' | '<' | '<=' | '>' | '>='; value: unknown }
-  | { path: string; op: 'exists' | 'notExists' }
-  | { path: string; op: 'beginsWith' | 'contains'; value: unknown }
-  | { path: string; op: 'in'; values: unknown[] }
-  | { op: 'and' | 'or'; clauses: ConditionClause[] }
-  | { op: 'not'; clause: ConditionClause };
+  | {path: string; op: '=' | '<>' | '<' | '<=' | '>' | '>='; value: unknown}
+  | {path: string; op: 'exists' | 'notExists'}
+  | {path: string; op: 'beginsWith' | 'contains'; value: unknown}
+  | {path: string; op: 'in'; values: unknown[]}
+  | {op: 'and' | 'or'; clauses: ConditionClause[]}
+  | {op: 'not'; clause: ConditionClause};
 ```
 
 The `updateInput` hook remains the escape hatch for anything the builder doesn't cover.
@@ -338,31 +334,31 @@ Hand-written `.d.ts` sidecars. The ambition is **deep**: typed paths, branded ra
 
 ```ts
 // paths.d.ts
-type Path<T, Depth extends unknown[] = []> =
-  Depth['length'] extends 5 ? string :                         // depth guard
-  T extends readonly (infer U)[]
+type Path<T, Depth extends unknown[] = []> = Depth['length'] extends 5
+  ? string // depth guard
+  : T extends readonly (infer U)[]
     ? `${number}` | `${number}.${Path<U, [...Depth, 1]>}`
     : T extends object
-      ? { [K in keyof T & string]: `${K}` | `${K}.${Path<T[K], [...Depth, 1]>}` }[keyof T & string]
+      ? {[K in keyof T & string]: `${K}` | `${K}.${Path<T[K], [...Depth, 1]>}`}[keyof T & string]
       : never;
 
 // raw.d.ts
 declare const rawBrand: unique symbol;
-type Raw<T> = T & { readonly [rawBrand]: true };
+type Raw<T> = T & {readonly [rawBrand]: true};
 declare function raw<T>(item: T): Raw<T>;
 ```
 
 ### 6.2 Patch and batch types
 
 ```ts
-type Patch<T> = { [K in Path<T>]?: unknown }; // looser than TItem-keyed to accept partial updates with dotted paths
+type Patch<T> = {[K in Path<T>]?: unknown}; // looser than TItem-keyed to accept partial updates with dotted paths
 
 type BatchDescriptor<TItem = unknown> =
-  | { action: 'get';    adapter: Adapter<TItem>; params: GetCommandInput }
-  | { action: 'check';  params: GetCommandInput }
-  | { action: 'put';    params: PutCommandInput }
-  | { action: 'patch';  params: UpdateCommandInput }
-  | { action: 'delete'; params: DeleteCommandInput };
+  | {action: 'get'; adapter: Adapter<TItem>; params: GetCommandInput}
+  | {action: 'check'; params: GetCommandInput}
+  | {action: 'put'; params: PutCommandInput}
+  | {action: 'patch'; params: UpdateCommandInput}
+  | {action: 'delete'; params: DeleteCommandInput};
 ```
 
 ### 6.3 Re-exports
@@ -391,18 +387,18 @@ v3 splits the REST layer into three pieces:
 
 Every functional requirement from `v3-survey.md` §4.1 maps to one or more helpers in `rest-core`:
 
-| Requirement | Helper(s) |
-|---|---|
-| Parse field subsetting | `parseFields(input)` → `{include, exclude}` |
-| Parse sorting | `parseSort(input)` → `{field, direction, chain}` |
-| Parse filter | `parseFilter(input)` → `{mode, query}` |
-| Parse patch body | `parsePatch(body, {metaPrefix})` → `{patch, options}` |
-| Parse key list | `parseNames(input)` → `string[]` |
-| Parse pagination | `parsePaging(input, {defaultLimit, maxLimit})` → `{offset, limit}` |
-| Build pagination envelope | `buildEnvelope(result, {keys})` → configurable key shape |
-| Build error body | `buildErrorBody(err, {includeDebug, errorId})` → configurable envelope |
-| Mass-op-by-criterion | `findAndPatch`, `findAndDelete`, `findOneAndPatch` |
-| Cache hooks | `etag(item)`, `lastModified(item)`, `vary(ctx)` |
+| Requirement               | Helper(s)                                                              |
+| ------------------------- | ---------------------------------------------------------------------- |
+| Parse field subsetting    | `parseFields(input)` → `{include, exclude}`                            |
+| Parse sorting             | `parseSort(input)` → `{field, direction, chain}`                       |
+| Parse filter              | `parseFilter(input)` → `{mode, query}`                                 |
+| Parse patch body          | `parsePatch(body, {metaPrefix})` → `{patch, options}`                  |
+| Parse key list            | `parseNames(input)` → `string[]`                                       |
+| Parse pagination          | `parsePaging(input, {defaultLimit, maxLimit})` → `{offset, limit}`     |
+| Build pagination envelope | `buildEnvelope(result, {keys})` → configurable key shape               |
+| Build error body          | `buildErrorBody(err, {includeDebug, errorId})` → configurable envelope |
+| Mass-op-by-criterion      | `findAndPatch`, `findAndDelete`, `findOneAndPatch`                     |
+| Cache hooks               | `etag(item)`, `lastModified(item)`, `vary(ctx)`                        |
 
 All helpers are pure. The Koa wrapper wires them to routes; consumers can call them from custom routes in any framework.
 
@@ -410,23 +406,23 @@ All helpers are pure. The Koa wrapper wires them to routes; consumers can call t
 
 `koaAdapter({adapter, policy, routes: 'standard'})` mounts:
 
-| Method | URI | Maps to |
-|---|---|---|
-| `GET` | `/` | `getAll` + pagination envelope |
-| `GET` | `/:key` | `getByKey`; `404` on miss |
-| `GET` | `/-by-names?names=…` | `getByKeys`; plain array, missing silently dropped |
-| `POST` | `/` | `post`; `204` |
-| `PUT` | `/:key` | `put`; `204` |
-| `PATCH` | `/:key` | `patch`; `204` |
-| `DELETE` | `/:key` | `delete`; `204` |
-| `DELETE` | `/` | `deleteAllByParams` + filter; `{processed: N}` |
-| `PUT` | `/-load` | bulk `putAll`; `{processed: N}` |
-| `PUT` | `/-clone/` or `/-clone/?filter=…` | `cloneAllByParams`; `{processed: N}` |
-| `PUT` | `/:key/-clone` | single-item `clone`; `204` or `404` |
-| `PUT` | `/:key/-move` | single-item `move`; `204` or `404` |
-| `PUT` | `/-clone-by-names/?names=…` | `cloneByKeys`; `{processed: N}` |
-| `PUT` | `/-move-by-names/?names=…` | `moveByKeys`; `{processed: N}` |
-| `DELETE` | `/-by-names?names=…` | `deleteByKeys`; `{processed: N}` |
+| Method   | URI                               | Maps to                                            |
+| -------- | --------------------------------- | -------------------------------------------------- |
+| `GET`    | `/`                               | `getAll` + pagination envelope                     |
+| `GET`    | `/:key`                           | `getByKey`; `404` on miss                          |
+| `GET`    | `/-by-names?names=…`              | `getByKeys`; plain array, missing silently dropped |
+| `POST`   | `/`                               | `post`; `204`                                      |
+| `PUT`    | `/:key`                           | `put`; `204`                                       |
+| `PATCH`  | `/:key`                           | `patch`; `204`                                     |
+| `DELETE` | `/:key`                           | `delete`; `204`                                    |
+| `DELETE` | `/`                               | `deleteAllByParams` + filter; `{processed: N}`     |
+| `PUT`    | `/-load`                          | bulk `putAll`; `{processed: N}`                    |
+| `PUT`    | `/-clone/` or `/-clone/?filter=…` | `cloneAllByParams`; `{processed: N}`               |
+| `PUT`    | `/:key/-clone`                    | single-item `clone`; `204` or `404`                |
+| `PUT`    | `/:key/-move`                     | single-item `move`; `204` or `404`                 |
+| `PUT`    | `/-clone-by-names/?names=…`       | `cloneByKeys`; `{processed: N}`                    |
+| `PUT`    | `/-move-by-names/?names=…`        | `moveByKeys`; `{processed: N}`                     |
+| `DELETE` | `/-by-names?names=…`              | `deleteByKeys`; `{processed: N}`                   |
 
 Method-prefix character `-` is configurable via `policy.methodPrefix`.
 
@@ -434,27 +430,27 @@ Method-prefix character `-` is configurable via `policy.methodPrefix`.
 
 ```ts
 interface RestPolicy {
-  metaPrefix: string;              // default '_' (wire-side meta keys)
-  dbPrefix: string;                // default '-' (DB-internal fields; informational)
-  methodPrefix: string;            // default '-'
+  metaPrefix: string; // default '_' (wire-side meta keys)
+  dbPrefix: string; // default '-' (DB-internal fields; informational)
+  methodPrefix: string; // default '-'
   envelope: {
-    items?: string;                // default 'data'
-    total?: string;                // default 'total'
-    offset?: string;               // default 'offset'
-    limit?: string;                // default 'limit'
+    items?: string; // default 'data'
+    total?: string; // default 'total'
+    offset?: string; // default 'offset'
+    limit?: string; // default 'limit'
   };
   statusCodes: {
-    miss?: number;                 // default 404
-    validation?: number;           // default 422
-    consistency?: number;          // default 409
-    throttle?: number;             // default 429
-    transient?: number;            // default 503
-    internal?: number;             // default 500
+    miss?: number; // default 404
+    validation?: number; // default 422
+    consistency?: number; // default 409
+    throttle?: number; // default 429
+    transient?: number; // default 503
+    internal?: number; // default 500
   };
   errorBody: (err: unknown, ctx: RestErrorContext) => unknown;
-  needTotal?: boolean;             // designer-time; default true
-  defaultLimit?: number;           // default 10
-  maxLimit?: number;               // default 100
+  needTotal?: boolean; // designer-time; default true
+  defaultLimit?: number; // default 10
+  maxLimit?: number; // default 100
 }
 ```
 
@@ -548,18 +544,18 @@ Folders where they earn their keep; bare files for one-offs (§2 of `src-functio
   "name": "dynamodb-toolkit",
   "type": "module",
   "exports": {
-    ".":             { "types": "./src/index.d.ts",            "default": "./src/index.js" },
-    "./expressions": { "types": "./src/expressions/index.d.ts", "default": "./src/expressions/index.js" },
-    "./batch":       { "types": "./src/batch/index.d.ts",       "default": "./src/batch/index.js" },
-    "./mass":        { "types": "./src/mass/index.d.ts",        "default": "./src/mass/index.js" },
-    "./paths":       { "types": "./src/paths/index.d.ts",       "default": "./src/paths/index.js" },
-    "./rest-core":   { "types": "./src/rest-core/index.d.ts",   "default": "./src/rest-core/index.js" },
-    "./handler":     { "types": "./src/handler/index.d.ts",     "default": "./src/handler/index.js" }
+    ".": {"types": "./src/index.d.ts", "default": "./src/index.js"},
+    "./expressions": {"types": "./src/expressions/index.d.ts", "default": "./src/expressions/index.js"},
+    "./batch": {"types": "./src/batch/index.d.ts", "default": "./src/batch/index.js"},
+    "./mass": {"types": "./src/mass/index.d.ts", "default": "./src/mass/index.js"},
+    "./paths": {"types": "./src/paths/index.d.ts", "default": "./src/paths/index.js"},
+    "./rest-core": {"types": "./src/rest-core/index.d.ts", "default": "./src/rest-core/index.js"},
+    "./handler": {"types": "./src/handler/index.d.ts", "default": "./src/handler/index.js"}
   },
   "files": ["src"],
   "peerDependencies": {
     "@aws-sdk/client-dynamodb": "^3.0.0",
-    "@aws-sdk/lib-dynamodb":    "^3.0.0"
+    "@aws-sdk/lib-dynamodb": "^3.0.0"
   }
 }
 ```
@@ -605,8 +601,8 @@ Everything else comes from Node's standard library:
 
   ```js
   // tests/helpers/withServer.js
-  import { createServer } from 'node:http';
-  import { once } from 'node:events';
+  import {createServer} from 'node:http';
+  import {once} from 'node:events';
 
   export async function withServer(handler, fn) {
     const server = createServer(handler);
@@ -788,4 +784,4 @@ Items the design doc leaves to the implementer's judgment, flagged here for visi
 
 ---
 
-*End of design doc. Implementation starts after sign-off.*
+_End of design doc. Implementation starts after sign-off._

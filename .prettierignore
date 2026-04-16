@@ -1,0 +1,9 @@
+# v2 code — reference only, removed in Phase 6
+Adapter.js
+index.js
+utils/
+helpers/
+tests/server.js
+tests/routes.js
+tests/Unit test dynamodb-toolkit.postman_collection.json
+wiki/

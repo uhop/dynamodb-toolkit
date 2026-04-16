@@ -1,14 +1,49 @@
 {
   "name": "dynamodb-toolkit",
-  "version": "2.3.0",
+  "version": "3.0.0-alpha.0",
   "description": "Helpers for AWS DynamoDB to build efficient web applications",
-  "main": "index.js",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./expressions": {
+      "types": "./src/expressions/index.d.ts",
+      "default": "./src/expressions/index.js"
+    },
+    "./batch": {
+      "types": "./src/batch/index.d.ts",
+      "default": "./src/batch/index.js"
+    },
+    "./mass": {
+      "types": "./src/mass/index.d.ts",
+      "default": "./src/mass/index.js"
+    },
+    "./paths": {
+      "types": "./src/paths/index.d.ts",
+      "default": "./src/paths/index.js"
+    },
+    "./rest-core": {
+      "types": "./src/rest-core/index.d.ts",
+      "default": "./src/rest-core/index.js"
+    },
+    "./handler": {
+      "types": "./src/handler/index.d.ts",
+      "default": "./src/handler/index.js"
+    }
+  },
   "scripts": {
-    "start": "node tests/server.js",
-    "debug": "node --inspect-brk tests/server.js",
+    "test": "tape6 --flags FO",
+    "test:e2e": "tape6 --flags FO tests/e2e/",
     "ts-check": "tsc --noEmit",
     "lint": "prettier --check .",
     "lint:fix": "prettier --write ."
+  },
+  "tape6": {
+    "tests": [
+      "/tests/test-*.*js"
+    ]
   },
   "repository": {
     "type": "git",
@@ -17,7 +52,9 @@
   "keywords": [
     "aws",
     "dynamodb",
-    "database"
+    "database",
+    "rest",
+    "adapter"
   ],
   "author": "Eugene Lazutkin <eugene.lazutkin@gmail.com> (http://lazutkin.com)",
   "license": "BSD-3-Clause",
@@ -26,18 +63,21 @@
   },
   "homepage": "https://github.com/uhop/dynamodb-toolkit#readme",
   "funding": "https://github.com/sponsors/uhop",
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.0.0",
+    "@aws-sdk/lib-dynamodb": "^3.0.0"
+  },
   "devDependencies": {
-    "aws-sdk": "^2.830.0",
-    "colors": "^1.4.0",
-    "koa": "^2.13.1",
-    "koa-body": "^4.2.0",
-    "koa-router": "^10.0.0",
+    "@aws-sdk/client-dynamodb": "^3.798.0",
+    "@aws-sdk/lib-dynamodb": "^3.798.0",
     "prettier": "^3.8.1",
+    "tape-six": "^1.7.13",
     "typescript": "^6.0.2"
   },
   "files": [
-    "/*.js",
-    "/utils",
-    "/helpers"
+    "src"
   ]
 }
