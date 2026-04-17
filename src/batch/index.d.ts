@@ -1,3 +1,8 @@
+/**
+ * Batch + transaction chunkers with `UnprocessedItems` / `UnprocessedKeys`
+ * retry and exponential backoff. JSDoc lives on each re-exported symbol.
+ */
+
 export {applyBatch, type BatchWriteDescriptor} from './apply-batch.js';
 export {applyTransaction, TRANSACTION_LIMIT, type TransactWriteDescriptor} from './apply-transaction.js';
 export {getBatch, type BatchGetDescriptor, type BatchGetResult} from './get-batch.js';

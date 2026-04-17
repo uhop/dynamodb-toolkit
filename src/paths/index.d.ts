@@ -1,3 +1,8 @@
+/**
+ * Path helpers — nested access and patch application on plain JS objects.
+ * Pure functions; no DynamoDB involvement. JSDoc lives on each re-exported symbol.
+ */
+
 export {getPath} from './get-path.js';
 export {setPath} from './set-path.js';
 export {deletePath} from './delete-path.js';

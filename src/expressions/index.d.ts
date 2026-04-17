@@ -1,3 +1,9 @@
+/**
+ * Expression builders — pure functions that assemble DynamoDB expression
+ * strings with attribute aliasing, placeholders, and deduplication. All
+ * accept an optional `params` to extend. JSDoc lives on each re-exported symbol.
+ */
+
 export {buildUpdate, type UpdateOptions, type ArrayOp} from './update.js';
 export {addProjection} from './projection.js';
 export {buildFilter, buildFilterByExample, type FilterOptions} from './filter.js';

@@ -1,4 +1,7 @@
-// REST core — parsers, builders, policy. Framework-agnostic.
+/**
+ * REST core — framework-agnostic parsers, builders, and policy. Every symbol
+ * carries JSDoc at its defining module; IDE hover follows the re-export chain.
+ */
 
 export {parseFields} from './parsers/parse-fields.js';
 export {parseSort, type ParsedSort, type SortClause} from './parsers/parse-sort.js';
