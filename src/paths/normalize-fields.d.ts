@@ -11,6 +11,7 @@
  * @param fields Field spec in any supported form.
  * @param projectionFieldMap Optional alias map for the first segment of each path.
  * @param separator Path separator. Default `'.'`.
+ * @returns Canonical list of dotted paths, or `null` when no fields were requested ("project everything").
  */
 export function normalizeFields(
   fields: string | string[] | Record<string, unknown> | null | undefined,

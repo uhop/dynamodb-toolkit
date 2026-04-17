@@ -4,5 +4,7 @@
  * a projection).
  *
  * @param input Raw query value.
+ * @returns The parsed list of dotted field paths, or `null` when no projection was
+ *   requested — caller should return every field in that case.
  */
 export function parseFields(input: string | string[] | null | undefined): string[] | null;

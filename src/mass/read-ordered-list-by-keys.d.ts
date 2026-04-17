@@ -10,6 +10,8 @@ import type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
  * @param keys Keys in the desired result order.
  * @param params Extra DynamoDB input merged into each sub-request
  *   (e.g. `ConsistentRead`, `ProjectionExpression`).
+ * @returns Array aligned 1:1 with `keys` — result[i] is the item for keys[i], or
+ *   `undefined` when that key had no matching item.
  */
 export function readOrderedListByKeys<T = Record<string, unknown>>(
   client: DynamoDBDocumentClient,

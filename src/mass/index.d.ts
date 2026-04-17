@@ -17,6 +17,8 @@ import type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
  * @param client The DynamoDB DocumentClient.
  * @param params DynamoDB `Query` / `Scan` input.
  * @param fn Async callback invoked with the raw response page.
+ * @returns Params to pass on the next call to continue paging, or `null` when the scan
+ *   is exhausted (no `LastEvaluatedKey` in the last response).
  */
 export function readList(
   client: DynamoDBDocumentClient,
@@ -27,6 +29,10 @@ export function readList(
 /**
  * Read a single page and return `{nextParams, items}` — items for this page,
  * `nextParams` for a subsequent call, `null` when exhausted.
+ *
+ * @param client The DynamoDB DocumentClient.
+ * @param params DynamoDB `Query` / `Scan` input.
+ * @returns `items` for this page, and `nextParams` to continue (or `null` when exhausted).
  */
 export function readListGetItems(
   client: DynamoDBDocumentClient,
@@ -41,6 +47,8 @@ export function readListGetItems(
  * @param tableName Table to read from.
  * @param keys Keys to fetch.
  * @param params Extra DynamoDB input merged into each sub-request.
+ * @returns The fetched items — may be shorter than `keys` (missing items drop out),
+ *   and order is arbitrary (DynamoDB doesn't preserve it).
  */
 export function readListByKeys<T = Record<string, unknown>>(
   client: DynamoDBDocumentClient,
@@ -57,7 +65,8 @@ export function readListByKeys<T = Record<string, unknown>>(
  * @param items Items to write.
  * @param mapFn Optional transform applied to each item before writing.
  *   Returning a falsy value skips that item.
- * @returns Number of items written.
+ * @returns Count of items that DynamoDB accepted into the table — excludes entries
+ *   skipped by `mapFn` returning a falsy value.
  */
 export function writeList(
   client: DynamoDBDocumentClient,
@@ -73,7 +82,7 @@ export function writeList(
  * @param client The DynamoDB DocumentClient.
  * @param params DynamoDB `Query` / `Scan` input (must include key projection).
  * @param keyFn Extracts the key from each fetched item. Default: identity.
- * @returns Number of items deleted.
+ * @returns Count of items DynamoDB removed (sum across every chunked `BatchWriteItem` call).
  */
 export function deleteList(
   client: DynamoDBDocumentClient,
@@ -87,7 +96,8 @@ export function deleteList(
  * @param client The DynamoDB DocumentClient.
  * @param tableName Target table.
  * @param keys Keys to delete.
- * @returns Number of items deleted.
+ * @returns Count of delete operations DynamoDB accepted (one per key; missing items count too —
+ *   DynamoDB deletes are idempotent).
  */
 export function deleteListByKeys(client: DynamoDBDocumentClient, tableName: string, keys: Record<string, unknown>[]): Promise<number>;
 
@@ -98,7 +108,7 @@ export function deleteListByKeys(client: DynamoDBDocumentClient, tableName: stri
  * @param client The DynamoDB DocumentClient.
  * @param params DynamoDB `Query` / `Scan` input. The target table is taken from `params.TableName`.
  * @param mapFn Transform applied to each fetched item before writing the copy.
- * @returns Number of items written.
+ * @returns Count of copies written to the target table.
  */
 export function copyList(
   client: DynamoDBDocumentClient,
@@ -115,7 +125,8 @@ export function copyList(
  * @param params DynamoDB `Query` / `Scan` input.
  * @param mapFn Transform applied to each fetched item before writing.
  * @param keyFn Extracts the original key from each fetched item (for the delete leg).
- * @returns Total batch-actions count (puts + deletes).
+ * @returns Sum of puts + deletes DynamoDB accepted — roughly double the item count
+ *   when the move succeeds on every item.
  */
 export function moveList(
   client: DynamoDBDocumentClient,
@@ -127,5 +138,9 @@ export function moveList(
 /**
  * Count items matching a `Query` / `Scan` via `Select: 'COUNT'` pagination.
  * Traverses every page — O(result size).
+ *
+ * @param client The DynamoDB DocumentClient.
+ * @param params DynamoDB `Query` / `Scan` input.
+ * @returns Total number of matches across all pages (post-filter when `FilterExpression` is set).
  */
 export function getTotal(client: DynamoDBDocumentClient, params: Record<string, unknown>): Promise<number>;

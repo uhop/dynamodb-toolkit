@@ -18,5 +18,7 @@ export type MatchedRoute =
  * @param method Request method (e.g. `'GET'`).
  * @param path URL pathname (no query string).
  * @param methodPrefix Character(s) that mark method URLs. Default `'-'`.
+ * @returns A discriminated-union route object — switch on `kind` to dispatch.
+ *   `unknown` means the path didn't match any standard route; treat as 404.
  */
 export function matchRoute(method: string, path: string, methodPrefix?: string): MatchedRoute;

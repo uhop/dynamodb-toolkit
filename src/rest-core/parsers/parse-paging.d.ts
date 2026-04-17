@@ -21,5 +21,7 @@ export interface ParsedPaging {
  *
  * @param input Raw values — strings or numbers.
  * @param options `defaultLimit` and `maxLimit`.
+ * @returns `{offset, limit}` normalized for `paginateList` — never negative, `limit` is
+ *   a positive integer inside `[1, maxLimit]`.
  */
 export function parsePaging(input?: {offset?: string | number; limit?: string | number} | null, options?: ParsePagingOptions): ParsedPaging;

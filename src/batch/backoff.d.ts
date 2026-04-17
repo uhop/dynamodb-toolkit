@@ -5,5 +5,7 @@
  * @param to Maximum delay in milliseconds. Default `2000`.
  * @param finite When `true`, the generator terminates after a fixed number
  *   of yields; when `false` (default), it yields forever (up to the cap).
+ * @returns Generator whose yielded numbers are milliseconds to `await sleep(...)` before
+ *   the next retry attempt — already jittered, ready to pass straight to `sleep`.
  */
 export function backoff(from?: number, to?: number, finite?: boolean): Generator<number, void, unknown>;

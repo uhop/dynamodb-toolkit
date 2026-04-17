@@ -26,5 +26,7 @@ export interface BatchGetResult {
  *
  * @param client The DynamoDB DocumentClient.
  * @param requests Descriptors, arrays of descriptors, and/or `null` holes.
+ * @returns The fetched items, each tagged with its source table. Order is arbitrary —
+ *   misses are simply absent, so the result may be shorter than the request list.
  */
 export function getBatch(client: DynamoDBDocumentClient, ...requests: (BatchGetDescriptor | BatchGetDescriptor[] | null)[]): Promise<BatchGetResult[]>;

@@ -188,6 +188,8 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @param keys Keys to fetch.
    * @param fields Optional projection spec.
    * @param options Consistency / revive / indirection / extra params.
+   * @returns The found items — may be shorter than `keys` (misses drop out) and in
+   *   arbitrary order (DynamoDB doesn't preserve caller order).
    */
   getByKeys(keys: (TKey | Raw<TKey>)[], fields?: string | string[] | null, options?: GetOptions): Promise<TItem[]>;
 
@@ -197,6 +199,8 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @param options Paging / sorting / projection / filter / revive options.
    * @param example Partial example fed to `prepareListInput` (for index lookups).
    * @param index GSI name fed to `prepareListInput`.
+   * @returns One page: `data` has up to `limit` items (revived unless `reviveItems: false`),
+   *   `offset`/`limit` echo the clamped window, `total` is present unless `needTotal: false`.
    */
   getAll(options?: ListOptions, example?: Partial<TItem>, index?: string): Promise<PaginatedResult<TItem>>;
 
@@ -206,6 +210,8 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    *
    * @param params Pre-built DynamoDB `Query` / `Scan` input.
    * @param options Paging / sorting / revive options.
+   * @returns Same envelope shape as {@link Adapter.getAll} — a single page of items plus
+   *   `offset`/`limit`/optional `total`.
    */
   getAllByParams(params: Record<string, unknown>, options?: ListOptions): Promise<PaginatedResult<TItem>>;
 
@@ -213,6 +219,10 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
 
   /**
    * Create-only write. Adds `attribute_not_exists(<partition key>)`.
+   *
+   * @param item Item to insert (wrap in `raw(...)` to skip `prepare` / `validateItem`).
+   * @returns The raw DynamoDB Command output — or the transaction output when
+   *   `hooks.checkConsistency` upgrades the write. Callers usually ignore it.
    * @throws `ConditionalCheckFailedException` when the key already exists.
    */
   post(item: TItem | Raw<TItem>): Promise<unknown>;
@@ -220,6 +230,10 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   /**
    * Create-or-replace write. Default adds `attribute_exists(<partition key>)`
    * (write fails if missing); `options.force` skips the check.
+   *
+   * @param item Item to write (wrap in `raw(...)` to skip `prepare` / `validateItem`).
+   * @param options `force`, extra conditions, extra DynamoDB input.
+   * @returns The raw DynamoDB Command output (or transaction output when upgraded).
    */
   put(item: TItem | Raw<TItem>, options?: PutOptions): Promise<unknown>;
 
@@ -230,12 +244,17 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @param key Item key.
    * @param patch Fields to SET (dotted paths supported).
    * @param options Deletion paths, array ops, extra conditions, separator.
+   * @returns The raw DynamoDB Command output (or transaction output when upgraded).
    */
   patch(key: TKey | Raw<TKey>, patch: Partial<TItem> | Raw<Partial<TItem>>, options?: PatchOptions): Promise<unknown>;
 
   /**
    * Delete an item by key. DynamoDB Delete is idempotent; succeeds whether
    * or not the item exists (unless `options.conditions` is supplied).
+   *
+   * @param key Item key.
+   * @param options Extra condition clauses, extra DynamoDB input.
+   * @returns The raw DynamoDB Command output (or transaction output when upgraded).
    */
   delete(key: TKey | Raw<TKey>, options?: DeleteOptions): Promise<unknown>;
 
@@ -246,12 +265,18 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @param key Source item key.
    * @param mapFn Transform from source item to destination item. Default identity.
    * @param options `force` swaps the destination write from `post` to `put({force})`.
+   * @returns The written (post-`mapFn`) item, or `undefined` when the source key missed.
    */
   clone(key: TKey | Raw<TKey>, mapFn?: (item: TItem) => TItem, options?: CloneOptions): Promise<TItem | undefined>;
 
   /**
    * `clone` + delete the source — bundled into a single `TransactWriteItems`.
    * Returns the moved item on success, `undefined` when the source is missing.
+   *
+   * @param key Source item key.
+   * @param mapFn Transform from source to destination. Default identity.
+   * @param options Same shape as {@link CloneOptions}.
+   * @returns The written (post-`mapFn`) item, or `undefined` when the source key missed.
    */
   move(key: TKey | Raw<TKey>, mapFn?: (item: TItem) => TItem, options?: MoveOptions): Promise<TItem | undefined>;
 
@@ -260,19 +285,64 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   /**
    * Bulk write. `'native'` strategy (default) uses `BatchWriteItem`;
    * `'sequential'` does individual Puts per item.
+   *
+   * @param items Items to write.
+   * @param options Strategy / extra DynamoDB input.
+   * @returns `{processed}` — total writes DynamoDB accepted across every underlying
+   *   batch call (or every per-item Command in sequential mode).
    */
   putAll(items: (TItem | Raw<TItem>)[], options?: MassOptions): Promise<{processed: number}>;
-  /** Bulk delete by known keys. */
+  /**
+   * Bulk delete by known keys.
+   *
+   * @param keys Keys to delete.
+   * @param options Strategy / extra DynamoDB input.
+   * @returns `{processed}` — total delete actions DynamoDB accepted (missing items count too).
+   */
   deleteByKeys(keys: (TKey | Raw<TKey>)[], options?: MassOptions): Promise<{processed: number}>;
-  /** Delete every item matching `params` (Query / Scan). */
+  /**
+   * Delete every item matching `params` (Query / Scan).
+   *
+   * @param params Pre-built DynamoDB `Query` / `Scan` input.
+   * @param options Strategy / extra DynamoDB input.
+   * @returns `{processed}` — total delete actions DynamoDB accepted.
+   */
   deleteAllByParams(params: Record<string, unknown>, options?: MassOptions): Promise<{processed: number}>;
-  /** Clone each item identified by a key, optionally transformed by `mapFn`. */
+  /**
+   * Clone each item identified by a key, optionally transformed by `mapFn`.
+   *
+   * @param keys Source keys.
+   * @param mapFn Transform applied before writing the copy. Default identity.
+   * @param options Strategy / extra DynamoDB input.
+   * @returns `{processed}` — total copies written.
+   */
   cloneByKeys(keys: (TKey | Raw<TKey>)[], mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
-  /** Clone every item matching `params`, optionally transformed by `mapFn`. */
+  /**
+   * Clone every item matching `params`, optionally transformed by `mapFn`.
+   *
+   * @param params Pre-built `Query` / `Scan` input.
+   * @param mapFn Transform applied before writing the copy. Default identity.
+   * @param options Strategy / extra DynamoDB input.
+   * @returns `{processed}` — total copies written.
+   */
   cloneAllByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
-  /** Move each item identified by a key (paired put + delete chunks). */
+  /**
+   * Move each item identified by a key (paired put + delete chunks).
+   *
+   * @param keys Source keys.
+   * @param mapFn Transform applied before writing the destination. Default identity.
+   * @param options Strategy / extra DynamoDB input.
+   * @returns `{processed}` — sum of put + delete actions (≈ 2× the moved-item count on success).
+   */
   moveByKeys(keys: (TKey | Raw<TKey>)[], mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
-  /** Move every item matching `params` (paired put + delete chunks). */
+  /**
+   * Move every item matching `params` (paired put + delete chunks).
+   *
+   * @param params Pre-built `Query` / `Scan` input.
+   * @param mapFn Transform applied before writing the destination. Default identity.
+   * @param options Strategy / extra DynamoDB input.
+   * @returns `{processed}` — sum of put + delete actions (≈ 2× the moved-item count on success).
+   */
   moveAllByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
 
   // --- Batch builders ---
@@ -280,16 +350,55 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   /**
    * Build a `get` descriptor for use with `getBatch` / `getTransaction`.
    * Carries a reference to this Adapter for result routing.
+   *
+   * @param key Item key.
+   * @param fields Optional projection spec.
+   * @param params Extra DynamoDB input merged into the descriptor.
+   * @returns A `{action: 'get', adapter, params}` descriptor ready to pass to
+   *   `getBatch` / `getTransaction`. `adapter` is this instance, so multi-table
+   *   transactions can revive each result against the right Adapter.
    */
   makeGet(key: TKey | Raw<TKey>, fields?: string | string[] | null, params?: Record<string, unknown>): Promise<BatchDescriptor & {action: 'get'}>;
-  /** Build a condition-only descriptor for `applyTransaction`. */
+  /**
+   * Build a condition-only descriptor for `applyTransaction`.
+   *
+   * @param key Item key the check runs against.
+   * @param params Extra DynamoDB input (typically `ConditionExpression`).
+   * @returns A `{action: 'check', params}` descriptor — include in a transaction to
+   *   abort the whole thing when the condition fails.
+   */
   makeCheck(key: TKey | Raw<TKey>, params?: Record<string, unknown>): Promise<BatchDescriptor & {action: 'check'}>;
-  /** Build a `put` descriptor with an `attribute_not_exists` condition. */
+  /**
+   * Build a `put` descriptor with an `attribute_not_exists` condition.
+   *
+   * @param item Item to insert.
+   * @returns A `{action: 'put', params}` descriptor ready for `applyBatch` / `applyTransaction`.
+   *   The transaction fails if the key already exists.
+   */
   makePost(item: TItem | Raw<TItem>): Promise<BatchDescriptor & {action: 'put'}>;
-  /** Build a `put` descriptor (with `attribute_exists` unless `force`). */
+  /**
+   * Build a `put` descriptor (with `attribute_exists` unless `force`).
+   *
+   * @param item Item to write.
+   * @param options `force`, extra conditions, extra DynamoDB input.
+   * @returns A `{action: 'put', params}` descriptor.
+   */
   makePut(item: TItem | Raw<TItem>, options?: PutOptions): Promise<BatchDescriptor & {action: 'put'}>;
-  /** Build a `patch` descriptor (`UpdateExpression`). */
+  /**
+   * Build a `patch` descriptor (`UpdateExpression`).
+   *
+   * @param key Item key.
+   * @param patch Fields to SET.
+   * @param options Deletion paths, array ops, extra conditions, separator.
+   * @returns A `{action: 'patch', params}` descriptor carrying the built `UpdateExpression`.
+   */
   makePatch(key: TKey | Raw<TKey>, patch: Partial<TItem> | Raw<Partial<TItem>>, options?: PatchOptions): Promise<BatchDescriptor & {action: 'patch'}>;
-  /** Build a `delete` descriptor. */
+  /**
+   * Build a `delete` descriptor.
+   *
+   * @param key Item key.
+   * @param options Extra condition clauses, extra DynamoDB input.
+   * @returns A `{action: 'delete', params}` descriptor.
+   */
   makeDelete(key: TKey | Raw<TKey>, options?: DeleteOptions): Promise<BatchDescriptor & {action: 'delete'}>;
 }

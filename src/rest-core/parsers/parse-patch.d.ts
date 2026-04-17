@@ -28,5 +28,7 @@ export interface ParsedPatch {
  *
  * @param body Raw request body. Non-objects and `null` are treated as empty.
  * @param options Meta prefix override.
+ * @returns `{patch, options}` — user fields split from meta; pass `options` straight to
+ *   `Adapter.patch` / `buildUpdate`. `patch` is empty when the body was empty or non-object.
  */
 export function parsePatch(body: Record<string, unknown> | null | undefined, options?: ParsePatchOptions): ParsedPatch;

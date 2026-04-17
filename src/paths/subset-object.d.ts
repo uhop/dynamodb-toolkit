@@ -7,6 +7,8 @@
  * @param fields Field spec in any form {@link normalizeFields} accepts. When
  *   `null` or omitted, returns `o` unchanged.
  * @param separator Path separator. Default `'.'`.
+ * @returns A fresh object containing only the requested paths from `o`. Keys whose
+ *   values were missing in the source are omitted (not set to `undefined`).
  */
 export function subsetObject<T extends Record<string, unknown>>(
   o: T,

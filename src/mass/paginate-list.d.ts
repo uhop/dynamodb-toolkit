@@ -32,6 +32,9 @@ export interface PaginatedResult<T = Record<string, unknown>> {
  * @param needTotal Whether to include `total` in the result. Default `true`.
  * @param minLimit Minimum request `Limit`. Default `10`.
  * @param maxLimit Clamp on the effective `limit`. Default `100`.
+ * @returns The requested page: `data` holds up to `limit` matching items, `offset` and
+ *   `limit` echo the effective values after clamping, `total` (when requested) is the
+ *   count of all matches available from `offset` onward.
  */
 export function paginateList<T = Record<string, unknown>>(
   client: DynamoDBDocumentClient,

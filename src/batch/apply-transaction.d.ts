@@ -28,7 +28,8 @@ export interface TransactWriteDescriptor {
  *
  * @param client The DynamoDB DocumentClient.
  * @param requests Descriptors, arrays of descriptors, and/or `null` holes.
- * @returns Number of actions executed. `0` when the input resolves to nothing.
+ * @returns Total number of actions (checks + writes) included in the transaction.
+ *   `0` when the input resolves to nothing — in that case no SDK call is made.
  * @throws When the combined action count exceeds {@link TRANSACTION_LIMIT}.
  */
 export function applyTransaction(client: DynamoDBDocumentClient, ...requests: (TransactWriteDescriptor | TransactWriteDescriptor[] | null)[]): Promise<number>;

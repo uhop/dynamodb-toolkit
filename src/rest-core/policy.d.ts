@@ -52,6 +52,7 @@ export const defaultPolicy: RestPolicy;
  *
  * @param err The error to classify.
  * @param statusCodes Status-code map. Falls back to {@link defaultPolicy}.
+ * @returns The HTTP status code to send — one of the policy's `statusCodes` values.
  */
 export function mapErrorStatus(err: unknown, statusCodes?: RestStatusCodes): number;
 
@@ -60,5 +61,6 @@ export function mapErrorStatus(err: unknown, statusCodes?: RestStatusCodes): num
  * `statusCodes` are merged key-by-key; everything else is shallow-merged.
  *
  * @param overrides Partial policy to overlay.
+ * @returns A fully-populated policy — pass directly to `createHandler`'s `policy` option.
  */
 export function mergePolicy(overrides?: Partial<RestPolicy>): RestPolicy;

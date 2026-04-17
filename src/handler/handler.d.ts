@@ -41,5 +41,8 @@ export interface HandlerOptions {
  *
  * @param adapter Target Adapter.
  * @param options Policy, sortable indices, key/example extractors.
+ * @returns A `(req, res) => Promise<void>` ready to plug into `http.createServer`
+ *   (or any Node-stream-shaped server). Writes the response and resolves — the
+ *   caller never needs to touch `res` themselves.
  */
 export function createHandler(adapter: Adapter<Record<string, unknown>>, options?: HandlerOptions): RequestHandler;

@@ -22,5 +22,7 @@ export interface ParsedFilter {
  *
  * @param input Raw query value.
  * @param options Optional mode + case-sensitivity passed through to the result.
+ * @returns `{query, mode?, caseSensitive?}` — ready to hand to `buildFilter` — or `null`
+ *   when no filter was requested.
  */
 export function parseFilter(input: string | string[] | null | undefined, options?: ParseFilterOptions): ParsedFilter | null;

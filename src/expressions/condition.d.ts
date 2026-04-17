@@ -24,5 +24,7 @@ export type ConditionClause =
  *
  * @param clauses Clause tree. When empty / null, `params` is returned unchanged.
  * @param params Existing DynamoDB params to extend. A fresh object is used when omitted.
+ * @returns The same `params` (fresh when omitted), now carrying a `ConditionExpression`
+ *   and placeholders — unchanged when `clauses` was empty.
  */
 export function buildCondition<T extends Record<string, unknown>>(clauses: ConditionClause[] | null | undefined, params?: T): T;

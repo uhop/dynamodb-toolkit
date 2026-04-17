@@ -10,6 +10,8 @@
  * @param skipSelect When `true`, does not set `Select: 'SPECIFIC_ATTRIBUTES'`.
  *   Use when building params for a `Select: 'COUNT'` path.
  * @param separator Path separator. Default `'.'`.
+ * @returns The same `params`, now carrying a `ProjectionExpression` (and `Select`
+ *   unless `skipSelect` was set) — unchanged if `fields` was empty.
  */
 export function addProjection<T extends Record<string, unknown>>(
   params: T,

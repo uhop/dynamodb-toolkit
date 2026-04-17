@@ -19,5 +19,7 @@ export interface ParsedSort extends SortClause {
  * mirror the first clause. Returns `null` when the input is missing or empty.
  *
  * @param input Raw query value.
+ * @returns A parsed sort descriptor (with `chain` holding every clause in order), or
+ *   `null` when no sort was requested — caller should use the table's natural order.
  */
 export function parseSort(input: string | string[] | null | undefined): ParsedSort | null;

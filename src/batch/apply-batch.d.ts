@@ -20,6 +20,7 @@ export interface BatchWriteDescriptor {
  *
  * @param client The DynamoDB DocumentClient.
  * @param requests Descriptors, arrays of descriptors, and/or `null` holes.
- * @returns Number of items successfully processed.
+ * @returns Total count of writes that DynamoDB accepted across every underlying
+ *   `BatchWriteItem` call (sum of puts + deletes, including retried ones).
  */
 export function applyBatch(client: DynamoDBDocumentClient, ...requests: (BatchWriteDescriptor | BatchWriteDescriptor[] | null)[]): Promise<number>;

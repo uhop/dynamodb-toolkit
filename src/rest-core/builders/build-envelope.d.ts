@@ -28,5 +28,7 @@ export interface BuildEnvelopeOptions {
  *
  * @param result The toolkit's paginated result shape.
  * @param options Key overrides and optional `links` block.
+ * @returns A wire-ready envelope — keys follow `options.keys` (or defaults), and only
+ *   defined members appear (`total`/`links` omitted when absent in the source).
  */
 export function buildEnvelope(result: PaginatedResult, options?: BuildEnvelopeOptions): Record<string, unknown>;

@@ -22,6 +22,8 @@ export class TransactionLimitExceededError extends Error {
  * @param batch The main write descriptor.
  * @param checks Extra checks from `hooks.checkConsistency`. `null` / `undefined`
  *   dispatches the main op alone; any array triggers a transaction.
+ * @returns The raw SDK response — either the single-op Command output (Put/Update/Delete)
+ *   or the `TransactWriteItemsCommand` output when upgraded. Callers usually ignore it.
  * @throws {@link TransactionLimitExceededError} when combined actions > 100.
  */
 export function dispatchWrite(client: DynamoDBDocumentClient, batch: BatchDescriptor, checks: BatchDescriptor[] | null | undefined): Promise<unknown>;

@@ -26,6 +26,8 @@ export interface TransactGetResult {
  *
  * @param client The DynamoDB DocumentClient.
  * @param requests Descriptors, arrays of descriptors, and/or `null` holes.
+ * @returns One result per descriptor in the same order as `requests` (after flattening and
+ *   skipping `null` holes). Misses come back with `item: null`; `adapter` is echoed from the input.
  */
 export function getTransaction(
   client: DynamoDBDocumentClient,

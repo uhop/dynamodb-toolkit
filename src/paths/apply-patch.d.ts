@@ -15,5 +15,6 @@ export interface ApplyPatchOptions {
  * @param o Object to patch in place.
  * @param patch Flat object whose keys are dotted paths.
  * @param options Deletion paths and separator override.
+ * @returns The same `o`, mutated — useful for chaining.
  */
 export function applyPatch<T extends Record<string, unknown>>(o: T, patch: Record<string, unknown>, options?: ApplyPatchOptions): T;

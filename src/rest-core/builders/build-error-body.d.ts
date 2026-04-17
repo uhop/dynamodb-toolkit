@@ -24,5 +24,6 @@ export interface ErrorBody {
  *
  * @param err The error to render.
  * @param options Optional `errorId` / `includeDebug`.
+ * @returns The JSON-serializable error body to send back to the client.
  */
 export function buildErrorBody(err: unknown, options?: BuildErrorBodyOptions): ErrorBody;

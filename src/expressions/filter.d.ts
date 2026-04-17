@@ -17,6 +17,8 @@ export interface FilterOptions {
  * @param query Search string. When empty / null, `params` is returned unchanged.
  * @param options Prefix, case sensitivity, and field restriction.
  * @param params Existing DynamoDB params to extend. A fresh object is used when omitted.
+ * @returns The same `params` (fresh when omitted), now carrying a `FilterExpression`
+ *   plus placeholders — unchanged when `query` was empty.
  */
 export function buildFilter<T extends Record<string, unknown>>(
   searchable: Record<string, 1 | true>,
@@ -32,5 +34,7 @@ export function buildFilter<T extends Record<string, unknown>>(
  *
  * @param example Partial object; every key/value pair becomes an equality clause.
  * @param params Existing DynamoDB params to extend. A fresh object is used when omitted.
+ * @returns The same `params` (fresh when omitted), now carrying an AND-joined equality
+ *   `FilterExpression` and placeholders — unchanged when `example` was empty.
  */
 export function buildFilterByExample<T extends Record<string, unknown>>(example: Record<string, unknown>, params?: T): T;

@@ -57,5 +57,7 @@ export const defaultHooks: Required<AdapterHooks<Record<string, unknown>>>;
  *
  * @param rawKey Source key (may carry extra fields).
  * @param keyFields Names of the partition (and optional sort) key fields.
+ * @returns A fresh object containing only the listed key fields — safe to use as a
+ *   DynamoDB `Key` without dragging projection fields into the request.
  */
 export function restrictKey<T extends Record<string, unknown>>(rawKey: T, keyFields: string[]): Partial<T>;

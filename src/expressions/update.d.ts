@@ -37,6 +37,8 @@ export interface UpdateOptions {
  * @param patch Flat object — keys are dotted paths, values are what to SET.
  * @param options Deletion paths, path separator, and array ops.
  * @param params Existing DynamoDB params to extend. A fresh object is used when omitted.
+ * @returns The same `params` (fresh when omitted), now carrying a non-empty `UpdateExpression`
+ *   plus any name/value placeholders the builder added.
  */
 export function buildUpdate<T extends Record<string, unknown>>(
   patch: Record<string, unknown>,

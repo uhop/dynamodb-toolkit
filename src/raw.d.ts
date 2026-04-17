@@ -29,5 +29,7 @@ export class Raw<T> {
  * Convenience factory for {@link Raw}. Equivalent to `new Raw(item)`.
  *
  * @param item The already-shaped value to wrap.
+ * @returns A `Raw<T>` wrapping `item` — pass to any Adapter write/read to bypass
+ *   `prepare` / `validateItem` / `revive` for this value.
  */
 export function raw<T>(item: T): Raw<T>;

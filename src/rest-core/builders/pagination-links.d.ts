@@ -20,5 +20,7 @@ export type UrlBuilder = (input: {offset: number; limit: number}) => string;
  * @param limit Current limit (page size).
  * @param total Total matches. When omitted, `next` is always produced (caller decides when to stop).
  * @param urlBuilder Function that renders a URL for a given window.
+ * @returns `{prev, next}` — URLs for the neighbouring pages, or `null` on the
+ *   corresponding edge. Both are `null` when `urlBuilder` was not supplied.
  */
 export function paginationLinks(offset: number, limit: number, total: number | undefined, urlBuilder?: UrlBuilder): PaginationLinks;
