@@ -16,14 +16,42 @@ export interface HandlerOptions {
    */
   sortableIndices?: Record<string, string>;
   /**
-   * Convert the URL `:key` segment into a key object.
-   * Default: `(raw, adapter) => ({[adapter.keyFields[0]]: raw})`.
-   * Override for composite keys.
+   * Convert the URL `:key` segment into a key object. Runs on every keyed
+   * route (`GET /:key`, `PUT /:key`, `PATCH /:key`, `DELETE /:key`, the
+   * single-item clone/move endpoints).
+   *
+   * - `rawKey` — the raw `:key` path segment, URL-decoded, string.
+   * - `adapter` — the target Adapter; use `adapter.keyFields` to know what
+   *   fields to populate.
+   *
+   * Return a full key object: every entry in `adapter.keyFields` must be
+   * a property of the returned object. The returned value becomes the
+   * `key` passed to `adapter.getByKey` / `put` / `patch` / `delete`.
+   *
+   * Default: `(raw, adapter) => ({[adapter.keyFields[0]]: raw})` — takes
+   * the raw string as the partition key. Override for composite keys
+   * (e.g. `${partition}:${sort}` → `{part, sort}`), or to coerce types
+   * (numeric partition keys, UUID validation).
    */
   keyFromPath?: (rawKey: string, adapter: Adapter<Record<string, unknown>>) => Record<string, unknown>;
   /**
-   * Produce an "example" object for `prepareListInput(example, index)` from
-   * the current request context. Default returns `{}`.
+   * Build the `example` object passed to the Adapter's `prepareListInput`
+   * hook from the current request. Runs on `GET /`, `GET /-by-names`, and
+   * the `-clone` / `-move` bulk endpoints.
+   *
+   * - `query` — parsed URL query-string object, `Record<string, string>`.
+   * - `body` — parsed request body, `unknown` (the handler's JSON parser
+   *   returns whatever was sent; consumers typically narrow to
+   *   `Record<string, unknown> | unknown[]`).
+   *
+   * Return a partial item: this becomes the `example` argument of
+   * `Adapter.prepareListInput(example, index)`, which is typically used
+   * to seed a `KeyConditionExpression` (e.g. `{tenant: query.tenant}`
+   * for a per-tenant list).
+   *
+   * Default: `() => ({})` — pass nothing to `prepareListInput`, which
+   * makes sense when the Adapter's hook derives everything from `index`
+   * alone.
    */
   exampleFromContext?: (query: Record<string, string>, body: unknown) => Record<string, unknown>;
 }

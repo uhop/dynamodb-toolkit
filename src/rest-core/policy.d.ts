@@ -29,7 +29,23 @@ export interface RestPolicy {
   envelope: Required<EnvelopeKeys>;
   /** HTTP status code mapping. */
   statusCodes: RestStatusCodes;
-  /** Error body builder. Swap for a custom envelope. */
+  /**
+   * Builder that turns an error into the response body sent to the client.
+   * Swap for a custom envelope (e.g. to match your API's error schema).
+   *
+   * - `err` — the error being mapped, after it's already been bucketed by
+   *   {@link mapErrorStatus}. `unknown` in the signature; in practice an
+   *   `Error`-like object with `.name`, `.message`, and optional
+   *   `.$metadata`.
+   * - `options` — `{includeDebug?, errorId?}`. `includeDebug: true` asks
+   *   the builder to append the stack; `errorId` is a correlation ID the
+   *   handler may have generated for logging.
+   *
+   * Return the JSON-serializable body. The default builder returns
+   * `{code, message}` (plus `stack` when `includeDebug`, plus `errorId`
+   * when supplied). Replace with your own function to match your API
+   * convention — e.g. a `{error: {type, message, requestId}}` envelope.
+   */
   errorBody: (err: unknown, options?: BuildErrorBodyOptions) => ErrorBody;
   /** When `false`, list endpoints omit `total` and skip the COUNT round-trip. Default `true`. */
   needTotal: boolean;
