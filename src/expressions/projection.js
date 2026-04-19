@@ -50,7 +50,8 @@ export const addProjection = (params, fields, projectionFieldMap, skipSelect, se
     if (!skipSelect && params.ProjectionExpression) params.Select = 'SPECIFIC_ATTRIBUTES';
   }
   if (params.ProjectionExpression) {
-    params.ProjectionExpression = params.ProjectionExpression.split(/\s*,\s*/)
+    params.ProjectionExpression = params.ProjectionExpression.split(',')
+      .map(s => s.trim())
       .filter(removeDups())
       .join(',');
   }

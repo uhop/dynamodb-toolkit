@@ -85,6 +85,41 @@ test('deletePath: non-object intermediate returns false', t => {
   t.notOk(deletePath({a: 'str'}, 'a.b'));
 });
 
+// Prototype-pollution guards
+
+test('setPath: refuses __proto__ segment', t => {
+  const o = {};
+  setPath(o, '__proto__.polluted', 'x');
+  t.notOk(o.polluted, 'own property unchanged');
+  t.notOk(Object.prototype.polluted, 'Object.prototype not polluted');
+  // cleanup just in case
+  delete Object.prototype.polluted;
+});
+
+test('setPath: refuses constructor.prototype segment', t => {
+  const o = {};
+  setPath(o, 'constructor.prototype.polluted', 'x');
+  t.notOk({}.polluted, 'Object.prototype not polluted');
+  delete Object.prototype.polluted;
+});
+
+test('setPath: refuses __proto__ as final segment', t => {
+  const o = {};
+  setPath(o, '__proto__', 'x');
+  t.equal(Object.getPrototypeOf(o), Object.prototype, 'prototype unchanged');
+});
+
+test('deletePath: refuses __proto__ segment', t => {
+  const o = {};
+  t.notOk(deletePath(o, '__proto__.toString'));
+  t.equal(typeof {}.toString, 'function', 'Object.prototype.toString intact');
+});
+
+test('deletePath: refuses constructor.prototype segment', t => {
+  t.notOk(deletePath({}, 'constructor.prototype.toString'));
+  t.equal(typeof {}.toString, 'function', 'Object.prototype.toString intact');
+});
+
 // applyPatch
 
 test('applyPatch: sets fields', t => {

@@ -1,7 +1,13 @@
 // Match an HTTP method + URL pathname to one of the standard route shapes.
 // Returns a discriminated result; caller dispatches.
 
-const splitPath = path => path.replace(/^\/+/, '').replace(/\/+$/, '').split('/');
+const splitPath = path => {
+  let start = 0,
+    end = path.length;
+  while (start < end && path[start] === '/') start++;
+  while (end > start && path[end - 1] === '/') end--;
+  return path.slice(start, end).split('/');
+};
 
 export const matchRoute = (method, path, methodPrefix = '-') => {
   const parts = splitPath(path);

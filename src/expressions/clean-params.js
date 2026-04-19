@@ -2,8 +2,10 @@
 
 const expressionFields = ['KeyConditionExpression', 'ConditionExpression', 'UpdateExpression', 'ProjectionExpression', 'FilterExpression'];
 
+const escapeRE = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const isUsed = (params, key) => {
-  const pattern = new RegExp(key + '\\b');
+  const pattern = new RegExp(escapeRE(key) + '\\b');
   return expressionFields.some(f => params[f] && pattern.test(params[f]));
 };
 
