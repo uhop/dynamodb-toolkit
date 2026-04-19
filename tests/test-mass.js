@@ -1,5 +1,4 @@
 import test from 'tape-six';
-import {mock} from 'node:test';
 import {
   paginateList,
   iterateList,
@@ -12,9 +11,7 @@ import {
   moveList,
   getTotal
 } from 'dynamodb-toolkit/mass';
-
-// Mock client that responds to Query/Scan commands
-const makeMockClient = handler => ({send: mock.fn(handler)});
+import {makeMockClient} from './helpers/mock-client.js';
 
 // Helper: make a simple scan-like mock that returns all items in one page
 const singlePageClient = items =>

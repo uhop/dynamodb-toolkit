@@ -1,10 +1,8 @@
 import test from 'tape-six';
-import {mock} from 'node:test';
 import {Adapter, raw, Raw, TransactionLimitExceededError} from 'dynamodb-toolkit';
+import {makeMockClient} from './helpers/mock-client.js';
 
 const TABLE = 'TestTable';
-
-const makeMockClient = handler => ({send: mock.fn(handler)});
 
 const makeAdapter = (clientHandler, overrides = {}) => {
   const client = makeMockClient(clientHandler);

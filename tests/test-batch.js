@@ -1,6 +1,6 @@
 import test from 'tape-six';
-import {mock} from 'node:test';
 import {applyBatch, applyTransaction, getBatch, getTransaction, backoff, TRANSACTION_LIMIT} from 'dynamodb-toolkit/batch';
+import {makeMockClient} from './helpers/mock-client.js';
 
 // backoff
 
@@ -17,10 +17,6 @@ test('backoff: values are bounded by the from/to range', t => {
     t.ok(val >= 0 && val < 200, `value ${val} in range`);
   }
 });
-
-// Mock client helper
-
-const makeMockClient = handler => ({send: mock.fn(handler)});
 
 // applyBatch
 

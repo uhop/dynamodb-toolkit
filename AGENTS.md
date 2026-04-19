@@ -23,6 +23,9 @@ If you cloned without `--recursive`, run `git submodule update --init` to popula
 | `npm install`                       | Install dependencies                                                                                  |
 | `npm test`                          | Run unit + integration suite via tape-six (no Docker required)                                        |
 | `npm run test:e2e`                  | Run end-to-end suite against DynamoDB Local (requires Docker)                                         |
+| `npm run test:deno`                 | Manual — same suite under Deno (excluding `.cjs` tests)                                               |
+| `npm run test:bun`                  | Manual — same suite under Bun (excluding `.cjs` tests)                                                |
+| `npm run ts-test`                   | Manual — run TypeScript test files (`tests/test-*.*ts`) via tape-six (Node 22+)                       |
 | `npm run ts-check`                  | Strict `tsc --noEmit` over `.ts`/`.d.ts` files                                                        |
 | `npm run js-check`                  | `tsc --project tsconfig.check.json` — JS lint via type-checker (catches unused vars, undeclared refs) |
 | `npm run lint` / `npm run lint:fix` | Prettier check / fix                                                                                  |
