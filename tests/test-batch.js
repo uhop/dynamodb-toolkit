@@ -111,6 +111,72 @@ test('applyTransaction: throws on limit exceeded', async t => {
   }
 });
 
+test('applyTransaction: {options} sentinel plumbs ClientRequestToken + capacity knobs', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+
+  await applyTransaction(
+    client,
+    {action: 'put', params: {TableName: 'T', Item: {id: '1'}}},
+    {options: {clientRequestToken: 'token-abc', returnConsumedCapacity: 'TOTAL', returnItemCollectionMetrics: 'SIZE'}}
+  );
+
+  t.equal(sent[0].input.ClientRequestToken, 'token-abc');
+  t.equal(sent[0].input.ReturnConsumedCapacity, 'TOTAL');
+  t.equal(sent[0].input.ReturnItemCollectionMetrics, 'SIZE');
+});
+
+test('applyTransaction: {options} can appear anywhere in the arg list', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+
+  await applyTransaction(client, {options: {clientRequestToken: 'early'}}, {action: 'put', params: {TableName: 'T', Item: {id: '1'}}});
+  t.equal(sent[0].input.ClientRequestToken, 'early', 'options-first is honored');
+});
+
+test('applyTransaction: later {options} fields override earlier', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+
+  await applyTransaction(
+    client,
+    {options: {clientRequestToken: 'first', returnConsumedCapacity: 'TOTAL'}},
+    {action: 'put', params: {TableName: 'T', Item: {id: '1'}}},
+    {options: {clientRequestToken: 'second'}}
+  );
+  t.equal(sent[0].input.ClientRequestToken, 'second', 'later token wins');
+  t.equal(sent[0].input.ReturnConsumedCapacity, 'TOTAL', 'earlier field preserved');
+});
+
+test('applyTransaction: no options sentinel → no transaction-level fields set', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+
+  await applyTransaction(client, {action: 'put', params: {TableName: 'T', Item: {id: '1'}}});
+  t.equal(sent[0].input.ClientRequestToken, undefined);
+  t.equal(sent[0].input.ReturnConsumedCapacity, undefined);
+  t.equal(sent[0].input.ReturnItemCollectionMetrics, undefined);
+});
+
+test('applyTransaction: {options} only (no descriptors) is a no-op', async t => {
+  const client = makeMockClient(async () => ({}));
+  const count = await applyTransaction(client, {options: {clientRequestToken: 'unused'}});
+  t.equal(count, 0);
+  t.equal(client.send.mock.callCount(), 0, 'no SDK call');
+});
+
 // getBatch
 
 test('getBatch: returns items keyed by table', async t => {

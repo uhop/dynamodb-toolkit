@@ -19,29 +19,41 @@ const toBatchItem = item => {
   }
 };
 
+const consume = (entry, items, options) => {
+  if (!entry) return options;
+  if (entry.action) {
+    const mapped = toBatchItem(entry);
+    if (mapped) items.push(mapped);
+    return options;
+  }
+  if (entry.options) return {...options, ...entry.options};
+  return options;
+};
+
 const flatten = requests => {
   const items = [];
+  let options = null;
   for (const r of requests) {
     if (!r) continue;
     if (Array.isArray(r)) {
-      for (const item of r) {
-        const mapped = toBatchItem(item);
-        if (mapped) items.push(mapped);
-      }
+      for (const entry of r) options = consume(entry, items, options);
     } else {
-      const mapped = toBatchItem(r);
-      if (mapped) items.push(mapped);
+      options = consume(r, items, options);
     }
   }
-  return items;
+  return {items, options};
 };
 
 export const applyTransaction = async (client, ...requests) => {
-  const items = flatten(requests);
+  const {items, options} = flatten(requests);
   if (!items.length) return 0;
   if (items.length > TRANSACTION_LIMIT) {
     throw new Error(`Transaction exceeds the ${TRANSACTION_LIMIT}-action limit: ${items.length} actions`);
   }
-  await client.send(new TransactWriteCommand({TransactItems: items}));
+  const input = {TransactItems: items};
+  if (options?.clientRequestToken) input.ClientRequestToken = options.clientRequestToken;
+  if (options?.returnConsumedCapacity) input.ReturnConsumedCapacity = options.returnConsumedCapacity;
+  if (options?.returnItemCollectionMetrics) input.ReturnItemCollectionMetrics = options.returnItemCollectionMetrics;
+  await client.send(new TransactWriteCommand(input));
   return items.length;
 };
