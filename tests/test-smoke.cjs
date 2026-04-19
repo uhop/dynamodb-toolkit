@@ -1,6 +1,8 @@
 // CommonJS smoke test — demonstrates dynamodb-toolkit is usable from .cjs consumers.
-// Requires Node >= 22.12 (unflagged require(esm)) — our `engines.node` is >=20,
-// but the engines floor is the Adapter's runtime floor, not the "require from CJS" floor.
+// Requires a Node that ships unflagged `require(esm)` — 20.19+ on the 20.x line,
+// 22.12+ on 22.x, anything newer. Our `engines.node` is >=20, which is the
+// Adapter's runtime floor; current 20.x releases satisfy the `require(esm)`
+// requirement as well.
 
 const {test} = require('tape-six');
 const {Raw, raw, Adapter, TransactionLimitExceededError} = require('dynamodb-toolkit');

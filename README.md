@@ -11,12 +11,24 @@ Opinionated zero-runtime-dependency micro-library for [AWS DynamoDB](https://aws
 
 - **Zero runtime dependencies.** AWS SDK v3 modules are peer dependencies (`@aws-sdk/client-dynamodb`, `@aws-sdk/lib-dynamodb`).
 - **ESM-only.** Native `import` / `export`, hand-written `.d.ts` sidecars next to every `.js` file. No build step.
+- **TypeScript, CommonJS, Node/Deno/Bun** — first-class TS typings via sidecars, CJS consumers can `require()` on current Node 20+, and the test suite runs on all three runtimes (see [Compatibility](#compatibility)).
 - **Schemaless Adapter** with hooks for `prepare` / `revive` / `validateItem` / `checkConsistency` and automatic single-op → `transactWriteItems` upgrade.
 - **Expression builders** for `UpdateExpression`, `ProjectionExpression`, `FilterExpression`, `ConditionExpression` — including patch-with-options, atomic array ops, filter-by-example.
 - **Batch + transaction chunking** with `UnprocessedItems` / `UnprocessedKeys` retry and exponential backoff.
 - **Mass operations** — `putAll`, `deleteByKeys`, `cloneByKeys`, `moveByKeys`, paginated reads with offset+limit accumulation through `FilterExpression`.
 - **Indirect-index second-hop** for sparse GSIs with key-only projection.
 - **Framework-agnostic REST core + `node:http` handler** — pure parsers/builders/policy plus a standard route pack ready to drop into `createServer`.
+
+## "Toolkit", not "framework"
+
+The pieces are independent — adopt as much or as little as you need. Every layer has a public surface and is useful on its own:
+
+- Use `buildUpdate` / `buildCondition` to prepare a `params` object, then send it with the raw SDK `UpdateCommand`. No `Adapter` in sight.
+- Hand-build your own `params` and pass them to `applyBatch` / `applyTransaction` for chunking, `UnprocessedItems` retry, and exponential backoff.
+- Use the `Adapter` for CRUD + hooks, but swap in your own `@aws-sdk/lib-dynamodb` Command invocation anywhere you want raw control.
+- Take the REST handler or leave it — the `Adapter` works standalone.
+
+Two concrete payoffs: **migration** (adopt one piece at a time starting from raw-SDK code) and **debugging** (peel back layers when something looks off). The boundary between caller code and toolkit machinery stays explicit.
 
 ## Install
 
@@ -84,6 +96,22 @@ The package ships discrete, tree-shakable sub-exports for callers who want only 
 | `dynamodb-toolkit/handler`     | `createHandler`, `matchRoute`                                                                                                                                                                             |
 
 Full reference docs live in the [wiki](https://github.com/uhop/dynamodb-toolkit/wiki).
+
+## Compatibility
+
+**TypeScript.** Hand-written `.d.ts` sidecars ship next to every `.js` — no build step, no typing-generation round-trip. `Adapter<TItem, TKey>` binds the item shape to method signatures; `buildUpdate<T>` / `buildCondition<T>` preserve caller-supplied `params` typing. A typed smoke test at [`tests/test-typed.ts`](tests/test-typed.ts) exercises the consumer-facing surface; run it via `npm run ts-test` (Node 22+; tape-six runs `.ts` natively — no `tsx` / `ts-node` needed).
+
+**CommonJS.** The package is ESM, but `require('dynamodb-toolkit')` works from `.cjs` on current Node 20+ (`require(esm)` shipped unflagged in Node 20.19 for the 20.x line and 22.12 for 22.x). No `await import()` needed — the source has no top-level `await`. A CJS smoke test at [`tests/test-smoke.cjs`](tests/test-smoke.cjs) demonstrates the main entry and every sub-export; it runs as part of `npm test` under Node.
+
+**Runtimes.** Tested on Node, Deno, and Bun. The same source tree runs under all three — `.cjs` tests are Node-only (`require(esm)` is the Node-specific story); everything else is portable.
+
+| Runtime | Script              |
+| ------- | ------------------- |
+| Node    | `npm test`          |
+| Deno    | `npm run test:deno` |
+| Bun     | `npm run test:bun`  |
+
+More detail lives on the [Compatibility](https://github.com/uhop/dynamodb-toolkit/wiki/Compatibility) wiki page.
 
 ## Migration: v2 → v3
 

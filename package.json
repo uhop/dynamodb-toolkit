@@ -1,7 +1,7 @@
 {
   "name": "dynamodb-toolkit",
   "version": "3.0.0",
-  "description": "Helpers for AWS DynamoDB to build efficient web applications",
+  "description": "Zero-dependency DynamoDB toolkit (AWS SDK v3) — Adapter with hooks, expression builders, batch/transaction chunking, mass operations, REST handler.",
   "type": "module",
   "exports": {
     ".": {
@@ -60,9 +60,24 @@
   "keywords": [
     "aws",
     "dynamodb",
+    "aws-sdk",
+    "aws-sdk-v3",
+    "nosql",
     "database",
+    "adapter",
+    "toolkit",
     "rest",
-    "adapter"
+    "crud",
+    "batch",
+    "transaction",
+    "pagination",
+    "expression-builder",
+    "hooks",
+    "typescript",
+    "esm",
+    "zero-dependencies",
+    "deno",
+    "bun"
   ],
   "author": "Eugene Lazutkin <eugene.lazutkin@gmail.com> (http://lazutkin.com)",
   "license": "BSD-3-Clause",
