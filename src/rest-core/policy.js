@@ -25,7 +25,8 @@ export const defaultPolicy = {
   errorBody: buildErrorBody,
   needTotal: true,
   defaultLimit: 10,
-  maxLimit: 100
+  maxLimit: 100,
+  maxOffset: 100_000
 };
 
 // Map an SDK error to a status code per policy. Falls back to internal (500).

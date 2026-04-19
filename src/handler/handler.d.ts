@@ -54,6 +54,12 @@ export interface HandlerOptions {
    * alone.
    */
   exampleFromContext?: (query: Record<string, string>, body: unknown) => Record<string, unknown>;
+  /**
+   * Maximum request-body size in bytes. Bodies that exceed this are rejected
+   * with HTTP 413 (`PayloadTooLarge`). Defends against memory-exhaustion DoS.
+   * Default `1048576` (1 MB).
+   */
+  maxBodyBytes?: number;
 }
 
 /**

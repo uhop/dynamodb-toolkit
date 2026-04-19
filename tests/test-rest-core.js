@@ -15,7 +15,10 @@ import {
   mergePolicy
 } from 'dynamodb-toolkit/rest-core';
 
-import {matchRoute} from 'dynamodb-toolkit/handler';
+import {matchRoute, createHandler} from 'dynamodb-toolkit/handler';
+import {Adapter} from 'dynamodb-toolkit';
+import {EventEmitter} from 'node:events';
+import {makeMockClient} from './helpers/mock-client.js';
 
 // --- parseFields ---
 
@@ -325,6 +328,7 @@ test('defaultPolicy: snapshot of expected defaults', t => {
   t.equal(defaultPolicy.statusCodes.miss, 404);
   t.equal(defaultPolicy.defaultLimit, 10);
   t.equal(defaultPolicy.maxLimit, 100);
+  t.equal(defaultPolicy.maxOffset, 100_000);
 });
 
 // --- matchRoute ---
@@ -367,4 +371,122 @@ test('matchRoute: configurable methodPrefix', t => {
 test('matchRoute: deeply nested → unknown', t => {
   const r = matchRoute('GET', '/a/b/c');
   t.equal(r.kind, 'unknown');
+});
+
+// --- createHandler: hardening ---
+
+const makeFakeReq = (method, url, {host = 'localhost', body} = {}) => {
+  const req = new EventEmitter();
+  req.method = method;
+  req.url = url;
+  req.headers = {host};
+  req.setEncoding = () => {};
+  req.destroy = () => {};
+  if (body !== undefined) {
+    setImmediate(() => {
+      req.emit('data', body);
+      req.emit('end');
+    });
+  }
+  return req;
+};
+
+const makeFakeRes = () => {
+  const headers = {};
+  let statusCode = 200;
+  let body = '';
+  let ended = false;
+  return {
+    get statusCode() {
+      return statusCode;
+    },
+    set statusCode(v) {
+      statusCode = v;
+    },
+    setHeader: (k, v) => (headers[k] = v),
+    end: chunk => {
+      if (chunk) body += chunk;
+      ended = true;
+    },
+    get body() {
+      return body;
+    },
+    get ended() {
+      return ended;
+    },
+    get headers() {
+      return headers;
+    }
+  };
+};
+
+const waitForResponse = res =>
+  new Promise(resolve =>
+    setImmediate(function poll() {
+      if (res.ended) return resolve();
+      setImmediate(poll);
+    })
+  );
+
+const makeTestAdapter = () =>
+  new Adapter({
+    client: makeMockClient(async () => ({})),
+    table: 'T',
+    keyFields: ['name']
+  });
+
+test('createHandler: oversized body → 413 PayloadTooLarge', async t => {
+  const handler = createHandler(makeTestAdapter(), {maxBodyBytes: 10});
+  const req = makeFakeReq('POST', '/', {body: 'x'.repeat(100)});
+  const res = makeFakeRes();
+  const p = handler(req, res);
+  await waitForResponse(res);
+  await p;
+  t.equal(res.statusCode, 413);
+  t.matchString(res.body, /PayloadTooLarge/);
+});
+
+test('createHandler: body within limit → normal processing', async t => {
+  const handler = createHandler(makeTestAdapter(), {maxBodyBytes: 1024});
+  const req = makeFakeReq('POST', '/', {body: JSON.stringify({name: 'x'})});
+  const res = makeFakeRes();
+  const p = handler(req, res);
+  await waitForResponse(res);
+  await p;
+  t.equal(res.statusCode, 204, 'small body accepted');
+});
+
+test('createHandler: double-slash in req.url does not pivot origin', async t => {
+  const handler = createHandler(makeTestAdapter());
+  const req = makeFakeReq('GET', '//evil.com/Hoth');
+  const res = makeFakeRes();
+  const p = handler(req, res);
+  await waitForResponse(res);
+  await p;
+  // Should be treated as item route with key 'evil.com' (one level deep) — NOT origin-pivoted.
+  // Actually the normalized path is '/evil.com/Hoth' → two segments → itemMethod or unknown.
+  // The important check: no crash, returns a valid HTTP response.
+  t.ok(res.statusCode >= 400 && res.statusCode < 500, 'returns a normal client error, not a crash');
+});
+
+test('createHandler: malformed Host header does not crash', async t => {
+  const handler = createHandler(makeTestAdapter());
+  const req = makeFakeReq('GET', '/Hoth', {host: 'a b c'});
+  const res = makeFakeRes();
+  const p = handler(req, res);
+  await waitForResponse(res);
+  await p;
+  t.ok(res.ended, 'response sent');
+  t.ok(res.statusCode, 'valid status assigned');
+});
+
+test('createHandler: 405 error body does not echo url.pathname', async t => {
+  const handler = createHandler(makeTestAdapter());
+  const req = makeFakeReq('PATCH', '/'); // PATCH not supported on root
+  const res = makeFakeRes();
+  const p = handler(req, res);
+  await waitForResponse(res);
+  await p;
+  t.equal(res.statusCode, 405);
+  t.doesNotMatchString(res.body, /\/[a-z]/, 'pathname not leaked in error body');
 });

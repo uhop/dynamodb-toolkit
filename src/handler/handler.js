@@ -17,14 +17,26 @@ import {
 
 import {matchRoute} from './match-route.js';
 
-const readJsonBody = req =>
+const readJsonBody = (req, maxBodyBytes) =>
   new Promise((resolve, reject) => {
     let body = '';
+    let size = 0;
+    let aborted = false;
     req.setEncoding?.('utf8');
     req.on('data', chunk => {
-      body += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      if (aborted) return;
+      const s = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      size += s.length;
+      if (size > maxBodyBytes) {
+        aborted = true;
+        reject(Object.assign(new Error(`Request body exceeds ${maxBodyBytes} bytes`), {status: 413, code: 'PayloadTooLarge'}));
+        req.destroy?.();
+        return;
+      }
+      body += s;
     });
     req.on('end', () => {
+      if (aborted) return;
       if (!body) return resolve(null);
       try {
         resolve(JSON.parse(body));
@@ -47,8 +59,14 @@ const sendNoContent = (res, status = 204) => {
 };
 
 const requestUrl = req => {
-  const host = req.headers?.host || 'localhost';
-  return new URL(req.url, `http://${host}`);
+  // Strip non-URL-safe characters from the Host header — defends against
+  // `new URL('http://a b')` crashes on malformed headers.
+  const rawHost = req.headers?.host || 'localhost';
+  const host = rawHost.replace(/[^\w.:-]/g, '') || 'localhost';
+  // Collapse leading slashes so an attacker can't pivot the URL's origin
+  // via `GET //evil.com/path HTTP/1.1`. We only care about path + query here.
+  const path = (req.url || '/').replace(/^\/+/, '/');
+  return new URL(path, `http://${host}`);
 };
 
 export const createHandler = (adapter, options = {}) => {
@@ -56,12 +74,13 @@ export const createHandler = (adapter, options = {}) => {
   const sortableIndices = options.sortableIndices || {};
   const keyFromPath = options.keyFromPath || ((rawKey, adp) => ({[adp.keyFields[0]]: rawKey}));
   const exampleFromContext = options.exampleFromContext || (() => ({}));
+  const maxBodyBytes = options.maxBodyBytes ?? 1024 * 1024;
 
   // Build adapter list options from a parsed query.
   const buildListOptions = query => {
     const fields = parseFields(query.fields);
     const filter = parseFilter(query.filter);
-    const paging = parsePaging(query, {defaultLimit: policy.defaultLimit, maxLimit: policy.maxLimit});
+    const paging = parsePaging(query, {defaultLimit: policy.defaultLimit, maxLimit: policy.maxLimit, maxOffset: policy.maxOffset});
     const consistent = parseFlag(query.consistent);
     /** @type {import('../adapter/adapter.js').ListOptions} */
     const out = {
@@ -109,7 +128,7 @@ export const createHandler = (adapter, options = {}) => {
   };
 
   const handlePost = async (req, res) => {
-    const body = await readJsonBody(req);
+    const body = await readJsonBody(req, maxBodyBytes);
     await adapter.post(body);
     sendNoContent(res);
   };
@@ -140,7 +159,7 @@ export const createHandler = (adapter, options = {}) => {
     const namesQ = parseNames(query.names);
     let names = namesQ;
     if (!names.length) {
-      const body = await readJsonBody(req);
+      const body = await readJsonBody(req, maxBodyBytes);
       if (Array.isArray(body)) names = body.map(s => String(s));
     }
     const keys = names.map(name => keyFromPath(name, adapter));
@@ -150,7 +169,7 @@ export const createHandler = (adapter, options = {}) => {
 
   const handleCloneByNames = async (req, res, query) => {
     const namesQ = parseNames(query.names);
-    const body = await readJsonBody(req);
+    const body = await readJsonBody(req, maxBodyBytes);
     let names = namesQ;
     if (!names.length && Array.isArray(body)) names = body.map(s => String(s));
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
@@ -161,7 +180,7 @@ export const createHandler = (adapter, options = {}) => {
 
   const handleMoveByNames = async (req, res, query) => {
     const namesQ = parseNames(query.names);
-    const body = await readJsonBody(req);
+    const body = await readJsonBody(req, maxBodyBytes);
     let names = namesQ;
     if (!names.length && Array.isArray(body)) names = body.map(s => String(s));
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
@@ -171,7 +190,7 @@ export const createHandler = (adapter, options = {}) => {
   };
 
   const handleLoad = async (req, res) => {
-    const body = await readJsonBody(req);
+    const body = await readJsonBody(req, maxBodyBytes);
     if (!Array.isArray(body)) {
       return sendError(res, Object.assign(new Error('Body must be an array of items'), {status: 400, code: 'BadLoadBody'}));
     }
@@ -180,7 +199,7 @@ export const createHandler = (adapter, options = {}) => {
   };
 
   const handleCloneAll = async (req, res, query) => {
-    const body = await readJsonBody(req);
+    const body = await readJsonBody(req, maxBodyBytes);
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const opts = buildListOptions(query);
     const {index} = resolveSort(query);
@@ -191,7 +210,7 @@ export const createHandler = (adapter, options = {}) => {
   };
 
   const handleMoveAll = async (req, res, query) => {
-    const body = await readJsonBody(req);
+    const body = await readJsonBody(req, maxBodyBytes);
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const opts = buildListOptions(query);
     const {index} = resolveSort(query);
@@ -212,7 +231,7 @@ export const createHandler = (adapter, options = {}) => {
   };
 
   const handleItemPut = async (req, res, key, query) => {
-    const body = await readJsonBody(req);
+    const body = await readJsonBody(req, maxBodyBytes);
     const force = parseFlag(query.force);
     // Merge URL key into body so the user need not repeat it
     const merged = {...body, ...key};
@@ -221,7 +240,7 @@ export const createHandler = (adapter, options = {}) => {
   };
 
   const handleItemPatch = async (req, res, key) => {
-    const body = await readJsonBody(req);
+    const body = await readJsonBody(req, maxBodyBytes);
     const {patch, options} = parsePatch(body, {metaPrefix: policy.metaPrefix});
     await adapter.patch(key, patch, options);
     sendNoContent(res);
@@ -233,7 +252,7 @@ export const createHandler = (adapter, options = {}) => {
   };
 
   const handleItemClone = async (req, res, key, query) => {
-    const body = await readJsonBody(req);
+    const body = await readJsonBody(req, maxBodyBytes);
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const force = parseFlag(query.force);
     const result = await adapter.clone(key, item => ({...item, ...overlay}), {force});
@@ -242,7 +261,7 @@ export const createHandler = (adapter, options = {}) => {
   };
 
   const handleItemMove = async (req, res, key, query) => {
-    const body = await readJsonBody(req);
+    const body = await readJsonBody(req, maxBodyBytes);
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const force = parseFlag(query.force);
     const result = await adapter.move(key, item => ({...item, ...overlay}), {force});
@@ -286,7 +305,7 @@ export const createHandler = (adapter, options = {}) => {
           break;
         }
       }
-      return sendError(res, Object.assign(new Error(`No route for ${route.method} ${url.pathname}`), {status: 405, code: 'MethodNotAllowed'}));
+      return sendError(res, Object.assign(new Error('Method not allowed for this route'), {status: 405, code: 'MethodNotAllowed'}));
     } catch (err) {
       sendError(res, err);
     }

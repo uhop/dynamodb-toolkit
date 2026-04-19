@@ -53,6 +53,12 @@ export interface RestPolicy {
   defaultLimit: number;
   /** Ceiling on `?limit=` — larger values are clamped. Default `100`. */
   maxLimit: number;
+  /**
+   * Ceiling on `?offset=` — larger values are clamped. Default `100_000`.
+   * Prevents DoS via `?offset=1e15` which would otherwise drive `paginateList`
+   * into astronomical skip-page SDK calls.
+   */
+  maxOffset: number;
 }
 
 /** The default REST policy. Inspect for the baseline values. */
