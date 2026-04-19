@@ -40,7 +40,7 @@ export const buildUpdate = (patch, options, params = {}) => {
   }
 
   // REMOVE actions from options.delete
-  if (deleteProps) {
+  if (Array.isArray(deleteProps)) {
     for (const key of deleteProps) {
       const parts = aliasPath(key, separator, uniqueNames, names, keyCounter);
       removeActions.push(joinPath(parts));
@@ -48,7 +48,7 @@ export const buildUpdate = (patch, options, params = {}) => {
   }
 
   // Array operations
-  if (arrayOps) {
+  if (Array.isArray(arrayOps)) {
     for (const op of arrayOps) {
       const parts = aliasPath(op.path, separator, uniqueNames, names, keyCounter);
       const pathExpr = joinPath(parts);
@@ -86,6 +86,8 @@ export const buildUpdate = (patch, options, params = {}) => {
           addActions.push(pathExpr + ' ' + valAlias);
           break;
         }
+        default:
+          throw new Error(`buildUpdate: unknown arrayOp "${op.op}" (expected append | prepend | setAtIndex | removeAtIndex | add)`);
       }
     }
   }

@@ -2,6 +2,6 @@
 
 export const cloneParams = params => ({
   ...params,
-  ExpressionAttributeNames: {...params.ExpressionAttributeNames},
-  ExpressionAttributeValues: {...params.ExpressionAttributeValues}
+  ExpressionAttributeNames: {...params?.ExpressionAttributeNames},
+  ExpressionAttributeValues: {...params?.ExpressionAttributeValues}
 });

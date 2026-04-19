@@ -43,6 +43,21 @@ test('buildUpdate: SET + REMOVE combined', t => {
   t.matchString(result.UpdateExpression, /REMOVE /);
 });
 
+test('buildUpdate: non-array options.delete is ignored', t => {
+  const result = buildUpdate({x: 1}, {delete: 'old'});
+  t.doesNotMatchString(result.UpdateExpression, /REMOVE/, 'string delete does not iterate chars');
+  t.matchString(result.UpdateExpression, /SET /);
+});
+
+test('buildUpdate: non-array options.arrayOps is ignored', t => {
+  const result = buildUpdate({x: 1}, {arrayOps: 'nope'});
+  t.matchString(result.UpdateExpression, /SET #upk0 = :upv0/);
+});
+
+test('buildUpdate: unknown arrayOp.op throws', t => {
+  t.throws(() => buildUpdate({}, {arrayOps: [{op: 'increment', path: 'n', value: 1}]}), 'unknown op rejected');
+});
+
 // buildUpdate — custom separator
 
 test('buildUpdate: custom separator', t => {
@@ -259,4 +274,11 @@ test('cloneParams: shallow clones with maps', t => {
   t.notEqual(cloned, original);
   t.notEqual(cloned.ExpressionAttributeNames, original.ExpressionAttributeNames);
   t.deepEqual(cloned, original);
+});
+
+test('cloneParams: null/undefined input returns fresh empty clone', t => {
+  const a = cloneParams(null);
+  t.deepEqual(a, {ExpressionAttributeNames: {}, ExpressionAttributeValues: {}});
+  const b = cloneParams(undefined);
+  t.deepEqual(b, {ExpressionAttributeNames: {}, ExpressionAttributeValues: {}});
 });
