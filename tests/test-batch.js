@@ -69,6 +69,26 @@ test('applyBatch: skips null requests', async t => {
   t.equal(total, 1);
 });
 
+test('applyBatch: throws on unknown action', async t => {
+  const client = makeMockClient(async () => ({UnprocessedItems: {}}));
+  try {
+    await applyBatch(client, [{action: 'patch', params: {TableName: 'T', Key: {id: '1'}}}]);
+    t.fail('should have thrown');
+  } catch (e) {
+    t.matchString(e.message, /unknown action "patch"/);
+  }
+});
+
+test('applyTransaction: throws on unknown action', async t => {
+  const client = makeMockClient(async () => ({}));
+  try {
+    await applyTransaction(client, [{action: 'get', params: {TableName: 'T', Key: {id: '1'}}}]);
+    t.fail('should have thrown');
+  } catch (e) {
+    t.matchString(e.message, /unknown action "get"/);
+  }
+});
+
 // applyTransaction
 
 test('applyTransaction: sends TransactWriteCommand', async t => {

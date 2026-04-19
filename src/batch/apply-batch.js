@@ -24,7 +24,7 @@ const toBatchRequest = item => {
     case 'delete':
       return {table: item.params.TableName, request: {DeleteRequest: {Key: item.params.Key}}};
     default:
-      return null;
+      throw new Error(`applyBatch: unknown action "${item.action}" (expected put | delete)`);
   }
 };
 
@@ -35,15 +35,16 @@ export const applyBatch = async (client, ...requests) => {
   for (let i = 0; i < items.length; i += BATCH_WRITE_LIMIT) {
     const chunk = items.slice(i, i + BATCH_WRITE_LIMIT);
     const batch = {};
+    let added = 0;
     for (const item of chunk) {
       const req = toBatchRequest(item);
-      if (!req) continue;
       if (!batch[req.table]) batch[req.table] = [];
       batch[req.table].push(req.request);
+      added++;
     }
-    if (Object.keys(batch).length) {
+    if (added) {
       await batchWrite(client, batch);
-      total += chunk.length;
+      total += added;
     }
   }
   return total;

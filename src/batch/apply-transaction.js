@@ -15,15 +15,14 @@ const toBatchItem = item => {
     case 'patch':
       return {Update: item.params};
     default:
-      return null;
+      throw new Error(`applyTransaction: unknown action "${item.action}" (expected check | delete | put | patch)`);
   }
 };
 
 const consume = (entry, items, options) => {
   if (!entry) return options;
   if (entry.action) {
-    const mapped = toBatchItem(entry);
-    if (mapped) items.push(mapped);
+    items.push(toBatchItem(entry));
     return options;
   }
   if (entry.options) return {...options, ...entry.options};

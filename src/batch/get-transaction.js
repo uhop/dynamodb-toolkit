@@ -27,7 +27,7 @@ export const getTransaction = async (client, ...requests) => {
   if (!items.length) return [];
   const data = await client.send(new TransactGetCommand({TransactItems: items}));
   return (data.Responses || []).map((response, index) => ({
-    table: items[index].Get.TableName,
+    table: items[index]?.Get?.TableName,
     item: response?.Item ?? null,
     adapter: adapters[index]
   }));
