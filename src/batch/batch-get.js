@@ -5,7 +5,9 @@ import {BatchGetCommand} from '@aws-sdk/lib-dynamodb';
 import {backoff} from './backoff.js';
 import {sleep} from '../sleep.js';
 
-const MAX_ATTEMPTS = 10;
+// With default backoff (cap 20s), 8 attempts yield max ~43s total wait —
+// fits AWS's "stop around one minute" guidance for DynamoDB retries.
+const MAX_ATTEMPTS = 8;
 
 export const batchGet = async (client, requestItems) => {
   let params = {RequestItems: requestItems};
