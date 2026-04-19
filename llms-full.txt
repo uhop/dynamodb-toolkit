@@ -251,12 +251,12 @@ Framework-agnostic helpers. Each parser accepts the raw query value (string or a
 
 ### 6.1 Parsers
 
-- `parseFields(input)` → `string[] | null`
+- `parseFields(input, {maxItems?})` → `string[] | null`. `maxItems` default `1000`; extra segments truncated (DoS guard).
 - `parseSort(input)` → `{field, direction: 'asc' | 'desc', chain: SortClause[]} | null`
-- `parseFilter(input, {mode?, caseSensitive?})` → `{query, mode?, caseSensitive?} | null`
-- `parsePatch(body, {metaPrefix?})` → `{patch, options}` — splits wire body into raw patch + `{delete, separator, arrayOps}`
-- `parseNames(input)` → `string[]`
-- `parsePaging(input, {defaultLimit?, maxLimit?})` → `{offset, limit}` (clamped)
+- `parseFilter(input, {mode?, caseSensitive?, maxLength?})` → `{query, mode?, caseSensitive?} | null`. `maxLength` default `1024`; longer queries truncated.
+- `parsePatch(body, {metaPrefix?})` → `{patch, options}` — splits wire body into raw patch + `{delete, separator, arrayOps}`. Patch accumulator is a null-prototype object (defends against `__proto__` in the request body).
+- `parseNames(input, {maxItems?})` → `string[]`. `maxItems` default `1000`.
+- `parsePaging(input, {defaultLimit?, maxLimit?, maxOffset?})` → `{offset, limit}` (clamped). `maxOffset` default `100_000` — caps `?offset=` to prevent DoS via `?offset=1e15` driving `paginateList` into astronomical skip-page SDK calls.
 - `parseFlag(input)` → `boolean` — accepts `yes` / `true` / `1` / `on` (case-insensitive)
 
 ### 6.2 Builders
@@ -279,7 +279,8 @@ Framework-agnostic helpers. Each parser accepts the raw query value (string or a
   errorBody: buildErrorBody,
   needTotal: true,
   defaultLimit: 10,
-  maxLimit: 100
+  maxLimit: 100,
+  maxOffset: 100_000
 }
 ```
 
@@ -296,7 +297,8 @@ const handler = createHandler(adapter, {
   policy: {/* override defaults */},
   sortableIndices: {name: '-t-name-index'},
   keyFromPath: (rawKey, adapter) => ({[adapter.keyFields[0]]: rawKey}),
-  exampleFromContext: (query, body) => ({})
+  exampleFromContext: (query, body) => ({}),
+  maxBodyBytes: 1024 * 1024 // default 1 MB; bodies exceeding → 413 PayloadTooLarge
 });
 
 createServer(handler).listen(3000);

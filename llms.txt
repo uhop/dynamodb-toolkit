@@ -117,10 +117,17 @@ import {createHandler} from 'dynamodb-toolkit/handler';
 
 const handler = createHandler(adapter, {
   sortableIndices: {name: '-t-name-index'},
-  policy: {/* override defaults */}
+  policy: {/* override defaults */},
+  maxBodyBytes: 1024 * 1024 // default 1 MB; bodies exceeding → 413 PayloadTooLarge
 });
 createServer(handler).listen(3000);
 ```
+
+### DoS-mitigation caps
+
+- `createHandler`: `maxBodyBytes` (default 1 MB) — oversized bodies → HTTP 413.
+- `defaultPolicy.maxOffset`: 100_000 — caller-supplied `?offset=` clamped before `paginateList`.
+- Parsers: `parseFields(input, {maxItems})` / `parseNames(input, {maxItems})` default 1000; `parseFilter(input, {maxLength})` default 1024; `parsePaging(input, {maxOffset, maxLimit, defaultLimit})` defaults 100_000 / 100 / 10.
 
 ### Standard route pack
 
