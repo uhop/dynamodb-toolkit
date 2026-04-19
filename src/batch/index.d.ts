@@ -11,6 +11,7 @@ export {
   type TransactWriteOptions,
   type TransactWriteOptionsDescriptor
 } from './apply-transaction.js';
+export {explainTransactionCancellation, type TransactionFailure, type TransactionCancellationExplanation} from './explain-transaction.js';
 export {getBatch, type BatchGetDescriptor, type BatchGetResult} from './get-batch.js';
 export {getTransaction, type TransactGetDescriptor, type TransactGetResult} from './get-transaction.js';
 export {backoff} from './backoff.js';

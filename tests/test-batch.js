@@ -1,5 +1,5 @@
 import test from 'tape-six';
-import {applyBatch, applyTransaction, getBatch, getTransaction, backoff, TRANSACTION_LIMIT} from 'dynamodb-toolkit/batch';
+import {applyBatch, applyTransaction, explainTransactionCancellation, getBatch, getTransaction, backoff, TRANSACTION_LIMIT} from 'dynamodb-toolkit/batch';
 import {makeMockClient} from './helpers/mock-client.js';
 
 // backoff
@@ -175,6 +175,101 @@ test('applyTransaction: {options} only (no descriptors) is a no-op', async t => 
   const count = await applyTransaction(client, {options: {clientRequestToken: 'unused'}});
   t.equal(count, 0);
   t.equal(client.send.mock.callCount(), 0, 'no SDK call');
+});
+
+// explainTransactionCancellation
+
+const makeCanceledError = reasons => {
+  const err = new Error('Transaction canceled');
+  err.name = 'TransactionCanceledException';
+  err.CancellationReasons = reasons;
+  return err;
+};
+
+test('explainTransactionCancellation: returns null for non-cancellation errors', t => {
+  t.equal(explainTransactionCancellation(null), null);
+  t.equal(explainTransactionCancellation(undefined), null);
+  t.equal(explainTransactionCancellation(new Error('boom')), null);
+  t.equal(explainTransactionCancellation({name: 'ValidationException'}), null);
+});
+
+test('explainTransactionCancellation: pairs reasons to descriptors by index', t => {
+  const descriptors = [
+    {action: 'check', params: {TableName: 'planets', Key: {name: 'anchor'}}},
+    {action: 'put', params: {TableName: 'planets', Item: {name: 'Hoth'}}},
+    {action: 'delete', params: {TableName: 'planets', Key: {name: 'old'}}}
+  ];
+  const err = makeCanceledError([
+    {Code: 'None'},
+    {Code: 'ConditionalCheckFailed', Message: 'conflict', Item: {name: 'Hoth', climate: 'frozen'}},
+    {Code: 'None'}
+  ]);
+
+  const report = explainTransactionCancellation(err, descriptors);
+
+  t.equal(report.failures.length, 1, 'only the real failure reported');
+  const f = report.failures[0];
+  t.equal(f.index, 1);
+  t.equal(f.code, 'ConditionalCheckFailed');
+  t.equal(f.message, 'conflict');
+  t.equal(f.descriptor.action, 'put');
+  t.equal(f.descriptor.params.TableName, 'planets');
+  t.deepEqual(f.item, {name: 'Hoth', climate: 'frozen'});
+  t.matchString(report.message, /action 1 \(put to planets\): ConditionalCheckFailed — conflict/);
+});
+
+test('explainTransactionCancellation: skips {options} sentinels when pairing', t => {
+  const err = makeCanceledError([{Code: 'ConditionalCheckFailed'}, {Code: 'None'}]);
+
+  const report = explainTransactionCancellation(
+    err,
+    {options: {clientRequestToken: 'tok'}},
+    {action: 'put', params: {TableName: 'T', Item: {id: '1'}}},
+    {options: {returnConsumedCapacity: 'TOTAL'}},
+    {action: 'delete', params: {TableName: 'T', Key: {id: '2'}}}
+  );
+
+  t.equal(report.failures.length, 1);
+  t.equal(report.failures[0].descriptor.action, 'put', 'paired with the put, not the options sentinel');
+});
+
+test('explainTransactionCancellation: flattens arrays of descriptors', t => {
+  const err = makeCanceledError([{Code: 'None'}, {Code: 'None'}, {Code: 'TransactionConflict'}]);
+
+  const report = explainTransactionCancellation(
+    err,
+    [
+      {action: 'put', params: {TableName: 'T', Item: {id: '1'}}},
+      {action: 'put', params: {TableName: 'T', Item: {id: '2'}}}
+    ],
+    {action: 'check', params: {TableName: 'T', Key: {id: '3'}}}
+  );
+
+  t.equal(report.failures.length, 1);
+  t.equal(report.failures[0].index, 2);
+  t.equal(report.failures[0].descriptor.action, 'check');
+});
+
+test('explainTransactionCancellation: handles multiple concurrent failures', t => {
+  const err = makeCanceledError([{Code: 'ConditionalCheckFailed'}, {Code: 'TransactionConflict', Message: 'concurrent update'}]);
+
+  const report = explainTransactionCancellation(err, [
+    {action: 'put', params: {TableName: 'A', Item: {id: '1'}}},
+    {action: 'patch', params: {TableName: 'B', Key: {id: '2'}}}
+  ]);
+
+  t.equal(report.failures.length, 2);
+  t.equal(report.failures[0].code, 'ConditionalCheckFailed');
+  t.equal(report.failures[1].code, 'TransactionConflict');
+  t.matchString(report.message, /action 0 \(put to A\): ConditionalCheckFailed/);
+  t.matchString(report.message, /action 1 \(patch to B\): TransactionConflict — concurrent update/);
+});
+
+test('explainTransactionCancellation: empty CancellationReasons produces a no-detail summary', t => {
+  const err = makeCanceledError(undefined);
+  const report = explainTransactionCancellation(err, {action: 'put', params: {TableName: 'T', Item: {id: '1'}}});
+  t.equal(report.failures.length, 0);
+  t.matchString(report.message, /no failure details/);
 });
 
 // getBatch
