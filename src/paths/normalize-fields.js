@@ -1,4 +1,6 @@
 // Normalize field specifications to a string array, applying projectionFieldMap if provided.
+// Returns null when no fields are requested (caller interprets as "project everything"),
+// including for strings that degenerate to zero segments after trimming (e.g. ',,,').
 
 export const normalizeFields = (fields, projectionFieldMap, separator = '.') => {
   if (!fields) return null;
@@ -14,6 +16,7 @@ export const normalizeFields = (fields, projectionFieldMap, separator = '.') => 
       return null;
     }
   }
+  if (!fields.length) return null;
   if (!projectionFieldMap) return fields;
   return fields.map(name => {
     const parts = name.split(separator),

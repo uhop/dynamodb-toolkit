@@ -31,6 +31,20 @@ test('getPath: pre-split path array', t => {
   t.equal(getPath({a: {b: 5}}, ['a', 'b']), 5);
 });
 
+test('getPath: does not read through prototype chain', t => {
+  t.equal(getPath({}, 'toString', 'miss'), 'miss', 'inherited method not leaked');
+  t.equal(getPath({}, 'constructor', 'miss'), 'miss', 'constructor not leaked');
+  t.equal(getPath({}, 'hasOwnProperty', 'miss'), 'miss');
+});
+
+test('getPath: own null values still return null', t => {
+  t.equal(getPath({a: null}, 'a', 'fallback'), null);
+});
+
+test('getPath: own undefined falls back to defaultValue', t => {
+  t.equal(getPath({a: undefined}, 'a', 'fallback'), 'fallback');
+});
+
 // setPath
 
 test('setPath: shallow', t => {
@@ -146,6 +160,24 @@ test('applyPatch: nested set + delete', t => {
   t.deepEqual(o, {config: {y: 2, z: 3}});
 });
 
+test('applyPatch: null patch returns target unchanged', t => {
+  const o = {a: 1};
+  t.equal(applyPatch(o, null), o);
+  t.deepEqual(o, {a: 1});
+});
+
+test('applyPatch: undefined patch returns target unchanged', t => {
+  const o = {a: 1};
+  t.equal(applyPatch(o, undefined), o);
+  t.deepEqual(o, {a: 1});
+});
+
+test('applyPatch: non-array options.delete is ignored', t => {
+  const o = {a: 1, b: 2};
+  applyPatch(o, {c: 3}, {delete: 'a'});
+  t.deepEqual(o, {a: 1, b: 2, c: 3}, 'string delete did not iterate characters');
+});
+
 // normalizeFields
 
 test('normalizeFields: null/undefined returns null', t => {
@@ -172,6 +204,20 @@ test('normalizeFields: projectionFieldMap remaps top-level', t => {
 
 test('normalizeFields: projectionFieldMap with nested path', t => {
   t.deepEqual(normalizeFields(['data.value'], {data: 'd'}), ['d.value']);
+});
+
+test('normalizeFields: degenerate comma-only string returns null', t => {
+  t.equal(normalizeFields(',,,'), null);
+  t.equal(normalizeFields('   ,   '), null);
+  t.equal(normalizeFields(','), null);
+});
+
+test('normalizeFields: empty object returns null', t => {
+  t.equal(normalizeFields({}), null);
+});
+
+test('normalizeFields: empty array returns null', t => {
+  t.equal(normalizeFields([]), null);
 });
 
 // subsetObject
