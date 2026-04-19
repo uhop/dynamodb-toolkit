@@ -1,37 +1,20 @@
 {
   "name": "dynamodb-toolkit",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Zero-dependency DynamoDB toolkit (AWS SDK v3) — Adapter with hooks, expression builders, batch/transaction chunking, mass operations, REST handler.",
   "type": "module",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
+  "types": "./src/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./src/index.d.ts",
-      "default": "./src/index.js"
-    },
-    "./expressions": {
-      "types": "./src/expressions/index.d.ts",
-      "default": "./src/expressions/index.js"
-    },
-    "./batch": {
-      "types": "./src/batch/index.d.ts",
-      "default": "./src/batch/index.js"
-    },
-    "./mass": {
-      "types": "./src/mass/index.d.ts",
-      "default": "./src/mass/index.js"
-    },
-    "./paths": {
-      "types": "./src/paths/index.d.ts",
-      "default": "./src/paths/index.js"
-    },
-    "./rest-core": {
-      "types": "./src/rest-core/index.d.ts",
-      "default": "./src/rest-core/index.js"
-    },
-    "./handler": {
-      "types": "./src/handler/index.d.ts",
-      "default": "./src/handler/index.js"
-    }
+    ".": "./src/index.js",
+    "./expressions": "./src/expressions/index.js",
+    "./batch": "./src/batch/index.js",
+    "./mass": "./src/mass/index.js",
+    "./paths": "./src/paths/index.js",
+    "./rest-core": "./src/rest-core/index.js",
+    "./handler": "./src/handler/index.js",
+    "./*": "./src/*"
   },
   "scripts": {
     "test": "tape6 --flags FO",
@@ -86,6 +69,8 @@
   },
   "homepage": "https://github.com/uhop/dynamodb-toolkit#readme",
   "funding": "https://github.com/sponsors/uhop",
+  "llms": "https://raw.githubusercontent.com/uhop/dynamodb-toolkit/master/llms.txt",
+  "llmsFull": "https://raw.githubusercontent.com/uhop/dynamodb-toolkit/master/llms-full.txt",
   "engines": {
     "node": ">=20"
   },
@@ -102,6 +87,8 @@
     "typescript": "^6.0.3"
   },
   "files": [
-    "src"
+    "src",
+    "llms.txt",
+    "llms-full.txt"
   ]
 }

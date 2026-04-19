@@ -73,10 +73,12 @@ Each returns a discriminated descriptor `{action, params}` (or `{action, adapter
 
 - `await adapter.makeGet(key, fields?, params?)` → `{action: 'get', adapter, params}`
 - `await adapter.makeCheck(key, params?)` → `{action: 'check', params}`
-- `await adapter.makePost(item)` → `{action: 'put', params}` (with `attribute_not_exists` on the partition key)
-- `await adapter.makePut(item, {force?, conditions?, params?})` → `{action: 'put', params}`
-- `await adapter.makePatch(key, patch, {delete?, separator?, arrayOps?, conditions?, params?})` → `{action: 'patch', params}`
-- `await adapter.makeDelete(key, {conditions?, params?})` → `{action: 'delete', params}`
+- `await adapter.makePost(item, {returnFailedItem?}?)` → `{action: 'put', params}` (with `attribute_not_exists` on the partition key)
+- `await adapter.makePut(item, {force?, conditions?, params?, returnFailedItem?}?)` → `{action: 'put', params}`
+- `await adapter.makePatch(key, patch, {delete?, separator?, arrayOps?, conditions?, params?, returnFailedItem?}?)` → `{action: 'patch', params}`
+- `await adapter.makeDelete(key, {conditions?, params?, returnFailedItem?}?)` → `{action: 'delete', params}`
+
+`returnFailedItem: true` sets `ReturnValuesOnConditionCheckFailure: 'ALL_OLD'` on the request. Single-op CRUD: the thrown `ConditionalCheckFailedException` carries the colliding item on its `Item` field. Inside a `TransactWriteItems`: the matching `CancellationReason.Item` is populated. Pair with `explainTransactionCancellation` (see §3) to surface the failing descriptor + its pre-existing item in one call.
 
 ### 1.5 CRUD
 
@@ -84,10 +86,12 @@ Each returns a discriminated descriptor `{action, params}` (or `{action, adapter
 - `await adapter.getByKeys(keys, fields?, options?)` — returns `TItem[]`. Missing keys silently dropped. Uses `BatchGetItem` with `UnprocessedKeys` retry.
 - `await adapter.getAll(options?, example?, index?)` — example is fed to `prepareListInput`. Returns `{data, offset, limit, total?}`.
 - `await adapter.getAllByParams(params, options?)` — params is the prepared input (KeyCondition, IndexName, etc.); options drives offset/limit/fields/filter/needTotal/reviveItems.
-- `await adapter.post(item)` — fails if key exists (`ConditionalCheckFailedException`).
-- `await adapter.put(item, {force?, conditions?, params?})` — `force=true` skips the existence check.
-- `await adapter.patch(key, patch, {delete?, separator?, arrayOps?, conditions?, params?})` — applies `UpdateExpression`. Key fields are stripped from `patch` automatically.
-- `await adapter.delete(key, {conditions?, params?})` — DynamoDB Delete is idempotent; missing items return success.
+- `await adapter.post(item, {returnFailedItem?}?)` — fails if key exists (`ConditionalCheckFailedException`).
+- `await adapter.put(item, {force?, conditions?, params?, returnFailedItem?}?)` — `force=true` skips the existence check.
+- `await adapter.patch(key, patch, {delete?, separator?, arrayOps?, conditions?, params?, returnFailedItem?}?)` — applies `UpdateExpression`. Key fields are stripped from `patch` automatically.
+- `await adapter.delete(key, {conditions?, params?, returnFailedItem?}?)` — DynamoDB Delete is idempotent; missing items return success.
+
+`returnFailedItem: true` → sets `ReturnValuesOnConditionCheckFailure: 'ALL_OLD'` on the underlying request. Thrown `ConditionalCheckFailedException.Item` carries the colliding item; inside an auto-upgraded transaction the matching `CancellationReason.Item` is populated.
 - `await adapter.clone(key, mapFn?, {force?, params?})` — read → mapFn → post (or put if force). Returns the cloned item or `undefined` on miss.
 - `await adapter.move(key, mapFn?, {force?, params?})` — read → mapFn → write + delete original via `transactWriteItems`. Returns the moved item or `undefined`.
 
@@ -205,7 +209,8 @@ type ConditionClause =
 All accept `(client, ...descriptors)` where descriptors are `{action, params}` items or arrays of items.
 
 - `applyBatch(client, ...descriptors)` → `Promise<number>` — chunked `BatchWriteItem` (limit 25 per call), `UnprocessedItems` retry with backoff.
-- `applyTransaction(client, ...descriptors)` → `Promise<number>` — single `TransactWriteItems` call. Throws if total > `TRANSACTION_LIMIT` (100).
+- `applyTransaction(client, ...descriptors)` → `Promise<number>` — single `TransactWriteItems` call. Throws if total > `TRANSACTION_LIMIT` (100). Accepts `{options: {clientRequestToken?, returnConsumedCapacity?, returnItemCollectionMetrics?}}` sentinel at any position in the variadic list for transaction-level knobs; multiple `{options}` entries merge, later fields winning.
+- `explainTransactionCancellation(err, ...descriptors)` → `{failures, message} | null` — maps `TransactionCanceledException.CancellationReasons` back to input descriptors; returns `null` for non-cancellation errors so callers can early-exit in `catch`. `failures[i]` has `{index, descriptor, code, message?, item?}`; `item` is populated when the matching descriptor set `returnFailedItem: true`. Walks args identically to `applyTransaction` (null skipped, arrays flattened, `{options}` sentinels ignored).
 - `getBatch(client, ...descriptors)` → `Promise<{table, item}[]>` — chunked `BatchGetItem` (limit 100), `UnprocessedKeys` retry.
 - `getTransaction(client, ...descriptors)` → `Promise<{table, item, adapter?}[]>` — single `TransactGetItems`.
 - `backoff(from?, to?, finite?)` — generator yielding exponential delays with full jitter (default base 50ms, cap 2s).

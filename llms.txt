@@ -36,7 +36,7 @@ await adapter.delete({name: 'Alderaan'});
 
 - `dynamodb-toolkit` — `Adapter`, `Raw`, `raw()`, `TransactionLimitExceededError`, type re-exports
 - `dynamodb-toolkit/expressions` — `buildUpdate`, `addProjection`, `buildFilter`, `buildFilterByExample`, `buildCondition`, `cleanParams`, `cloneParams`
-- `dynamodb-toolkit/batch` — `applyBatch`, `applyTransaction`, `getBatch`, `getTransaction`, `backoff`, `TRANSACTION_LIMIT`
+- `dynamodb-toolkit/batch` — `applyBatch`, `applyTransaction`, `explainTransactionCancellation`, `getBatch`, `getTransaction`, `backoff`, `TRANSACTION_LIMIT`
 - `dynamodb-toolkit/mass` — `paginateList`, `iterateList`, `iterateItems`, `readList`, `readListByKeys`, `readOrderedListByKeys`, `writeList`, `deleteList`, `deleteListByKeys`, `copyList`, `moveList`, `getTotal`
 - `dynamodb-toolkit/paths` — `getPath`, `setPath`, `deletePath`, `applyPatch`, `normalizeFields`, `subsetObject`
 - `dynamodb-toolkit/rest-core` — `parseFields`, `parseSort`, `parseFilter`, `parsePatch`, `parseNames`, `parsePaging`, `parseFlag`, `buildEnvelope`, `buildErrorBody`, `paginationLinks`, `defaultPolicy`, `mapErrorStatus`, `mergePolicy`
@@ -75,10 +75,10 @@ await adapter.delete({name: 'Alderaan'});
 - `getByKeys(keys, fields?, options?)` → `TItem[]`
 - `getAll(options?, example?, index?)` → `{data, offset, limit, total?}`
 - `getAllByParams(params, options?)` → `{data, offset, limit, total?}`
-- `post(item)` → fails on existing key (ConditionalCheckFailedException → 409)
-- `put(item, {force?, conditions?, params?})`
-- `patch(key, patch, {delete?, separator?, arrayOps?, conditions?, params?})`
-- `delete(key, {conditions?, params?})`
+- `post(item, {returnFailedItem?})` → fails on existing key (ConditionalCheckFailedException → 409)
+- `put(item, {force?, conditions?, params?, returnFailedItem?})`
+- `patch(key, patch, {delete?, separator?, arrayOps?, conditions?, params?, returnFailedItem?})`
+- `delete(key, {conditions?, params?, returnFailedItem?})`
 - `clone(key, mapFn?, {force?, params?})` → cloned item or `undefined` (miss)
 - `move(key, mapFn?, {force?, params?})` → moved item or `undefined`
 
@@ -94,10 +94,20 @@ await adapter.delete({name: 'Alderaan'});
 
 - `makeGet(key, fields?, params?)` → `{action: 'get', adapter, params}`
 - `makeCheck(key, params?)` → `{action: 'check', params}`
-- `makePost(item)` → `{action: 'put', params}` (with `attribute_not_exists` condition)
-- `makePut(item, options?)` → `{action: 'put', params}`
-- `makePatch(key, patch, options?)` → `{action: 'patch', params}`
-- `makeDelete(key, options?)` → `{action: 'delete', params}`
+- `makePost(item, {returnFailedItem?}?)` → `{action: 'put', params}` (with `attribute_not_exists` condition)
+- `makePut(item, {force?, conditions?, params?, returnFailedItem?}?)` → `{action: 'put', params}`
+- `makePatch(key, patch, {delete?, separator?, arrayOps?, conditions?, params?, returnFailedItem?}?)` → `{action: 'patch', params}`
+- `makeDelete(key, {conditions?, params?, returnFailedItem?}?)` → `{action: 'delete', params}`
+
+`returnFailedItem: true` sets `ReturnValuesOnConditionCheckFailure: 'ALL_OLD'` — the thrown `ConditionalCheckFailedException` carries the colliding item on `.Item`, and inside a transaction the matching `TransactionCanceledException.CancellationReasons[i].Item` is populated.
+
+### Batch helpers
+
+- `applyBatch(client, ...descriptors)` — chunked `BatchWriteItem` (limit 25), `UnprocessedItems` retry.
+- `applyTransaction(client, ...descriptors)` — single `TransactWriteItems` call. Accepts `{options: {clientRequestToken?, returnConsumedCapacity?, returnItemCollectionMetrics?}}` sentinel at any position for transaction-level knobs.
+- `explainTransactionCancellation(err, ...descriptors)` → `{failures, message} | null`. Maps `TransactionCanceledException.CancellationReasons` back to input descriptors; returns `null` for non-cancellation errors.
+- `getBatch` / `getTransaction` — read counterparts.
+- `backoff(from?, to?, finite?)` — generator of exponential-jittered delays.
 
 ## REST handler
 
