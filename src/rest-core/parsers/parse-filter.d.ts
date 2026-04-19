@@ -4,6 +4,8 @@ export interface ParseFilterOptions {
   mode?: 'substring' | 'prefix' | 'exact' | 'tokenized';
   /** Case sensitivity. Passed through. */
   caseSensitive?: boolean;
+  /** Maximum query-string length; longer inputs are truncated. Default `1024`. */
+  maxLength?: number;
 }
 
 /** Return shape of {@link parseFilter}. */

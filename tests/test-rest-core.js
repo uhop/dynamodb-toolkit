@@ -109,6 +109,14 @@ test('parsePatch: null body returns empty patch', t => {
   t.deepEqual(r.options, {});
 });
 
+test('parsePatch: __proto__ in body does not pollute the returned patch prototype', t => {
+  const body = JSON.parse('{"__proto__": {"polluted": "yes"}, "name": "ok"}');
+  const r = parsePatch(body);
+  t.equal(r.patch.name, 'ok', 'ordinary keys still parsed');
+  t.equal(Object.getPrototypeOf(r.patch), null, 'patch has null prototype');
+  t.equal(r.patch.polluted, undefined, 'no pollution leaked via prototype');
+});
+
 // --- parseNames ---
 
 test('parseNames: comma string', t => {
@@ -151,6 +159,44 @@ test('parsePaging: negative offset → 0', t => {
 test('parsePaging: invalid limit → default', t => {
   const r = parsePaging({limit: 'abc'}, {defaultLimit: 7});
   t.equal(r.limit, 7);
+});
+
+test('parsePaging: caps offset at maxOffset (DoS guard)', t => {
+  const r = parsePaging({offset: 1e15});
+  t.equal(r.offset, 100_000, 'huge offset clamped to default maxOffset');
+});
+
+test('parsePaging: maxOffset override', t => {
+  const r = parsePaging({offset: 5000}, {maxOffset: 200});
+  t.equal(r.offset, 200);
+});
+
+test('parseFields: truncates to maxItems default 1000', t => {
+  const input = Array.from({length: 1500}, (_, i) => 'f' + i).join(',');
+  const r = parseFields(input);
+  t.equal(r.length, 1000, 'capped at default');
+});
+
+test('parseFields: maxItems override', t => {
+  const r = parseFields('a,b,c,d', {maxItems: 2});
+  t.deepEqual(r, ['a', 'b']);
+});
+
+test('parseNames: truncates to maxItems default 1000', t => {
+  const arr = Array.from({length: 1500}, (_, i) => 'n' + i);
+  const r = parseNames(arr);
+  t.equal(r.length, 1000);
+});
+
+test('parseFilter: truncates to maxLength default 1024', t => {
+  const input = 'a'.repeat(2000);
+  const r = parseFilter(input);
+  t.equal(r.query.length, 1024, 'capped at default');
+});
+
+test('parseFilter: maxLength override', t => {
+  const r = parseFilter('abcdefgh', {maxLength: 4});
+  t.equal(r.query, 'abcd');
 });
 
 // --- parseFlag ---

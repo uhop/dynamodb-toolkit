@@ -4,6 +4,12 @@ export interface ParsePagingOptions {
   defaultLimit?: number;
   /** Maximum limit accepted; anything larger is clamped. Default `100`. */
   maxLimit?: number;
+  /**
+   * Maximum offset accepted; anything larger is clamped. Default `100_000`.
+   * Prevents DoS via `?offset=1e15` which would otherwise drive `paginateList`
+   * into ~10^14 skip-page SDK calls.
+   */
+  maxOffset?: number;
 }
 
 /** Return shape of {@link parsePaging}. */

@@ -4,8 +4,10 @@
 
 export const parsePatch = (body, options = {}) => {
   const metaPrefix = options.metaPrefix || '_';
-  const patch = {};
-  const patchOptions = {};
+  // Null-prototype accumulators: a body key of '__proto__' would otherwise
+  // invoke the prototype setter on a plain `{}` and pollute the result's chain.
+  const patch = Object.create(null);
+  const patchOptions = Object.create(null);
 
   if (!body || typeof body !== 'object') return {patch, options: patchOptions};
 
