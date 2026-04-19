@@ -150,6 +150,64 @@ test('delete: sends DeleteCommand', async t => {
   t.deepEqual(sent[0].input.Key, {name: 'Hoth'});
 });
 
+// --- returnFailedItem ---
+
+test('post: returnFailedItem sets ReturnValuesOnConditionCheckFailure', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.post({name: 'X'}, {returnFailedItem: true});
+  t.equal(sent[0].input.ReturnValuesOnConditionCheckFailure, 'ALL_OLD');
+});
+
+test('post: default omits ReturnValuesOnConditionCheckFailure', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.post({name: 'X'});
+  t.equal(sent[0].input.ReturnValuesOnConditionCheckFailure, undefined);
+});
+
+test('put: returnFailedItem sets ReturnValuesOnConditionCheckFailure', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.put({name: 'X'}, {returnFailedItem: true});
+  t.equal(sent[0].input.ReturnValuesOnConditionCheckFailure, 'ALL_OLD');
+});
+
+test('patch: returnFailedItem sets ReturnValuesOnConditionCheckFailure', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.patch({name: 'X'}, {climate: 'cold'}, {returnFailedItem: true});
+  t.equal(sent[0].input.ReturnValuesOnConditionCheckFailure, 'ALL_OLD');
+});
+
+test('delete: returnFailedItem sets ReturnValuesOnConditionCheckFailure', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.delete({name: 'X'}, {conditions: [{path: 'v', op: '=', value: 1}], returnFailedItem: true});
+  t.equal(sent[0].input.ReturnValuesOnConditionCheckFailure, 'ALL_OLD');
+});
+
+test('makePost: returnFailedItem propagates to descriptor params', async t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  const d = await adapter.makePost({name: 'X'}, {returnFailedItem: true});
+  t.equal(d.params.ReturnValuesOnConditionCheckFailure, 'ALL_OLD');
+});
+
 // --- transaction auto-upgrade ---
 
 test('post: checkConsistency returns checks → TransactWriteCommand', async t => {

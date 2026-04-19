@@ -110,10 +110,11 @@ export class Adapter {
   }
 
   /** @returns {Promise<{action: 'put', params: any}>} */
-  async makePost(item) {
+  async makePost(item, options) {
     await this._validate(item);
     let p = {TableName: this.table, Item: this._prepareItem(item)};
     p = this._checkExistence(p, true);
+    if (options?.returnFailedItem) p.ReturnValuesOnConditionCheckFailure = 'ALL_OLD';
     p = this.hooks.updateInput(p, {name: 'post'});
     return {action: 'put', params: cleanParams(p)};
   }
@@ -126,6 +127,7 @@ export class Adapter {
     p.Item = this._prepareItem(item);
     if (!force) p = this._checkExistence(p);
     if (options?.conditions) p = buildCondition(options.conditions, p);
+    if (options?.returnFailedItem) p.ReturnValuesOnConditionCheckFailure = 'ALL_OLD';
     p = this.hooks.updateInput(p, {name: 'put', force});
     return {action: 'put', params: cleanParams(p)};
   }
@@ -146,6 +148,7 @@ export class Adapter {
     p = this._checkExistence(p);
     if (options?.conditions) p = buildCondition(options.conditions, p);
     p = buildUpdate(payload, {delete: options?.delete, separator: options?.separator, arrayOps: options?.arrayOps}, p);
+    if (options?.returnFailedItem) p.ReturnValuesOnConditionCheckFailure = 'ALL_OLD';
     p = this.hooks.updateInput(p, {name: 'patch'});
     return {action: 'patch', params: cleanParams(p)};
   }
@@ -155,14 +158,15 @@ export class Adapter {
     let p = this._cloneParams(options?.params);
     p.Key = this._toKey(key, p.IndexName);
     if (options?.conditions) p = buildCondition(options.conditions, p);
+    if (options?.returnFailedItem) p.ReturnValuesOnConditionCheckFailure = 'ALL_OLD';
     p = this.hooks.updateInput(p, {name: 'delete'});
     return {action: 'delete', params: cleanParams(p)};
   }
 
   // --- single ops with auto-upgrade ---
 
-  async post(item) {
-    const batch = await this.makePost(item);
+  async post(item, options) {
+    const batch = await this.makePost(item, options);
     const checks = await this.hooks.checkConsistency(batch);
     return dispatchWrite(this.client, batch, checks);
   }

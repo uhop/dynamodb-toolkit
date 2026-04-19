@@ -38,6 +38,17 @@ export interface GetOptions {
   params?: Record<string, unknown>;
 }
 
+/** Options for `post`. */
+export interface PostOptions {
+  /**
+   * When `true`, sets `ReturnValuesOnConditionCheckFailure: 'ALL_OLD'`. If the
+   * `attribute_not_exists` check fails, the thrown `ConditionalCheckFailedException`
+   * carries the existing item on its `Item` field — useful for "tell me what I
+   * collided with" debugging.
+   */
+  returnFailedItem?: boolean;
+}
+
 /** Options for `put`. */
 export interface PutOptions {
   /** When `true`, skips the existence check (create-or-replace). */
@@ -46,6 +57,12 @@ export interface PutOptions {
   conditions?: ConditionClause[];
   /** Extra DynamoDB input merged into the Command. */
   params?: Record<string, unknown>;
+  /**
+   * When `true`, sets `ReturnValuesOnConditionCheckFailure: 'ALL_OLD'`. The
+   * thrown `ConditionalCheckFailedException` carries the item that failed the
+   * check on its `Item` field.
+   */
+  returnFailedItem?: boolean;
 }
 
 /** Options for `patch`. */
@@ -60,6 +77,12 @@ export interface PatchOptions {
   conditions?: ConditionClause[];
   /** Extra DynamoDB input merged into the Command. */
   params?: Record<string, unknown>;
+  /**
+   * When `true`, sets `ReturnValuesOnConditionCheckFailure: 'ALL_OLD'`. The
+   * thrown `ConditionalCheckFailedException` carries the item that failed the
+   * check on its `Item` field.
+   */
+  returnFailedItem?: boolean;
 }
 
 /** Options for `delete`. */
@@ -68,6 +91,12 @@ export interface DeleteOptions {
   conditions?: ConditionClause[];
   /** Extra DynamoDB input merged into the Command. */
   params?: Record<string, unknown>;
+  /**
+   * When `true`, sets `ReturnValuesOnConditionCheckFailure: 'ALL_OLD'`. The
+   * thrown `ConditionalCheckFailedException` carries the item that failed the
+   * check on its `Item` field.
+   */
+  returnFailedItem?: boolean;
 }
 
 /** Options for `clone`. */
@@ -221,11 +250,12 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * Create-only write. Adds `attribute_not_exists(<partition key>)`.
    *
    * @param item Item to insert (wrap in `raw(...)` to skip `prepare` / `validateItem`).
+   * @param options `returnFailedItem` to surface the colliding item on check failure.
    * @returns The raw DynamoDB Command output — or the transaction output when
    *   `hooks.checkConsistency` upgrades the write. Callers usually ignore it.
    * @throws `ConditionalCheckFailedException` when the key already exists.
    */
-  post(item: TItem | Raw<TItem>): Promise<unknown>;
+  post(item: TItem | Raw<TItem>, options?: PostOptions): Promise<unknown>;
 
   /**
    * Create-or-replace write. Default adds `attribute_exists(<partition key>)`
@@ -372,10 +402,11 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * Build a `put` descriptor with an `attribute_not_exists` condition.
    *
    * @param item Item to insert.
+   * @param options `returnFailedItem` to surface the colliding item on check failure.
    * @returns A `{action: 'put', params}` descriptor ready for `applyBatch` / `applyTransaction`.
    *   The transaction fails if the key already exists.
    */
-  makePost(item: TItem | Raw<TItem>): Promise<BatchDescriptor & {action: 'put'}>;
+  makePost(item: TItem | Raw<TItem>, options?: PostOptions): Promise<BatchDescriptor & {action: 'put'}>;
   /**
    * Build a `put` descriptor (with `attribute_exists` unless `force`).
    *
