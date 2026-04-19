@@ -13,7 +13,7 @@ export const paginateList = async (client, params, options, needTotal = true, mi
   let result = [],
     total = 0,
     offset = 0,
-    limit = 10;
+    limit = minLimit;
   if ('offset' in options && !isNaN(options.offset)) offset = Math.floor(+options.offset);
   if ('limit' in options && !isNaN(options.limit)) limit = Math.min(maxLimit, Math.floor(+options.limit));
 

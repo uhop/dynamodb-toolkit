@@ -18,14 +18,21 @@ export const moveList = async (client, params, mapFn = identity, keyFn = identit
       const items = data.Items || [];
       for (let offset = 0; offset < items.length; offset += MOVE_CHUNK) {
         const slice = items.slice(offset, offset + MOVE_CHUNK);
-        const puts = slice
-          .map(mapFn)
-          .filter(identity)
-          .map(item => ({action: 'put', params: {TableName: tableName, Item: item}}));
-        const deletes = slice
-          .map(keyFn)
-          .filter(identity)
-          .map(key => ({action: 'delete', params: {TableName: tableName, Key: key}}));
+        // Pair put + delete per item so a falsy mapFn or keyFn drops BOTH legs —
+        // otherwise the source gets deleted without its transformed copy being written.
+        const pairs = [];
+        for (const item of slice) {
+          const put = mapFn(item);
+          if (!put) continue;
+          const key = keyFn(item);
+          if (!key) continue;
+          pairs.push({put, key});
+        }
+        if (!pairs.length) continue;
+        /** @type {{action: 'put', params: any}[]} */
+        const puts = pairs.map(({put}) => ({action: 'put', params: {TableName: tableName, Item: put}}));
+        /** @type {{action: 'delete', params: any}[]} */
+        const deletes = pairs.map(({key}) => ({action: 'delete', params: {TableName: tableName, Key: key}}));
         processed += await applyBatch(client, [...puts, ...deletes]);
       }
     });

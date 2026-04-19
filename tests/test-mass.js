@@ -105,6 +105,25 @@ test('readOrderedListByKeys: missing keys return undefined', async t => {
   t.equal(result[1], undefined);
 });
 
+test('readOrderedListByKeys: record with partition-key value "__proto__" does not pollute Object.prototype', async t => {
+  const client = makeMockClient(async () => ({
+    Responses: {
+      T: [
+        {pk: '__proto__', sk: 'x', polluted: 'yes'},
+        {pk: 'real', sk: 'y', val: 1}
+      ]
+    },
+    UnprocessedKeys: {}
+  }));
+  const result = await readOrderedListByKeys(client, 'T', [
+    {pk: '__proto__', sk: 'x'},
+    {pk: 'real', sk: 'y'}
+  ]);
+  t.equal(result[0]?.polluted, 'yes', 'own lookup still works');
+  t.equal(result[1]?.val, 1);
+  t.equal({}.polluted, undefined, 'Object.prototype not polluted');
+});
+
 // writeList
 
 test('writeList: writes items via batch', async t => {
@@ -162,6 +181,28 @@ test('moveList: puts and deletes', async t => {
     item => ({id: item.id})
   );
   t.equal(count, 2, 'put + delete = 2 batch items');
+});
+
+test('moveList: mapFn returning falsy drops the delete too (paired dispatch)', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'BatchWriteCommand') return {UnprocessedItems: {}};
+    return {Items: [{id: '1', skip: true}, {id: '2'}], Count: 2};
+  });
+  const count = await moveList(
+    client,
+    {TableName: 'T'},
+    item => (item.skip ? null : item), // drop id=1
+    item => ({id: item.id})
+  );
+  // Only id=2 should be moved: 1 put + 1 delete = 2
+  t.equal(count, 2, 'only paired put+delete count');
+  const writeCmd = sent.find(c => c.constructor.name === 'BatchWriteCommand');
+  const requests = writeCmd.input.RequestItems.T;
+  t.equal(requests.length, 2, 'one put + one delete (not one delete for id=1 orphaned)');
+  const deletedIds = requests.filter(r => r.DeleteRequest).map(r => r.DeleteRequest.Key.id);
+  t.deepEqual(deletedIds, ['2'], 'id=1 NOT deleted because its mapFn returned falsy');
 });
 
 // paginateList
