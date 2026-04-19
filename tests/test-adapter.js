@@ -24,6 +24,12 @@ test('Adapter: throws on missing required options', t => {
   t.throws(() => new Adapter({client: {}, table: 't'}), 'missing keyFields');
 });
 
+test('Adapter: rejects non-array keyFields', t => {
+  t.throws(() => new Adapter({client: {}, table: 't', keyFields: 'name'}), 'string is not an array');
+  t.throws(() => new Adapter({client: {}, table: 't', keyFields: {}}), 'object is not an array');
+  t.throws(() => new Adapter({client: {}, table: 't', keyFields: []}), 'empty array');
+});
+
 test('Adapter: defaults applied', t => {
   const {adapter} = makeAdapter(async () => ({}));
   t.deepEqual(adapter.projectionFieldMap, {});
@@ -390,6 +396,16 @@ test('putAll: sequential uses individual Puts', async t => {
   t.equal(sent.filter(c => c.constructor.name === 'PutCommand').length, 2);
 });
 
+test('putAll: sequential propagates options.params', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.putAll([{name: 'A'}], {strategy: 'sequential', params: {ReturnConsumedCapacity: 'TOTAL'}});
+  t.equal(sent[0].input.ReturnConsumedCapacity, 'TOTAL', 'params.ReturnConsumedCapacity flows through');
+});
+
 test('deleteByKeys: uses BatchWrite', async t => {
   const sent = [];
   const {adapter} = makeAdapter(async cmd => {
@@ -399,6 +415,35 @@ test('deleteByKeys: uses BatchWrite', async t => {
   const r = await adapter.deleteByKeys([{name: 'A'}, {name: 'B'}]);
   t.equal(r.processed, 2);
   t.equal(sent[0].constructor.name, 'BatchWriteCommand');
+});
+
+test('moveByKeys: mapFn returning falsy drops the delete too', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'BatchGetCommand') {
+      return {
+        Responses: {
+          [TABLE]: [
+            {name: 'keep', v: 1},
+            {name: 'drop', v: 2}
+          ]
+        },
+        UnprocessedKeys: {}
+      };
+    }
+    return {UnprocessedItems: {}};
+  });
+
+  const r = await adapter.moveByKeys([{name: 'keep'}, {name: 'drop'}], item => (item.name === 'drop' ? null : {...item, v: item.v + 100}));
+
+  // Only "keep" should be moved: 1 put + 1 delete = 2
+  t.equal(r.processed, 2, 'only paired items counted');
+  const writeCmd = sent.find(c => c.constructor.name === 'BatchWriteCommand');
+  const requests = writeCmd.input.RequestItems[TABLE];
+  t.equal(requests.length, 2, 'one put + one delete (not orphaned delete for dropped item)');
+  const deletedNames = requests.filter(r => r.DeleteRequest).map(r => r.DeleteRequest.Key.name);
+  t.deepEqual(deletedNames, ['keep'], '"drop" was NOT deleted because mapFn returned null');
 });
 
 test('getByKeys: uses BatchGet', async t => {

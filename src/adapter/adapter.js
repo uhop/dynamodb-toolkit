@@ -31,7 +31,9 @@ export class Adapter {
     if (!options) throw new Error('AdapterOptions are required');
     if (!options.client) throw new Error('options.client (DynamoDBDocumentClient) is required');
     if (!options.table) throw new Error('options.table is required');
-    if (!options.keyFields?.length) throw new Error('options.keyFields must be a non-empty array');
+    if (!Array.isArray(options.keyFields) || !options.keyFields.length) {
+      throw new Error('options.keyFields must be a non-empty array');
+    }
 
     this.client = options.client;
     this.table = options.table;
@@ -285,7 +287,7 @@ export class Adapter {
     if (strategy === 'sequential') {
       let processed = 0;
       for (const item of items) {
-        await this.put(item, {force: true});
+        await this.put(item, {force: true, params: options?.params});
         processed++;
       }
       return {processed};
@@ -351,14 +353,20 @@ export class Adapter {
     let processed = 0;
     for (let i = 0; i < valid.length; i += MOVE_CHUNK) {
       const slice = valid.slice(i, i + MOVE_CHUNK);
-      /** @type {{action: 'put', params: any}[]} */
-      const puts = slice.map(item => {
+      // Pair put + delete per item so a falsy mapFn result drops BOTH legs —
+      // otherwise the source is deleted without the transformed copy being written.
+      const pairs = [];
+      for (const item of slice) {
         const revived = this.hooks.revive(item);
         const mapped = mapFn ? mapFn(revived) : revived;
-        return {action: 'put', params: {TableName: this.table, Item: this._prepareItem(mapped)}};
-      });
+        if (!mapped) continue;
+        pairs.push({put: this._prepareItem(mapped), key: this._restrictKey(item)});
+      }
+      if (!pairs.length) continue;
+      /** @type {{action: 'put', params: any}[]} */
+      const puts = pairs.map(({put}) => ({action: 'put', params: {TableName: this.table, Item: put}}));
       /** @type {{action: 'delete', params: any}[]} */
-      const deletes = slice.map(item => ({action: 'delete', params: {TableName: this.table, Key: this._restrictKey(item)}}));
+      const deletes = pairs.map(({key}) => ({action: 'delete', params: {TableName: this.table, Key: key}}));
       processed += await applyBatch(this.client, [...puts, ...deletes]);
     }
     return {processed};
