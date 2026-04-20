@@ -339,6 +339,19 @@ Per `policy.statusCodes`. Default: `ConditionalCheckFailedException` / `Transact
 
 `policy.errorBody` builds the response body. Default returns `{code, message}`.
 
+### 7.4 Framework adapters (separate packages)
+
+The bundled handler in this package is `node:http`-only. Framework-specific bindings ship as separate unscoped npm packages so the core keeps zero runtime dependencies. Each adapter is a thin wrapper (~150–300 LoC) that translates its framework's request/response shape into calls through the same `rest-core` parsers/builders + `matchRoute` used by the bundled handler. The wire contract (routes from §7.1, query parameters from §7.2, error mapping from §7.3, envelope keys from `policy`) is identical across all four.
+
+| Package | Runtime / framework | Peer deps | npm |
+| --- | --- | --- | --- |
+| `dynamodb-toolkit-koa` | Koa 2.x | `koa` | https://www.npmjs.com/package/dynamodb-toolkit-koa |
+| `dynamodb-toolkit-express` | Express 4.x / 5.x | `express` | https://www.npmjs.com/package/dynamodb-toolkit-express |
+| `dynamodb-toolkit-fetch` | Fetch API — `(Request) => Promise<Response>`. Runs on Cloudflare Workers, Deno Deploy, Bun.serve, Hono, Node native fetch server | none | https://www.npmjs.com/package/dynamodb-toolkit-fetch |
+| `dynamodb-toolkit-lambda` | AWS Lambda — API Gateway REST (v1), API Gateway HTTP (v2), Function URL, ALB. Auto-detects event shape. Ships `createNodeListener` / `createFetchBridge` for local-debug without `sam local` | none | https://www.npmjs.com/package/dynamodb-toolkit-lambda |
+
+Each adapter package ships its own wiki + `llms.txt` / `llms-full.txt` with framework-specific deployment patterns, body-reader behavior, and peer-dep notes.
+
 ## 8. Bare files
 
 - `import {sleep} from 'dynamodb-toolkit'` — `sleep(ms): Promise<void>`

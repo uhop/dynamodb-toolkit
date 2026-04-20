@@ -160,6 +160,15 @@ createServer(handler).listen(3000);
 
 `ConditionalCheckFailedException` → 409, `ValidationException` → 422, throughput / limits → 429, 5xx SDK → 503, anything else → 500. Override via `policy.statusCodes` and `policy.errorBody`.
 
+## Framework adapters
+
+The bundled `dynamodb-toolkit/handler` is `node:http`-only. Framework-specific bindings ship as separate packages (zero runtime deps in the core; frameworks are peer deps of each adapter). All four adapters share the same wire contract (routes, query parameters, envelope, error mapping) as the bundled handler.
+
+- `dynamodb-toolkit-koa` — Koa 2.x middleware. https://www.npmjs.com/package/dynamodb-toolkit-koa
+- `dynamodb-toolkit-express` — Express 4.x / 5.x middleware / Router. https://www.npmjs.com/package/dynamodb-toolkit-express
+- `dynamodb-toolkit-fetch` — `(Request) => Promise<Response>` for Cloudflare Workers, Deno Deploy, Bun.serve, Hono, and Node's native fetch server. https://www.npmjs.com/package/dynamodb-toolkit-fetch
+- `dynamodb-toolkit-lambda` — AWS Lambda handler for API Gateway REST + HTTP, Function URL, and ALB. Ships local-debug bridges (`createNodeListener` / `createFetchBridge`) for running the handler on real HTTP without `sam local`. https://www.npmjs.com/package/dynamodb-toolkit-lambda
+
 ## Patching
 
 ```js
