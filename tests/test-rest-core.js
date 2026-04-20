@@ -7,15 +7,20 @@ import {
   parseNames,
   parsePaging,
   parseFlag,
+  coerceStringQuery,
   buildEnvelope,
   buildErrorBody,
   paginationLinks,
+  buildListOptions,
+  resolveSort,
+  stripMount,
+  validateWriteBody,
   defaultPolicy,
   mapErrorStatus,
   mergePolicy
 } from 'dynamodb-toolkit/rest-core';
 
-import {matchRoute, createHandler} from 'dynamodb-toolkit/handler';
+import {matchRoute, createHandler, readJsonBody} from 'dynamodb-toolkit/handler';
 import {Adapter} from 'dynamodb-toolkit';
 import {EventEmitter} from 'node:events';
 import {makeMockClient} from './helpers/mock-client.js';
@@ -489,4 +494,250 @@ test('createHandler: 405 error body does not echo url.pathname', async t => {
   await p;
   t.equal(res.statusCode, 405);
   t.doesNotMatchString(res.body, /\/[a-z]/, 'pathname not leaked in error body');
+});
+
+// --- coerceStringQuery ---
+
+test('coerceStringQuery: filters to strings only', t => {
+  const out = coerceStringQuery({a: 'x', b: 42, c: {nested: 1}, d: ['first', 'second']});
+  t.deepEqual(Object.keys(out).sort(), ['a', 'd']);
+  t.equal(out.a, 'x');
+  t.equal(out.d, 'first');
+});
+
+test('coerceStringQuery: null / undefined return empty', t => {
+  t.deepEqual(Object.keys(coerceStringQuery(null)), []);
+  t.deepEqual(Object.keys(coerceStringQuery(undefined)), []);
+});
+
+test('coerceStringQuery: null-prototype accumulator', t => {
+  const out = coerceStringQuery({constructor: 'evil'});
+  t.equal(out.constructor, 'evil');
+  t.notOk(Object.getPrototypeOf(out), 'no prototype to pollute');
+});
+
+// --- stripMount ---
+
+test('stripMount: request under mount returns tail', t => {
+  t.equal(stripMount('/planets/Tatooine', '/planets'), '/Tatooine');
+  t.equal(stripMount('/planets', '/planets'), '/');
+  t.equal(stripMount('/planets/', '/planets'), '/');
+});
+
+test('stripMount: trailing slash on mountPath is normalized', t => {
+  t.equal(stripMount('/planets/Tatooine', '/planets/'), '/Tatooine');
+  t.equal(stripMount('/planets', '/planets/'), '/');
+});
+
+test('stripMount: partial prefix match returns null (not accidental hit)', t => {
+  t.equal(stripMount('/planetsburg', '/planets'), null);
+  t.equal(stripMount('/other', '/planets'), null);
+});
+
+test('stripMount: empty / missing mount returns pathname as-is', t => {
+  t.equal(stripMount('/foo', ''), '/foo');
+  t.equal(stripMount('/foo', undefined), '/foo');
+  t.equal(stripMount('', ''), '/');
+});
+
+// --- validateWriteBody ---
+
+test('validateWriteBody: plain objects pass', t => {
+  const body = {name: 'x'};
+  t.equal(validateWriteBody(body), body);
+  t.deepEqual(validateWriteBody({}), {});
+});
+
+test('validateWriteBody: null / undefined / array / primitives rejected', t => {
+  const expectBadBody = input => {
+    let caught;
+    try {
+      validateWriteBody(input);
+    } catch (err) {
+      caught = err;
+    }
+    t.ok(caught, 'rejected');
+    t.equal(caught && caught.status, 400);
+    t.equal(caught && caught.code, 'BadBody');
+  };
+  expectBadBody(null);
+  expectBadBody(undefined);
+  expectBadBody([1, 2, 3]);
+  expectBadBody('string');
+  expectBadBody(42);
+});
+
+test('validateWriteBody: allowEmpty lets null / undefined through', t => {
+  t.equal(validateWriteBody(null, {allowEmpty: true}), null);
+  t.equal(validateWriteBody(undefined, {allowEmpty: true}), undefined);
+});
+
+test('validateWriteBody: allowArray lets arrays through', t => {
+  const arr = [{a: 1}, {b: 2}];
+  t.equal(validateWriteBody(arr, {allowArray: true}), arr);
+});
+
+// --- buildListOptions + resolveSort ---
+
+test('buildListOptions: composes parsers with policy caps', t => {
+  const policy = mergePolicy({defaultLimit: 5, maxLimit: 50, maxOffset: 1000});
+  const out = buildListOptions({offset: '20', limit: '30', fields: 'a,b', filter: 'x'}, policy);
+  t.equal(out.offset, 20);
+  t.equal(out.limit, 30);
+  t.deepEqual(out.fields, ['a', 'b']);
+  t.equal(out.filter, 'x');
+});
+
+test('buildListOptions: missing values fall back to policy', t => {
+  const policy = mergePolicy({defaultLimit: 7});
+  const out = buildListOptions({}, policy);
+  t.equal(out.limit, 7);
+  t.equal(out.offset, 0);
+});
+
+test('resolveSort: ascending + descending', t => {
+  t.deepEqual(resolveSort({sort: 'name'}, {name: 'name-gsi'}), {index: 'name-gsi', descending: false});
+  t.deepEqual(resolveSort({sort: '-name'}, {name: 'name-gsi'}), {index: 'name-gsi', descending: true});
+});
+
+test('resolveSort: no sort or unmapped field', t => {
+  t.deepEqual(resolveSort({}, {name: 'name-gsi'}), {index: undefined, descending: false});
+  t.deepEqual(resolveSort({sort: 'unknown'}, {name: 'name-gsi'}).index, undefined);
+});
+
+// --- matchRoute HEAD → GET ---
+
+test('matchRoute: HEAD request dispatches through GET handler', t => {
+  const r = matchRoute('HEAD', '/Tatooine');
+  t.equal(r.kind, 'item');
+  t.equal(r.method, 'GET', 'effective method is GET');
+  t.equal(r.head, true, 'head flag set');
+});
+
+test('matchRoute: non-HEAD keeps method verbatim', t => {
+  const r = matchRoute('POST', '/');
+  t.equal(r.method, 'POST');
+  t.equal(r.head, false);
+});
+
+// --- readJsonBody (Node Buffer) ---
+
+test('readJsonBody: parses valid JSON', async t => {
+  const req = new EventEmitter();
+  setImmediate(() => {
+    req.emit('data', Buffer.from('{"a":1}', 'utf8'));
+    req.emit('end');
+  });
+  const body = await readJsonBody(req, 1024);
+  t.deepEqual(body, {a: 1});
+});
+
+test('readJsonBody: empty body resolves to null', async t => {
+  const req = new EventEmitter();
+  setImmediate(() => req.emit('end'));
+  const body = await readJsonBody(req, 1024);
+  t.equal(body, null);
+});
+
+test('readJsonBody: byte cap measured in bytes, not UTF-16 code units', async t => {
+  // 4 astral emoji = 16 bytes in UTF-8 (4 bytes × 4 chars).
+  // In UTF-16 s.length would be 8 (surrogate pairs per emoji).
+  // With cap = 8 this must now reject (byte count is 16).
+  const req = new EventEmitter();
+  setImmediate(() => {
+    req.emit('data', Buffer.from('"🌍🌏🌎🌍"', 'utf8'));
+    req.emit('end');
+  });
+  let caught;
+  try {
+    await readJsonBody(req, 8);
+  } catch (err) {
+    caught = err;
+  }
+  t.ok(caught, 'rejected');
+  t.equal(caught.status, 413);
+  t.equal(caught.code, 'PayloadTooLarge');
+});
+
+test('readJsonBody: malformed JSON → 400 BadJsonBody', async t => {
+  const req = new EventEmitter();
+  setImmediate(() => {
+    req.emit('data', Buffer.from('{not json', 'utf8'));
+    req.emit('end');
+  });
+  let caught;
+  try {
+    await readJsonBody(req, 1024);
+  } catch (err) {
+    caught = err;
+  }
+  t.equal(caught.status, 400);
+  t.equal(caught.code, 'BadJsonBody');
+});
+
+test('readJsonBody: multi-chunk UTF-8 sequences decode correctly (no partial-codepoint hazard)', async t => {
+  // Split a 4-byte emoji across two chunks — old string-accumulation version
+  // relied on setEncoding('utf8') + StringDecoder to handle this; Buffer
+  // accumulation sidesteps by decoding once after concat.
+  const full = Buffer.from('{"planet":"🌍"}', 'utf8');
+  const midEmoji = full.indexOf(0xf0) + 2; // split inside the 4-byte sequence
+  const req = new EventEmitter();
+  setImmediate(() => {
+    req.emit('data', full.subarray(0, midEmoji));
+    req.emit('data', full.subarray(midEmoji));
+    req.emit('end');
+  });
+  const body = await readJsonBody(req, 1024);
+  t.deepEqual(body, {planet: '🌍'});
+});
+
+// --- Bundled handler: HEAD + body-always-parsed invariants ---
+
+test('createHandler: HEAD /:key returns 200 headers + empty body with Content-Length', async t => {
+  const adapter = makeTestAdapter();
+  adapter.getByKey = async () => ({name: 'Hoth', climate: 'frozen'});
+  const handler = createHandler(adapter);
+  const req = makeFakeReq('HEAD', '/Hoth');
+  const res = makeFakeRes();
+  const p = handler(req, res);
+  await waitForResponse(res);
+  await p;
+  t.equal(res.statusCode, 200);
+  t.equal(res.body, '', 'no body written for HEAD');
+  t.equal(res.headers['Content-Type'], 'application/json; charset=utf-8');
+  t.ok(res.headers['Content-Length'], 'Content-Length set');
+  t.equal(Number(res.headers['Content-Length']), JSON.stringify({name: 'Hoth', climate: 'frozen'}).length);
+});
+
+test('createHandler: HEAD / dispatches through GET (pagination envelope headers, empty body)', async t => {
+  const adapter = makeTestAdapter();
+  adapter.getAll = async () => ({data: [{name: 'a'}], offset: 0, limit: 10, total: 1});
+  const handler = createHandler(adapter);
+  const req = makeFakeReq('HEAD', '/');
+  const res = makeFakeRes();
+  const p = handler(req, res);
+  await waitForResponse(res);
+  await p;
+  t.equal(res.statusCode, 200);
+  t.equal(res.body, '');
+  t.ok(res.headers['Content-Length']);
+});
+
+test('createHandler: body-always-parsed invariant — exampleFromContext receives parsed body on PUT /-clone', async t => {
+  const adapter = makeTestAdapter();
+  let capturedBody;
+  adapter._buildListParams = async () => ({TableName: 'T'});
+  adapter.cloneAllByParams = async () => ({processed: 0});
+  const handler = createHandler(adapter, {
+    exampleFromContext: (_query, body) => {
+      capturedBody = body;
+      return {};
+    }
+  });
+  const req = makeFakeReq('PUT', '/-clone', {body: JSON.stringify({overlay: 'ok'})});
+  const res = makeFakeRes();
+  const p = handler(req, res);
+  await waitForResponse(res);
+  await p;
+  t.deepEqual(capturedBody, {overlay: 'ok'}, 'body parsed and passed through, not null');
 });

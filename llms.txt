@@ -39,8 +39,8 @@ await adapter.delete({name: 'Alderaan'});
 - `dynamodb-toolkit/batch` — `applyBatch`, `applyTransaction`, `explainTransactionCancellation`, `getBatch`, `getTransaction`, `backoff`, `TRANSACTION_LIMIT`
 - `dynamodb-toolkit/mass` — `paginateList`, `iterateList`, `iterateItems`, `readList`, `readListByKeys`, `readOrderedListByKeys`, `writeList`, `deleteList`, `deleteListByKeys`, `copyList`, `moveList`, `getTotal`
 - `dynamodb-toolkit/paths` — `getPath`, `setPath`, `deletePath`, `applyPatch`, `normalizeFields`, `subsetObject`
-- `dynamodb-toolkit/rest-core` — `parseFields`, `parseSort`, `parseFilter`, `parsePatch`, `parseNames`, `parsePaging`, `parseFlag`, `buildEnvelope`, `buildErrorBody`, `paginationLinks`, `defaultPolicy`, `mapErrorStatus`, `mergePolicy`
-- `dynamodb-toolkit/handler` — `createHandler`, `matchRoute`
+- `dynamodb-toolkit/rest-core` — `parseFields`, `parseSort`, `parseFilter`, `parsePatch`, `parseNames`, `parsePaging`, `parseFlag`, `coerceStringQuery`, `buildEnvelope`, `buildErrorBody`, `paginationLinks`, `buildListOptions`, `resolveSort`, `stripMount`, `validateWriteBody`, `defaultPolicy`, `mapErrorStatus`, `mergePolicy`
+- `dynamodb-toolkit/handler` — `createHandler`, `matchRoute`, `readJsonBody`
 
 ## Adapter constructor options
 

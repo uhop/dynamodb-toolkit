@@ -85,12 +85,12 @@ The handler ships a standard route pack — `GET / POST /`, `GET PUT PATCH DELET
 
 The bundled `dynamodb-toolkit/handler` is a pure `node:http` handler. Framework-specific bindings live in separate packages so the core stays zero-dep — each adapter is a thin wrapper that translates its framework's request/response shape into the toolkit's `rest-core` parsers + standard route pack. The wire contract (routes, query parameters, envelope keys, error mapping) is identical across all four.
 
-| Package | Runtime / framework | Notes |
-| --- | --- | --- |
-| [`dynamodb-toolkit-koa`](https://www.npmjs.com/package/dynamodb-toolkit-koa) | [Koa](https://koajs.com/) 2.x | Middleware; `koa` as peer dep |
-| [`dynamodb-toolkit-express`](https://www.npmjs.com/package/dynamodb-toolkit-express) | [Express](https://expressjs.com/) 4.x / 5.x | Middleware / Router; `express` as peer dep |
-| [`dynamodb-toolkit-fetch`](https://www.npmjs.com/package/dynamodb-toolkit-fetch) | Fetch API — `(Request) => Promise<Response>` | Zero-framework; runs on Cloudflare Workers, Deno Deploy, Bun.serve, Hono, Node native fetch server |
-| [`dynamodb-toolkit-lambda`](https://www.npmjs.com/package/dynamodb-toolkit-lambda) | AWS Lambda handler | Four event shapes (API Gateway REST / HTTP, Function URL, ALB); ships local-debug bridges for running the handler on real HTTP without `sam local` |
+| Package                                                                              | Runtime / framework                          | Notes                                                                                                                                              |
+| ------------------------------------------------------------------------------------ | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`dynamodb-toolkit-koa`](https://www.npmjs.com/package/dynamodb-toolkit-koa)         | [Koa](https://koajs.com/) 2.x                | Middleware; `koa` as peer dep                                                                                                                      |
+| [`dynamodb-toolkit-express`](https://www.npmjs.com/package/dynamodb-toolkit-express) | [Express](https://expressjs.com/) 4.x / 5.x  | Middleware / Router; `express` as peer dep                                                                                                         |
+| [`dynamodb-toolkit-fetch`](https://www.npmjs.com/package/dynamodb-toolkit-fetch)     | Fetch API — `(Request) => Promise<Response>` | Zero-framework; runs on Cloudflare Workers, Deno Deploy, Bun.serve, Hono, Node native fetch server                                                 |
+| [`dynamodb-toolkit-lambda`](https://www.npmjs.com/package/dynamodb-toolkit-lambda)   | AWS Lambda handler                           | Four event shapes (API Gateway REST / HTTP, Function URL, ALB); ships local-debug bridges for running the handler on real HTTP without `sam local` |
 
 ## Sub-exports
 

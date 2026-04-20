@@ -258,12 +258,17 @@ Framework-agnostic helpers. Each parser accepts the raw query value (string or a
 - `parseNames(input, {maxItems?})` → `string[]`. `maxItems` default `1000`.
 - `parsePaging(input, {defaultLimit?, maxLimit?, maxOffset?})` → `{offset, limit}` (clamped). `maxOffset` default `100_000` — caps `?offset=` to prevent DoS via `?offset=1e15` driving `paginateList` into astronomical skip-page SDK calls.
 - `parseFlag(input)` → `boolean` — accepts `yes` / `true` / `1` / `on` (case-insensitive)
+- `coerceStringQuery(query)` → `Record<string, string>` — filters framework query bag to string values only (drops nested objects / numbers; picks first string from arrays). Null-prototype accumulator defends against `?constructor=…` / `?__proto__=…` shadowing.
 
 ### 6.2 Builders
 
 - `buildEnvelope(result, {keys?, links?})` → wraps `{data, offset, limit, total?}` with configurable key names; optionally embeds `links`.
 - `buildErrorBody(err, {includeDebug?, errorId?})` → `{code, message, errorId?, stack?}`
 - `paginationLinks(offset, limit, total, urlBuilder?)` → `{prev: string | null, next: string | null}` — `urlBuilder` is `({offset, limit}) => string`.
+- `buildListOptions(query, policy)` → `ListOptionsBase` — composes `parseFields` / `parseFilter` / `parsePaging` / `parseFlag` under policy's pagination caps. Returns `{offset, limit, consistent, needTotal, fields?, filter?}` ready for `adapter.getAll`.
+- `resolveSort(query, sortableIndices?)` → `{index, descending}` — resolves `?sort=-name` to `{index: 'name-gsi', descending: true}` via the passed GSI mapping. Unmapped / missing fields → `{index: undefined, descending: false}`.
+- `stripMount(pathname, mountPath?)` → `string | null` — returns the pathname tail when the request is under `mountPath`, else `null`. Normalizes trailing slash on `mountPath` so `'/planets/'` and `'/planets'` behave identically. Empty / missing `mountPath` means "mount at root."
+- `validateWriteBody(body, {allowEmpty?, allowArray?}?)` → `body` — throws `{status: 400, code: 'BadBody'}` when `body` is non-object (or null/array without the matching option). Use on write-shaped routes where `{...body, ...key}` would silently accept `null` (writes key-only) or arrays (writes `{"0": …}`).
 
 ### 6.3 Policy
 
@@ -303,6 +308,14 @@ const handler = createHandler(adapter, {
 
 createServer(handler).listen(3000);
 ```
+
+**HEAD → GET auto-promote.** `matchRoute` treats `HEAD` as `GET` for dispatch, annotates the result with `head: true`, and the bundled handler returns headers + `Content-Length` with an empty body. Consumers get the expected REST semantics on every resource endpoint without extra configuration.
+
+**Body-always-parsed invariant.** For clone-all / move-all routes (`PUT /-clone`, `PUT /-move`), the parsed body flows into `exampleFromContext(query, body)` alongside the query — consumers can key their tenant/ownership scope on either. (Earlier versions passed `null` on these routes.)
+
+**Body cap measures bytes, not UTF-16 code units.** As of 3.1.2, the built-in body reader accumulates `Buffer` chunks and enforces `maxBodyBytes` in bytes. Multi-byte payloads (CJK, emoji) are now bounded by the advertised cap; earlier versions let ~2-4× through because `String.length` counts code units.
+
+**`readJsonBody(req, maxBodyBytes, {destroy?})`.** Exported helper for adapter-style code that needs the same Node-stream reader as the bundled handler. Pass `{destroy: false}` when the framework needs the socket alive to write the 413 response (Koa, Express — both hand body serialization to the framework response object).
 
 ### 7.1 Standard route pack
 

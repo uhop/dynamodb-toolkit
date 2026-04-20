@@ -5,3 +5,4 @@
 
 export {createHandler, type HandlerOptions, type RequestHandler} from './handler.js';
 export {matchRoute, type MatchedRoute} from './match-route.js';
+export {readJsonBody, type ReadJsonBodyOptions} from './read-json-body.js';

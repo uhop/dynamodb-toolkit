@@ -16,41 +16,20 @@ import {
 } from '../rest-core/index.js';
 
 import {matchRoute} from './match-route.js';
+import {readJsonBody} from './read-json-body.js';
+import {Buffer} from 'node:buffer';
 
-const readJsonBody = (req, maxBodyBytes) =>
-  new Promise((resolve, reject) => {
-    let body = '';
-    let size = 0;
-    let aborted = false;
-    req.setEncoding?.('utf8');
-    req.on('data', chunk => {
-      if (aborted) return;
-      const s = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-      size += s.length;
-      if (size > maxBodyBytes) {
-        aborted = true;
-        reject(Object.assign(new Error(`Request body exceeds ${maxBodyBytes} bytes`), {status: 413, code: 'PayloadTooLarge'}));
-        req.destroy?.();
-        return;
-      }
-      body += s;
-    });
-    req.on('end', () => {
-      if (aborted) return;
-      if (!body) return resolve(null);
-      try {
-        resolve(JSON.parse(body));
-      } catch (err) {
-        reject(Object.assign(err, {status: 400, code: 'BadJsonBody'}));
-      }
-    });
-    req.on('error', reject);
-  });
-
-const sendJson = (res, status, body) => {
+const sendJson = (req, res, status, body) => {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.end(body == null ? '' : JSON.stringify(body));
+  const serialized = body == null ? '' : JSON.stringify(body);
+  if (req.method === 'HEAD') {
+    // HEAD mirrors GET's headers + Content-Length with an empty body.
+    res.setHeader('Content-Length', String(Buffer.byteLength(serialized, 'utf8')));
+    res.end();
+    return;
+  }
+  res.end(serialized);
 };
 
 const sendNoContent = (res, status = 204) => {
@@ -100,9 +79,9 @@ export const createHandler = (adapter, options = {}) => {
     return {index: sortableIndices[sort.field], descending: sort.direction === 'desc'};
   };
 
-  const sendError = (res, err) => {
+  const sendError = (req, res, err) => {
     const status = err?.status && err.status >= 400 && err.status < 600 ? err.status : mapErrorStatus(err, policy.statusCodes);
-    sendJson(res, status, policy.errorBody(err));
+    sendJson(req, res, status, policy.errorBody(err));
   };
 
   // --- collection-level handlers ---
@@ -124,7 +103,7 @@ export const createHandler = (adapter, options = {}) => {
     const links = paginationLinks(result.offset, result.limit, result.total, urlBuilder);
     const envelopeOpts = {keys: policy.envelope};
     if (links.prev || links.next) envelopeOpts.links = links;
-    sendJson(res, 200, buildEnvelope(result, envelopeOpts));
+    sendJson(req, res, 200, buildEnvelope(result, envelopeOpts));
   };
 
   const handlePost = async (req, res) => {
@@ -133,7 +112,7 @@ export const createHandler = (adapter, options = {}) => {
     sendNoContent(res);
   };
 
-  const handleDeleteAll = async (_req, res, query) => {
+  const handleDeleteAll = async (req, res, query) => {
     const opts = buildListOptions(query);
     const {index} = resolveSort(query);
     const example = exampleFromContext(query, null);
@@ -141,18 +120,18 @@ export const createHandler = (adapter, options = {}) => {
     // by re-using the Adapter's internal list-params machinery via getAll-style options
     const params = await adapter._buildListParams(opts, false, example, index);
     const r = await adapter.deleteAllByParams(params);
-    sendJson(res, 200, {processed: r.processed});
+    sendJson(req, res, 200, {processed: r.processed});
   };
 
   // --- /-by-names handlers ---
 
-  const handleGetByNames = async (_req, res, query) => {
+  const handleGetByNames = async (req, res, query) => {
     const names = parseNames(query.names);
     const fields = parseFields(query.fields);
     const consistent = parseFlag(query.consistent);
     const keys = names.map(name => keyFromPath(name, adapter));
     const items = await adapter.getByKeys(keys, fields, {consistent});
-    sendJson(res, 200, items);
+    sendJson(req, res, 200, items);
   };
 
   const handleDeleteByNames = async (req, res, query) => {
@@ -164,7 +143,7 @@ export const createHandler = (adapter, options = {}) => {
     }
     const keys = names.map(name => keyFromPath(name, adapter));
     const r = await adapter.deleteByKeys(keys);
-    sendJson(res, 200, {processed: r.processed});
+    sendJson(req, res, 200, {processed: r.processed});
   };
 
   const handleCloneByNames = async (req, res, query) => {
@@ -175,7 +154,7 @@ export const createHandler = (adapter, options = {}) => {
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const keys = names.map(name => keyFromPath(name, adapter));
     const r = await adapter.cloneByKeys(keys, item => ({...item, ...overlay}));
-    sendJson(res, 200, {processed: r.processed});
+    sendJson(req, res, 200, {processed: r.processed});
   };
 
   const handleMoveByNames = async (req, res, query) => {
@@ -186,16 +165,16 @@ export const createHandler = (adapter, options = {}) => {
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const keys = names.map(name => keyFromPath(name, adapter));
     const r = await adapter.moveByKeys(keys, item => ({...item, ...overlay}));
-    sendJson(res, 200, {processed: r.processed});
+    sendJson(req, res, 200, {processed: r.processed});
   };
 
   const handleLoad = async (req, res) => {
     const body = await readJsonBody(req, maxBodyBytes);
     if (!Array.isArray(body)) {
-      return sendError(res, Object.assign(new Error('Body must be an array of items'), {status: 400, code: 'BadLoadBody'}));
+      return sendError(req, res, Object.assign(new Error('Body must be an array of items'), {status: 400, code: 'BadLoadBody'}));
     }
     const r = await adapter.putAll(body);
-    sendJson(res, 200, {processed: r.processed});
+    sendJson(req, res, 200, {processed: r.processed});
   };
 
   const handleCloneAll = async (req, res, query) => {
@@ -203,10 +182,12 @@ export const createHandler = (adapter, options = {}) => {
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const opts = buildListOptions(query);
     const {index} = resolveSort(query);
-    const example = exampleFromContext(query, null);
+    // Body-always-parsed invariant: pass the parsed body (not null) to
+    // exampleFromContext so consumers can derive scope from both query + body.
+    const example = exampleFromContext(query, body);
     const params = await adapter._buildListParams(opts, false, example, index);
     const r = await adapter.cloneAllByParams(params, item => ({...item, ...overlay}));
-    sendJson(res, 200, {processed: r.processed});
+    sendJson(req, res, 200, {processed: r.processed});
   };
 
   const handleMoveAll = async (req, res, query) => {
@@ -214,24 +195,24 @@ export const createHandler = (adapter, options = {}) => {
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const opts = buildListOptions(query);
     const {index} = resolveSort(query);
-    const example = exampleFromContext(query, null);
+    const example = exampleFromContext(query, body);
     const params = await adapter._buildListParams(opts, false, example, index);
     const r = await adapter.moveAllByParams(params, item => ({...item, ...overlay}));
-    sendJson(res, 200, {processed: r.processed});
+    sendJson(req, res, 200, {processed: r.processed});
   };
 
   // --- item-level handlers ---
 
-  const handleItemGet = async (_req, res, key, query) => {
+  const handleItemGet = async (req, res, key, query) => {
     const fields = parseFields(query.fields);
     const consistent = parseFlag(query.consistent);
     const item = await adapter.getByKey(key, fields, {consistent});
     if (item === undefined) return sendNoContent(res, policy.statusCodes.miss);
-    sendJson(res, 200, item);
+    sendJson(req, res, 200, item);
   };
 
   const handleItemPut = async (req, res, key, query) => {
-    const body = await readJsonBody(req, maxBodyBytes);
+    const body = /** @type {Record<string, unknown> | null | undefined} */ (await readJsonBody(req, maxBodyBytes));
     const force = parseFlag(query.force);
     // Merge URL key into body so the user need not repeat it
     const merged = {...body, ...key};
@@ -240,7 +221,7 @@ export const createHandler = (adapter, options = {}) => {
   };
 
   const handleItemPatch = async (req, res, key) => {
-    const body = await readJsonBody(req, maxBodyBytes);
+    const body = /** @type {Record<string, unknown> | null | undefined} */ (await readJsonBody(req, maxBodyBytes));
     const {patch, options} = parsePatch(body, {metaPrefix: policy.metaPrefix});
     await adapter.patch(key, patch, options);
     sendNoContent(res);
@@ -273,6 +254,7 @@ export const createHandler = (adapter, options = {}) => {
     try {
       const url = requestUrl(req);
       const query = Object.fromEntries(url.searchParams);
+      // matchRoute promotes HEAD → GET internally; route.method is effective.
       const route = matchRoute(req.method, url.pathname, policy.methodPrefix);
 
       switch (route.kind) {
@@ -305,9 +287,9 @@ export const createHandler = (adapter, options = {}) => {
           break;
         }
       }
-      return sendError(res, Object.assign(new Error('Method not allowed for this route'), {status: 405, code: 'MethodNotAllowed'}));
+      return sendError(req, res, Object.assign(new Error('Method not allowed for this route'), {status: 405, code: 'MethodNotAllowed'}));
     } catch (err) {
-      sendError(res, err);
+      sendError(req, res, err);
     }
   };
 };

@@ -2,3 +2,4 @@
 
 export {createHandler} from './handler.js';
 export {matchRoute} from './match-route.js';
+export {readJsonBody} from './read-json-body.js';

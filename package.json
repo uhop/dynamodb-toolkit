@@ -1,6 +1,6 @@
 {
   "name": "dynamodb-toolkit",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "description": "Zero-dependency DynamoDB toolkit (AWS SDK v3) — Adapter with hooks, expression builders, batch/transaction chunking, mass operations, REST handler.",
   "type": "module",
   "main": "./src/index.js",
