@@ -111,7 +111,7 @@ Index and URL design depend heavily on the application. User choices:
     not be a legal facility name, and `--cars` must not be a legal VIN (real VINs cannot
     start with `--`, so the constraint is automatic there).
 - The hierarchy, which fixes the order of fields in the structural key and the URL.
-  - Example for a facility that rents cars *and* boats, listed separately:
+  - Example for a facility that rents cars _and_ boats, listed separately:
     `/:state/:rental-name/cars/:car-vin` and `/:state/:rental-name/boats/:boat-vin`.
   - Not only linear hierarchies but also tree hierarchies are possible.
 - Which operations must be aware of children: deleting or renaming a parent may require
@@ -192,6 +192,40 @@ There are surely more ways to leverage DynamoDB for such needs — it all comes 
 keys and key expressions. Further research into smart uses of key/value stores is
 warranted.
 
+### Table lifecycle — friction observed in v2
+
+Creating the DynamoDB table and its LSIs / GSIs was the main point of uneasiness with
+v2. The workflow was: lay out the indices manually in the AWS console, get it wrong,
+delete the table, start over, then separately code the same structure into the
+adapter's options. Two representations of the same schema, kept in sync by hand.
+
+Two ideas worth pursuing, both additive features on top of the Adapter schema work
+already planned for Cluster 3:
+
+- **T1 — Adapter-driven table provisioning.** The Adapter already knows its key
+  schema and (post-Q16) its GSI / LSI declarations. Project that into a
+  `CreateTableCommand` / `UpdateTableCommand` so `adapter.ensureTable()` or a CLI
+  (`dynamodb-toolkit ensure-table <adapter-module>`) creates the table if absent and
+  adds missing GSIs if they've drifted. LSIs are creation-time only, so the helper
+  refuses if an LSI is declared against a table that already exists without it
+  (explicit error pointing at "delete + recreate" — we do not automate destructive
+  ops). Must be opt-in: many teams provision tables via Terraform / CDK /
+  CloudFormation and do not want the adapter touching the table.
+- **T2 — Adapter ↔ table verification.** `adapter.verifyTable()` runs
+  `DescribeTableCommand`, compares the live schema against the adapter declaration,
+  and reports mismatches (missing GSIs, key-schema divergence, LSI mismatch). Useful
+  at bootstrap and in CI. What `DescribeTable` cannot tell us — non-indexed field
+  types, hooks, marshalling choices — is where a descriptor record could help: the
+  adapter writes one reserved record (e.g., key `__adapter__`) containing a
+  serialised snapshot of its declaration, then a verifying adapter can compare its
+  own declaration against what was last written. Optional; useful mainly when
+  multiple adapters share a table and want consistency checks. Opt-in to avoid
+  surprising reserved-key behaviour.
+
+T1 and T2 share the same declaration source — whatever Q16 / Q17 / Q18 settle for
+GSI / LSI / sparse-index shape is what drives both. Prerequisite: Cluster 3 settled.
+No blocker beyond that.
+
 ## Note on performance and consistency
 
 Individual-object operations are generally fast, but mass operations can take a long
@@ -222,7 +256,7 @@ questions — they are settled positions to build against.
 ### Audience
 
 - **The toolkit's user is a programmer, not an end user.** The programmer uses our
-  adapters (DB adapter + HTTP adapter) to build a REST API for *their* end users; the
+  adapters (DB adapter + HTTP adapter) to build a REST API for _their_ end users; the
   end user of that REST API is someone else entirely. Every design decision is measured
   against "does this make the programmer's life easier while letting them deliver a fast
   and flexible API to their end users?"
@@ -245,7 +279,9 @@ questions — they are settled positions to build against.
   per query parameter, whether it compiles to a KeyCondition or a Filter. The REST
   surface hides the choice.
 - **`begins_with()` is the primary hierarchical query primitive.** The structural index
-  field (join of `keyFields` with `|`) is what makes this possible.
+  field (declared via `structuralKey: {field, separator}`; default separator `|`) is
+  what makes this possible. The adapter computes the joined value automatically in
+  `prepare()`; the user's hook still runs afterwards.
 
 ### Structure
 
@@ -274,41 +310,51 @@ truth: `src/adapter/hooks.d.ts` and `src/adapter/hooks.js` in v3.1.2.
 **Write path** (`post`, `put`, `patch`, `putAll`, `clone*`, `move*`):
 
 1. `validateItem(item, isPatch)` — async validator; throw to abort.
-2. `prepare(item, isPatch)` — two-fold responsibility: (a) **technical-field
-   construction** (structural index field built from `keyFields`, sparse-GSI technical
-   fields when the type warrants them, search mirrors for case-insensitive substring
-   filtering); (b) **type marshalling for values DynamoDB cannot round-trip natively**
-   (JS `Map` → plain object or entries array; `Date` → ISO string or epoch; user-class
-   instances → plain objects; anything else outside the SDK's auto-marshalling rules).
-   Also renames and strips transient fields.
-3. Command is built (`PutCommand` / `UpdateCommand` / `DeleteCommand` / etc.).
-4. `updateInput(input, op)` — last-chance mutation of the Command's params before
+2. **Built-in prepare step** (Q16 resolution) — runs before the user's `prepare` hook
+   when the Adapter has declared schema: (a) reject incoming fields whose names start
+   with `technicalPrefix` (if declared); (b) compute and write the `structuralKey`
+   field by joining `keyFields` components with the declared separator (numbers
+   zero-padded per `width`); (c) write search-mirror fields per `searchable`;
+   (d) write sparse-GSI marker fields per `indices[*].sparse` predicates.
+3. `prepare(item, isPatch)` — user hook, runs after the built-in step. Still owns:
+   (a) **type marshalling for values DynamoDB cannot round-trip natively** (JS `Map`
+   → plain object or entries array; `Date` → ISO string or epoch; user-class
+   instances → plain objects; anything else outside the SDK's auto-marshalling
+   rules); (b) transient-field renames / strips; (c) any custom encoding that
+   overrides the built-in structural-key computation (rare).
+4. Command is built (`PutCommand` / `UpdateCommand` / `DeleteCommand` / etc.).
+5. `updateInput(input, op)` — last-chance mutation of the Command's params before
    dispatch (custom `ReturnValues`, extra condition clauses, etc.).
-5. `checkConsistency(batch)` — optional; when it returns an array, the adapter auto-
+6. `checkConsistency(batch)` — optional; when it returns an array, the adapter auto-
    upgrades the single Command into a `TransactWriteItems` bundling those descriptors.
    This is where cross-adapter invariant checks live (relevant to A6' later).
-6. Dispatch.
+7. Dispatch.
 
 **Read path — single-item ops** (`getByKey`, `patch`, `delete`, `clone`, `move`, …):
 
-1. `prepareKey(key, index)` — shapes *only* the `Key` object for GetItem / UpdateItem /
+1. `prepareKey(key, index)` — shapes _only_ the `Key` object for GetItem / UpdateItem /
    DeleteItem. Receives `index` (GSI name or `undefined`), so it can rewrite keys to
    match the GSI key schema. Does **not** build `params`.
 2. Command dispatched.
-3. `revive(rawItem, fields)` — symmetric to `prepare`: strip technical fields, rebuild
+3. **Built-in revive step** (Q16 resolution) — runs before the user's `revive` hook
+   when `technicalPrefix` is declared: strip every field whose name starts with the
+   prefix (structural key, search mirrors, sparse markers, version field, anything
+   adapter-managed). Adapters that don't declare `technicalPrefix` skip this step
+   and do their own stripping in the user hook.
+4. `revive(rawItem, fields)` — user hook, runs after the built-in step. Rebuild
    marshalled types back into user shape (`Map` from entries; `Date` from ISO string;
    user-class instances via their constructor), apply projection, add calculated fields.
 
 **Read path — list ops** (`getAll`):
 
 1. `prepareListInput(example, index)` — produces `{IndexName, KeyConditionExpression,
-   ExpressionAttributeNames, ExpressionAttributeValues, …}` to turn a Scan into a
+ExpressionAttributeNames, ExpressionAttributeValues, …}` to turn a Scan into a
    Query. **This is where `/TX/--rentals` → `begins_with(sk, "TX|")` actually gets
    emitted** — hierarchical list queries live here, not in `prepareKey`.
 2. Query / Scan dispatched (after filter / projection / paging options are layered on).
 3. `revive` runs per returned item.
 
-**SDK-level auto-marshalling that `prepare` / `revive` do *not* need to handle.** AWS
+**SDK-level auto-marshalling that `prepare` / `revive` do _not_ need to handle.** AWS
 SDK v3's `DynamoDBDocumentClient` (`@aws-sdk/lib-dynamodb`) round-trips these JS ↔
 DynamoDB pairs automatically:
 
@@ -320,7 +366,7 @@ DynamoDB pairs automatically:
   README](https://github.com/aws/aws-sdk-js-v3/tree/main/lib/lib-dynamodb).) Sets must
   be homogeneous; a mixed-type set throws at marshall time.
 
-So `prepare` / `revive` own everything the SDK does *not* marshal: `Map`, `Date`,
+So `prepare` / `revive` own everything the SDK does _not_ marshal: `Map`, `Date`,
 user-class instances, circular references (unsupported at all), non-set JS collections.
 Relevant `marshallOptions` that can shift the boundary:
 `convertClassInstanceToMap: true` (coerce class instances to plain maps — loses
@@ -359,8 +405,8 @@ Q17.
   on that GSI returns active items in chronological order — no filter, one index seek.
 - **Sparse GSIs by absence.** DynamoDB excludes items that lack the indexed field from
   the GSI. This is an official, documented behaviour, not a quirk:
-  *"A global secondary index only tracks data items where its key attributes actually
-  exist."* — [DynamoDB Developer Guide, Global secondary indexes](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.html).
+  _"A global secondary index only tracks data items where its key attributes actually
+  exist."_ — [DynamoDB Developer Guide, Global secondary indexes](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.html).
   This lets one table host type-scoped indices cheaply: write the technical field only
   on records of the desired type, and the GSI naturally contains only those records.
   No type-discriminator partition needed. Commonly called a "sparse index" in AWS
@@ -378,12 +424,12 @@ Q17.
   after the table exists. The adapter's index schema must match the table's physical
   schema at creation; trying to declare an LSI post-hoc means recreating the table.
 - **Max 5 LSIs per table** (vs. 20 GSIs). Budget accordingly.
-- **Strongly consistent reads.** LSIs are the *only* way to get strongly consistent
+- **Strongly consistent reads.** LSIs are the _only_ way to get strongly consistent
   reads on an alternate sort order. `GetOptions.consistent: true` plus a Query against
   an LSI gives read-your-writes on the secondary sort. GSIs cannot do this — DynamoDB
   rejects `ConsistentRead` on GSI Query.
 - **Shared partition key with base table.** An LSI is always scoped to a single
-  partition — it provides alternate sort orders *within* a partition, not across them.
+  partition — it provides alternate sort orders _within_ a partition, not across them.
 - **10 GB per-partition cap.** This includes base-table items plus every LSI entry
   that shares the partition key. Hitting the cap triggers
   `ItemCollectionSizeLimitExceededException`. Adding more LSIs to a partition that
@@ -399,14 +445,14 @@ Q17.
 
 Quick decision table:
 
-| Concern | LSI | GSI |
-| --- | --- | --- |
-| Consistency | eventual or strong | eventual only |
-| Capacity cost | shared with base | separate replication WCU |
-| Partition-size cap | **10 GB incl. LSI entries** | unlimited (auto-spread) |
-| Schema flexibility | creation-time only | add / remove anytime |
-| Count limit | 5 | 20 |
-| Access pattern | alternate sort within a partition | alternate sort / partition across table |
+| Concern            | LSI                               | GSI                                     |
+| ------------------ | --------------------------------- | --------------------------------------- |
+| Consistency        | eventual or strong                | eventual only                           |
+| Capacity cost      | shared with base                  | separate replication WCU                |
+| Partition-size cap | **10 GB incl. LSI entries**       | unlimited (auto-spread)                 |
+| Schema flexibility | creation-time only                | add / remove anytime                    |
+| Count limit        | 5                                 | 20                                      |
+| Access pattern     | alternate sort within a partition | alternate sort / partition across table |
 
 Rule of thumb: **LSI for alternate sort orders within bounded-size partitions that
 may need strong consistency; GSI for cross-partition access patterns, or when the
@@ -415,6 +461,238 @@ hierarchical car-rental example, this is a real tradeoff: partitioning on `state
 keeps the hierarchy together and makes LSIs viable for small / medium operators, but
 a mega-chain with many thousands of cars per state approaches the 10 GB cap and
 should shift to GSI-based alternate sorts (or repartition by type).
+
+### Adapter index declaration
+
+Concrete declarative shape on the Adapter. Supersedes the thin v3.1.2 surface
+(`indirectIndices: {name: 1}`, key schema discovered at call time via
+`params.IndexName`) without removing it — existing adapters keep working.
+
+```js
+new Adapter({
+  // Technical-field marker. Opt-in; default unset (backwards compatible).
+  // When set: prepare() rejects incoming user fields that start with this prefix;
+  // revive() auto-strips all fields that start with it before returning to the caller.
+  // Every adapter-managed field name (structural key, search mirror, sparse marker,
+  // version field, etc.) must start with this prefix — validated at construction.
+  technicalPrefix: '-',
+
+  // keyFields: array of {field, type?, width?} descriptors, string shorthand = type 'string'.
+  keyFields: [
+    'state',
+    {field: 'rentalId', type: 'number', width: 5}, // zero-padded when joined
+    'carVin'
+  ],
+
+  // Structural key — required when keyFields.length > 1. Built automatically by
+  // the adapter's default prepare() step: join keyFields component values with
+  // `separator`; number components zero-padded per their `width`. User's prepare()
+  // hook still runs afterwards and can override if an edge case needs it.
+  structuralKey: {
+    field: '-sk', // user-chosen; validated to start with technicalPrefix
+    separator: '|' // default; any string accepted (multi-char, unprintable)
+  },
+
+  // Index declarations — GSIs and LSIs in one discriminated map.
+  indices: {
+    'by-status-date': {
+      type: 'gsi',
+      pk: 'status', // shorthand = { field: 'status', type: 'string' }
+      sk: {field: 'createdAt', type: 'number'},
+      projection: 'all', // 'keys-only' | 'all' | ['field1', 'field2'] (INCLUDE)
+      sparse: true, // true = omit index fields when their value is undefined
+      //  { onlyWhen: (item) => boolean } for per-type sparse
+      indirect: false // true = keys-only projection + second-hop BatchGet on read
+    },
+    'by-name': {
+      type: 'lsi',
+      sk: 'name', // LSI inherits base pk; only sk is declared
+      projection: 'all'
+    }
+  },
+
+  // Type detection (Q13 resolution) — both optional.
+  // typeLabels pairs 1:1 with keyFields (same length, validated at construction);
+  // typeLabels[i] is the label for a record with keyFields[0..i] present.
+  typeLabels: ['state', 'rental', 'car'],
+  // Overrides depth-based detection when the field is present on the item.
+  typeDiscriminator: {field: 'kind'},
+
+  // Existing options — still supported.
+  searchable: {name: 1},
+  searchablePrefix: '-search-' // conventionally starts with technicalPrefix
+  // indirectIndices: { 'legacy-gsi': 1 },  // legacy shorthand, still accepted
+});
+```
+
+**Key decisions embedded** (Q16 resolution):
+
+- **Type vocabulary**: `'string' | 'number' | 'binary'` on index keys. Maps to
+  DynamoDB `S`/`N`/`B` internally. Binary is valid on GSI/LSI keys only — not on
+  `keyFields` components (no real use case).
+- **Number components in composite keys require `width`** — construction throws
+  when a `{type: 'number'}` keyFields component omits `width` in a composite
+  (`keyFields.length > 1`). Without zero-padding, lexicographic sort on the
+  joined string breaks (`"9" > "10"`). `width` is ignored in a single-field
+  keyFields (DynamoDB sorts N natively).
+- **`technicalPrefix`** is opt-in. Existing adapters that don't set it behave
+  identically to today. Hierarchical adapters gain automatic stripping + incoming
+  validation with one option.
+- **Structural key field + separator are both user-declared.** No `sk` or `|`
+  defaults baked into the toolkit vocabulary — separator defaults to `'|'` only
+  because something has to, and it can be any string including multi-character or
+  unprintable. Field name has no default and must be supplied explicitly when
+  needed (required when `keyFields.length > 1`, optional otherwise).
+- **Automatic structural-key formation** in the default `prepare()` step when
+  `structuralKey` is declared. **Rule**: walk `keyFields` in order, collect
+  contiguous-from-start defined fields, stop at the first missing one, join with
+  the declared separator. Number components zero-padded per their `width`.
+  - `{state: 'TX'}` → `"TX"` (state record).
+  - `{state: 'TX', rentalName: 'Dallas'}` → `"TX|Dallas"` (rental record).
+  - `{state: 'TX', rentalName: 'Dallas', carVin: 'Buick'}` →
+    `"TX|Dallas|Buick"` (car record).
+  - `{state: 'TX', carVin: 'Buick'}` → **throws** (non-contiguous: `rentalName`
+    missing between `state` and `carVin`).
+  - `{rentalName: 'Dallas'}` → **throws** (no partition-key field).
+
+  The depth of the resulting key is the object-type signal — ties directly into
+  Q13's type-detector helper and satisfies the §Structure principle that "URL ⇔
+  object-type is always unambiguous" without requiring a type discriminator field.
+  The user's `prepare()` hook runs after and can override the built-in result if
+  an edge case needs custom encoding (URL-encoding components, hashing,
+  separator-in-data handling, etc.).
+
+  **Write-side only.** This rule applies to `prepare()` — building a record's
+  structural key from its fields. Read-side list queries use structurally related
+  but distinct patterns and are Q12 / A1' helper territory:
+  - `begins_with(sk, "TX|")` — list rentals + cars under TX (trailing separator
+    forces child-level matches, excludes the state-op record at `"TX"` itself).
+  - `begins_with(sk, "TX|Dal")` — list TX records whose next-level name starts
+    with "Dal" (partial-prefix match).
+  - `begins_with(sk, "TX|Dallas|")` — list cars at Dallas Rental (trailing
+    separator again, excludes the rental record at `"TX|Dallas"` itself).
+
+  A1' ships helpers that take `keyFields` values + options like
+  `{trailingSeparator?: bool, prefix?: string}` and produce the right
+  `KeyConditionExpression` with proper `ExpressionAttributeNames` /
+  `ExpressionAttributeValues`.
+
+- **Single `indices` map, discriminated by `type`.** Separate `gsis`/`lsis` keys
+  rejected as unnecessary duplication.
+- **Default `projection: 'all'`.** Callers get full items back by default;
+  `keys-only` with `indirect: true` is an explicit opt-in for the cheap-storage /
+  second-hop-read tradeoff.
+- **Legacy `indirectIndices` coexists with `indices`.** Auto-synthesises
+  `{type: 'gsi', indirect: true, projection: 'keys-only'}` for each entry.
+  No deprecation warning — both forms are first-class.
+- **GSI/LSI pk and sk reference physical fields only.** No computed/derived key
+  support in the declaration; users who need one compute it in `prepare()` and
+  declare the GSI over the resulting physical field.
+- **Type detection via `adapter.typeOf(item)`** (Q13 resolution). Three signals,
+  ordered:
+  1. **`typeDiscriminator.field` wins when present on the item.** Any string value
+     is accepted; the adapter does not constrain the value space. Lets the adapter
+     author distinguish records that share a structural depth but have different
+     semantics (e.g., car vs. truck, both at depth 3).
+  2. **Structural-key depth** — count the contiguous-from-start defined `keyFields`
+     on the record. Depth `i+1` → `typeLabels[i]` when `typeLabels` is declared.
+  3. **Raw depth number** when `typeLabels` is not declared. The adapter author
+     can switch on `adapter.keyFields.length` themselves.
+
+  `typeLabels` is an array that pairs 1:1 with `keyFields` (validated at
+  construction — length must match). `typeLabels[i]` is the label for a record
+  with `keyFields[0..i]` present. Both `typeLabels` and `typeDiscriminator` are
+  optional; with neither, `typeOf()` returns the depth number.
+
+  **Multi-Adapter shared-table dispatch is deferred.** One `DynamoDB` table
+  served by multiple Adapters (overlapping or disjoint keyFields) needs its own
+  design pass (registry shape, cascade crossing boundaries, declarative vs.
+  imperative routing). `adapter.typeOf` is single-adapter only; users who need
+  cross-adapter routing compose their own dispatcher for now. Likely a post-3.x
+  addition when demand signals.
+
+### Read-side key-condition helpers (A1' / Q12 resolution)
+
+The write-side `prepare()` step (Q16) builds structural keys from an item's
+fields. The read side needs helpers that build `KeyConditionExpression` clauses
+for prefix queries — the `begins_with(sk, "TX|")`, `begins_with(sk, "TX|Dal")`,
+`begins_with(sk, "TX|Dallas|")` patterns the hierarchical use case depends on.
+
+Two layers, following the existing `expressions/` module conventions
+(`buildCondition` / `buildFilter` / `buildUpdate` with counter-based placeholder
+names and `params`-merge semantics):
+
+**Primitive: `expressions/key-condition.js`** — Adapter-agnostic, accepts a fully
+computed prefix string:
+
+```js
+buildKeyCondition(
+  {
+    field, // structural-key field name (e.g., '-sk')
+    value, // already-joined prefix string (caller computes)
+    kind, // 'exact' | 'prefix'
+    pkField, // optional: partition-key field name
+    pkValue // optional: partition-key value
+  },
+  (params = {})
+);
+// Returns params with KeyConditionExpression merged (AND-combined if present),
+// ExpressionAttributeNames / Values extended with '#kc0' / ':kcv0' style placeholders.
+```
+
+The primitive is the escape hatch for GSIs with user-maintained structural keys
+(per Q16g — the toolkit does not declaratively know those GSIs' structural
+shape).
+
+**Adapter method: `adapter.buildKey(values, options)`** — the ergonomic surface:
+
+```js
+adapter.buildKey(values, {kind?, partial?, indexName?}, params = {})
+```
+
+- `values` — object keyed by `keyFields` names. Validated the same way as in
+  `prepare()`: contiguous-from-start, no missing partition-key field, no gaps.
+- `kind` — `'exact' | 'children' | 'partial'`. Inferred when omitted: `'exact'`
+  if no `partial`, `'partial'` if `partial` is present. `'children'` must be
+  explicit.
+- `partial` — string; appended after a separator to the structural prefix.
+  Implies `kind: 'partial'`.
+- `indexName` — optional. Targets a GSI/LSI whose structural shape the adapter
+  declares; falls back to main-table `structuralKey` when absent. Users working
+  with a user-maintained-structural-key GSI call the primitive directly.
+
+Examples for `keyFields: ['state', 'rentalName', 'carVin']`,
+`structuralKey: {field: '-sk', separator: '|'}`:
+
+| Call                                                                        | `KeyConditionExpression`              | `:sk` value       |
+| --------------------------------------------------------------------------- | ------------------------------------- | ----------------- |
+| `adapter.buildKey({state: 'TX'})`                                           | `#pk = :pk AND #sk = :sk`             | `"TX"`            |
+| `adapter.buildKey({state: 'TX'}, {kind: 'children'})`                       | `#pk = :pk AND begins_with(#sk, :sk)` | `"TX\|"`          |
+| `adapter.buildKey({state: 'TX', rentalName: 'Dallas'})`                     | `#pk = :pk AND #sk = :sk`             | `"TX\|Dallas"`    |
+| `adapter.buildKey({state: 'TX', rentalName: 'Dallas'}, {kind: 'children'})` | `#pk = :pk AND begins_with(#sk, :sk)` | `"TX\|Dallas\|"`  |
+| `adapter.buildKey({state: 'TX', rentalName: 'Dallas'}, {partial: 'B'})`     | `#pk = :pk AND begins_with(#sk, :sk)` | `"TX\|Dallas\|B"` |
+| `adapter.buildKey({state: 'TX'}, {partial: 'Dal'})`                         | `#pk = :pk AND begins_with(#sk, :sk)` | `"TX\|Dal"`       |
+
+Decisions embedded:
+
+- **Two-level API**: primitive + Adapter method. Primitive is the escape hatch
+  for non-declarative structural GSIs; Adapter method is the common path.
+- **Object-only input**: `values` is an object, validated against `keyFields`.
+  Named values survive keyFields-order changes; positional arrays don't.
+- **`kind` vocabulary**: `'exact' | 'children' | 'partial'` — reads naturally in
+  hierarchical terms. Rejected: `'eq' / 'all' / 'prefix'` (too SQL-ish),
+  `'point' / 'subtree' / 'startsWith'` (wordy).
+- **Inference defaults**: `kind: 'exact'` when no options, `kind: 'partial'` when
+  `partial` is present, `kind: 'children'` must be explicit (fewer footguns — the
+  trailing-separator case is the one people forget).
+- **Naming**: `buildKey` on the Adapter; `buildKeyCondition` as the primitive.
+  Matches the `build<Target>` convention already in `expressions/`.
+- **Params merge**: primitive accepts and merges `params` exactly like
+  `buildCondition`. Adapter method forwards `params` through. Collision-safe
+  placeholder generation via the existing counter utility.
+- **GSI with its own structural key**: deferred. Per Q16g, such GSIs are
+  user-maintained; users invoke the primitive directly with their own prefix
+  string. No new declarative surface for them in this round.
 
 ### Cascade ordering (invariant preservation)
 
@@ -431,6 +709,39 @@ rule:
 - **Move = copy + delete.** Copy phase root-first; delete phase leaf-first. Two passes.
 - **`mapFn` on clone / move** can rewrite keys and attributes on the fly — this is how
   name-mangling (e.g., "clone all Texas records as Florida records") is expressed.
+
+### Cascade surface (developer primitive, not URL convention)
+
+Cascade is a **toolkit primitive exposed to the adapter developer**, not a URL
+convention imposed on the end user's REST API. Two layers, kept distinct:
+
+- **End-user REST API layer.** Shape is whatever the developer designs — single-record
+  DELETE, meta-marker list DELETE, cascade URLs, or none of the above. The toolkit's
+  built-in REST handler keeps its current contract (`DELETE /key` = single row,
+  `DELETE /--list-marker` = `deleteAllByParams`), but the developer is free to route
+  as they see fit.
+- **Developer primitive layer.** The toolkit ships a one-call cascade primitive the
+  developer wires in wherever they want:
+  - `adapter.deleteAllUnder(key)` — delete `key` and everything declared to hang off
+    it, leaf-first.
+  - `adapter.cloneAllUnder(srcKey, dstKey, {mapFn?})` — clone the subtree, root-first,
+    with optional key/value rewrite.
+  - `adapter.moveAllUnder(srcKey, dstKey, {mapFn?})` — copy-then-delete the subtree,
+    two phases.
+
+  Naming is placeholder — fits the existing `…ByKeys` / `…ByParams` family; could also
+  be `deleteCascade` / `cloneCascade` / `moveCascade` if that reads better. Will pin in
+  the A6' design pass.
+
+**Requires a declared parent-child relationship.** Without a cascade declaration on
+the Adapter (A6'), the primitive throws a clear error (`CascadeNotDeclared`). The
+toolkit will not infer cascade scope from the structural index — composite `keyFields`
+is a join pattern, not a parent-child declaration.
+
+**The default REST handler's `DELETE /key` semantics do not change.** It stays a
+single-row delete. Adapter developers who want a cascade URL register it themselves
+and call `deleteAllUnder` from their handler. Backwards compatible for every v3.x
+adapter.
 
 ### Resumability via idempotent phases
 
@@ -471,14 +782,14 @@ consistent by default.
 
 **Scenarios, triaged against the idempotent-phases model:**
 
-| Scenario | Handled by idempotent phases | Residual |
-| --- | --- | --- |
-| Item at cursor deleted | ✓ `ExclusiveStartKey` is positional, not identity-bound | — |
-| Item in already-processed range deleted | ✓ we processed old state; rerun converges | — |
-| Item in already-processed range modified | partial — we acted on stale state | **real: edit case** |
-| Item inserted in already-processed range | ✗ invisibly missed | **real: completeness** |
-| Item inserted post-cursor | ✓ processed | minor: unintended inclusion |
-| Item migrated across cursor boundary (delete + put) | ✗ may be missed or double-processed | **real: key-move case** |
+| Scenario                                            | Handled by idempotent phases                            | Residual                    |
+| --------------------------------------------------- | ------------------------------------------------------- | --------------------------- |
+| Item at cursor deleted                              | ✓ `ExclusiveStartKey` is positional, not identity-bound | —                           |
+| Item in already-processed range deleted             | ✓ we processed old state; rerun converges               | —                           |
+| Item in already-processed range modified            | partial — we acted on stale state                       | **real: edit case**         |
+| Item inserted in already-processed range            | ✗ invisibly missed                                      | **real: completeness**      |
+| Item inserted post-cursor                           | ✓ processed                                             | minor: unintended inclusion |
+| Item migrated across cursor boundary (delete + put) | ✗ may be missed or double-processed                     | **real: key-move case**     |
 
 **Mitigations the toolkit should ship:**
 
@@ -486,14 +797,14 @@ consistent by default.
   the toolkit auto-injects `ConditionExpression: <versionField> = :v` on writes and
   increments on success. `edit` uses the previously-read version as `:v`. Conflicts
   surface as `ConditionalCheckFailedException` and land in the mass-op `failed`
-  bucket with reason code; caller retries after re-reading. Covers the *modification
-  during scan* case cleanly.
+  bucket with reason code; caller retries after re-reading. Covers the _modification
+  during scan_ case cleanly.
 - **Scope-freeze via `createdAt ≤ T` filter.** Mass ops accept an optional
   operation-start timestamp; the toolkit emits a FilterExpression. Requires the
   caller's schema to carry a timestamp field; toolkit provides the helper, not a
-  mandate. Covers most of the *insertion during scan* case — new inserts after `T`
+  mandate. Covers most of the _insertion during scan_ case — new inserts after `T`
   are excluded.
-- **Clear documentation of non-coverage.** The *key-migration across cursor boundary*
+- **Clear documentation of non-coverage.** The _key-migration across cursor boundary_
   case (item renamed while mid-scan) is rare and not worth engineering around.
   Callers who need strict atomicity lock the range at the application level (e.g.,
   set a `locked: true` flag on the parent before a cascade, clear after).
@@ -547,6 +858,7 @@ documentation problem, not a code problem.
   realising the RCU cost in DynamoDB. The `?fields=` parameter is one of the highest-
   leverage things they can do for their end users; the wiki should say so early and
   often.
+
 - **Built-in marshalling helpers for standard JS classes.** Low-effort value-add: ship
   named helpers for the common cases that `prepare` / `revive` would otherwise re-
   implement in every project. Minimum set:
@@ -559,6 +871,7 @@ documentation problem, not a code problem.
 
   Shipped as standalone functions the user wires into their `prepare` / `revive`; not
   a declarative schema layer (that is a bigger design with tradeoffs — Q31).
+
 - **`edit(mapFn)` — proposed mass-op primitive for in-place, non-key modification.**
   Typical `mapFn` changes a single non-key field (e.g., appending `_copy` to a display
   name; flipping a status; bumping a counter). The current clone/move shape is
@@ -572,7 +885,7 @@ documentation problem, not a code problem.
     cost and correctness characteristics without the caller noticing.
   - **Wire-level shape.** Individual `UpdateCommand`s per item (BatchWriteItem cannot
     carry updates). Toolkit concurrency-caps to avoid overwhelming the table.
-  - **Resumability.** `edit` is *caller-idempotent*: whether a retry is safe depends
+  - **Resumability.** `edit` is _caller-idempotent_: whether a retry is safe depends
     on the mapFn (e.g., `status = 'archived'` is idempotent; `name = name + '_copy'`
     is not). The toolkit does not enforce this; callers who need resume-safety write
     idempotent mapFns or layer optimistic concurrency on top (own version field +
@@ -585,20 +898,78 @@ documentation problem, not a code problem.
   DynamoDB matters. The underlying mechanism (`LastEvaluatedKey`) is shared with the
   cursor used by mass-op resume.
 
-### Filter surface (sketch, not yet final)
+### Filter surface
 
-- **`flt-<field>-<op>=<value>`** is a promising generalisation of `?prefix=`. The
-  compiler auto-promotes index-compatible conditions to `KeyConditionExpression`.
-- **Allowlist is non-optional.** The adapter declares `{filterable: {field: [ops]}}`.
-  Parser rejects anything outside with 400. Type coercion rides along from the adapter
-  schema. Authorisation is still a separate concern (a `prepareListInput` hook), not the
-  same as allowlist.
-- **Multi-value operators: pairs first (`ge` + `le`), not delimited values.** The
-  compiler merges pairs on the same field into a single `BETWEEN` KeyCondition when the
-  field is the sort key.
-- **Text search is orthogonal.** Handled by an external index (OpenSearch, Algolia,
-  etc.) synced via DynamoDB Streams; the adapter takes returned keys and BatchGets the
-  records. Not fused into the `flt-` shape.
+- **Grammar: `f-<field>-<op>=<value>`.** Single prefix `f-` (terse, matches the
+  `-search-` / `-by-names` / `--rentals` token aesthetic already in the toolkit).
+  One grammar: the compiler auto-promotes index-compatible conditions to
+  `KeyConditionExpression`; everything else falls through to `FilterExpression`. No
+  separate `key-` prefix. Replaces the v2 `?prefix=…` convention entirely —
+  `?prefix=foo` → `f-<sort-key-field>-beg=foo`.
+- **Parse rule: strip `f-`, split field and op from the right against a closed op
+  set.** This lets field names contain dashes (`f-rental-name-eq=…` → field
+  `rental-name`, op `eq`). Ops must therefore be fixed and documented.
+- **Operator vocabulary (two-letter SQL-standard where natural, three-letter where
+  there is no two-letter form, Django-aligned naming):**
+
+  | Op    | Meaning                           | DynamoDB primitive       |
+  | ----- | --------------------------------- | ------------------------ |
+  | `eq`  | equals                            | `=`                      |
+  | `ne`  | not equals                        | `<>`                     |
+  | `lt`  | less than                         | `<`                      |
+  | `le`  | less than or equal                | `<=`                     |
+  | `gt`  | greater than                      | `>`                      |
+  | `ge`  | greater than or equal             | `>=`                     |
+  | `in`  | in set (multi-value)              | `IN`                     |
+  | `btw` | between (multi-value pair)        | `BETWEEN`                |
+  | `beg` | begins_with (strings)             | `begins_with()`          |
+  | `ct`  | contains (substring / set member) | `contains()`             |
+  | `ex`  | attribute_exists                  | `attribute_exists()`     |
+  | `nx`  | attribute_not_exists              | `attribute_not_exists()` |
+
+  Note: `ge` / `le` instead of Django's `gte` / `lte` — two letters win when the form
+  is obvious.
+
+- **Multi-value operators (`in`, `btw`): first-character-delimiter, with `,`
+  fallback.** For `f-<field>-in` / `f-<field>-btw`:
+  - If the value's first character is non-alphanumeric ASCII, it is the delimiter.
+    Everything after it is split on that character. Prior art: `sed s/…/…/`, regex
+    `m` delimiters.
+  - Otherwise the value is split on `,`.
+  - Rule for callers: if your data contains commas, pick any other non-alphanumeric
+    first character.
+
+  Examples:
+  - `f-cost-in=1,3,5,7` — default `,` delimiter.
+  - `f-cost-in=$1$3$5$8` — user-picked `$` delimiter.
+  - `f-cost-btw=^1^10` — pair with `^` delimiter.
+  - `f-name-in=|a,b|c,d` — values with commas; `|` picked to avoid escaping.
+
+  `btw` requires exactly 2 values (400 otherwise); `in` accepts 1..N. Leading /
+  trailing empties from delimiter placement are dropped; interior empties are an
+  error.
+
+  Repeated-param form (`f-cost-in=1&f-cost-in=3`) is **not** accepted. Each of the
+  four adapters would need to normalise the framework's native multi-value handling
+  (Koa last-value vs. Express `qs` array vs. fetch `getAll` vs. Lambda's split
+  `multiValueQueryStringParameters`) — two parsing paths × four adapters is real
+  maintenance cost for no capability gain the delimiter form does not already give.
+
+- **Allowlist is non-optional.** The adapter declares `{filterable: {field: [ops]}}`
+  (lives on the Adapter — see Q6 resolution). Parser rejects anything outside with 400. Type coercion rides along from the adapter schema. Authorisation remains a
+  separate concern (a `prepareListInput` hook), not the same as allowlist.
+- **Auto-promotion to `KeyConditionExpression`.** The compiler merges pairs on the
+  same indexed field (`ge` + `le` → `BETWEEN`), recognises a single `btw` on the
+  sort key, promotes `beg` on the sort key to `begins_with(sk, :v)`, and promotes
+  `eq` on the partition key. Everything else stays in `FilterExpression`. Auto-
+  promotion is silent; the adapter can opt a field out via `filterable` if it wants
+  to force Filter semantics.
+- **Text search is up to the adapter author.** The toolkit already ships
+  `-search-<field>=<text>` (case-insensitive substring via `FilterExpression`) as a
+  built-in option; adapters that need efficient text search opt into an external
+  index (OpenSearch / Algolia / etc.) synced via DynamoDB Streams, with the adapter
+  taking returned keys and BatchGetting the records. Not fused into the `f-` grammar
+  either way.
 
 ### Asynchronous mass operations
 
@@ -624,74 +995,129 @@ choose-one; we will answer them when we sit down for the proper design pass.
 
 ### Scope and release sequencing
 
-1. **A6' (invariant-preserving declarative cascade) — 3.x minor or 4.0?** Additive if we
-   keep refusal-as-default for undeclared relationships; breaking if the relationship
-   declaration is intrusive on existing Adapter shape.
-2. **W1 (hierarchical wiki walkthrough) — draft now against current toolkit, or wait
-   until A1' helpers ship?** Drafting now would shape A1' from the user-facing side;
-   waiting would let the wiki code samples use final helper names.
-3. **Queue write-through.** Move the revised action plan into
-   `projects/dynamodb-toolkit/queue.md` now, or hold for one more design round?
+1. **A6' (invariant-preserving declarative cascade) — 3.x minor or 4.0?** — _resolved._
+   **3.x minor.** Q10's resolution collapses the breaking-change surface: cascade is a
+   developer primitive (new additive methods — `deleteAllUnder` / `cloneAllUnder` /
+   `moveAllUnder` or equivalent) plus an opt-in relationship declaration on the
+   Adapter (new optional config field; existing adapters ignore it). The default REST
+   handler's contract is unchanged. No existing API shape shifts; no caller breaks.
+   Ships as a minor when the primitive + declaration design is pinned.
+2. **W1 (hierarchical wiki walkthrough) — draft now vs. wait for A1'** — _resolved._
+   Draft W1 now against v3.1.2. User-facing framing will shape A1' helpers rather
+   than the other way around.
+3. **Queue write-through** — _resolved._ Completed 2026-04-21 after Cluster 3
+   settled. `projects/dynamodb-toolkit/queue.md` now reflects all cluster
+   resolutions, the pinned adapter-declaration shape, the revised action points
+   (A6' as 3.x minor, A8 spec'd, T1/T2 added), and the remaining open questions.
 
 ### Filter grammar
 
-4. **Single `flt-` prefix with auto-promotion, or dual (`key-` forces KeyCondition + 400
-   if field not indexed; `flt-` is Filter-with-auto-promotion)?** Single is simpler;
-   dual is more explicit.
-5. **Operator vocabulary.** Pin two-letter (`ge`) or three-letter (`gte`) once, so we
-   do not end up with synonyms. Follow Django/SQLAlchemy (`eq`, `ne`, `lt`, `lte`, `gt`,
-   `gte`, `startswith`, `contains`, `in`) or a local shorthand?
-6. **Where does `filterable` live?** Adapter schema, route pack, or separate config
-   object? Probably adapter (schema info), but confirm.
-7. **Does `?prefix=` remain a named convention, or is it absorbed into
-   `flt-<level-field>-beg=…`?** If absorbed, `?prefix=` is documented as shorthand; if
-   separate, both coexist with clear docs on when each applies.
-8. **Multi-value operators beyond pairs.** Stop at pairs (`ge` + `le`), or add explicit
-   `btw`, `in`, etc. with delimiter-escape rules?
+All Cluster 4 questions are resolved. Concrete grammar lives in §"Filter surface"
+above.
+
+4. **Single prefix vs. dual (`key-`/`flt-`)** — _resolved._ Single prefix with auto-
+   promotion. Prefix text: **`f-`** (not `flt-`) — terse, matches the toolkit's
+   existing token aesthetic (`-search-`, `-by-names`, `--rentals`), no collision
+   with reserved params (`fields`, `offset`, `limit`, `cursor`, `sort`).
+5. **Operator vocabulary — two-letter or three-letter, Django or local?** —
+   _resolved._ Two-letter SQL-standard where natural (`eq`, `ne`, `lt`, `le`, `gt`,
+   `ge`), three-letter where there is no two-letter form (`btw`, `beg`). Django-
+   aligned naming with SQL-standard `ge`/`le` instead of Django's `gte`/`lte`. Full
+   table in §"Filter surface". Adds `ex`/`nx` for attribute existence checks.
+6. **Where does `filterable` live?** — _resolved._ On the Adapter schema. Route pack
+   and separate config object both rejected — `filterable` is schema-level
+   information and belongs with the rest of the Adapter declaration.
+7. **`?prefix=` — keep, deprecate, or absorb?** — _resolved._ Absorbed into
+   `f-<sort-key-field>-beg=…` and removed. No shorthand kept; one grammar.
+8. **Multi-value beyond pairs — stop or add?** — _resolved._ Added, via first-
+   character-delimiter with `,` fallback. Spec in §"Filter surface". Repeated-param
+   form (`f-cost-in=1&f-cost-in=3`) not accepted — framework differences across the
+   four adapters make it more maintenance cost than capability gain.
 
 ### Hierarchy and routing
 
-9. **GSI selection in URL** — *resolved.* Both conventions are accepted: URL-driven
+9. **GSI selection in URL** — _resolved._ Both conventions are accepted: URL-driven
    (path segment or meta-marker) when the GSI maps to a distinct access pattern, and
    query-param-driven (implied by `?sort=…` or a filter) when the GSI is an
    optimisation detail. Narrower remaining question: what is the declarative shape on
    the Adapter for the field → GSI mapping, and how is the "when to decline the index"
    rule expressed?
-10. **Cascade refusal vs. silent drop on undeclared relationships.** When an adapter has
-    no declared parent-child relationship and a DELETE hits a non-leaf URL, do we refuse
-    (400) or proceed with a single-row delete (current behaviour)? Refusal is safer but
-    breaks today's callers.
-11. **Text search convention.** Adopt a `?q=<text>` handled by an app-defined search
-    hook (returns keys → BatchGet), or leave it entirely to the adapter author with no
-    toolkit-level convention?
+10. **Cascade refusal vs. silent drop on undeclared relationships** — _resolved._
+    Question reframed: cascade is a developer-level primitive, not a structural
+    inference from the URL. The toolkit will not classify URLs as "non-leaf" from
+    composite `keyFields` alone. Resolution:
+    - `DELETE /key` in the default REST handler stays single-row, always. Backwards
+      compatible.
+    - Cascade is triggered by explicit developer call (`adapter.deleteAllUnder(key)` or
+      similar — naming pinned in A6' design pass), not by URL shape.
+    - The cascade primitive requires an A6' relationship declaration; without one it
+      throws `CascadeNotDeclared`. No guessing from the structural index.
+    - REST URL conventions for cascade (e.g., a `--all` meta-marker, `?cascade=all`
+      query param, a dedicated path segment) are entirely the developer's choice; the
+      toolkit provides the primitive they wire in, not the URL convention.
+
+    See §"Cascade surface (developer primitive, not URL convention)".
+
+11. **Text search convention** — _resolved._ Up to the adapter author. The toolkit
+    already ships `-search-<field>=<text>` (case-insensitive substring via
+    `FilterExpression`) as one option; adapters that need efficient text search opt
+    into an external index (OpenSearch / Algolia / etc.) synced via DynamoDB Streams.
+    Not fused into the `f-` grammar either way.
 
 ### Helpers and shapes
 
-12. **A1' helper signatures.** `beginsWithOnStructuralIndex(params, token)` — exact
-    shape, where does it live (`rest-core` or `expressions`), how does it interact with
-    an already-partially-populated `KeyConditionExpression`?
-13. **Type-detector helper shape.** `{discriminatorField?, keyPresenceMap}` →
-    `(record) => type`. Does it return a string, or an adapter reference? How does it
-    fit into a multi-type table served by multiple Adapters?
+12. **A1' helper signatures** — _resolved._ Two-level API:
+    `buildKeyCondition(input, params)` primitive in `expressions/key-condition.js`
+    (Adapter-agnostic; follows `build<Target>` convention + counter-based
+    placeholder naming); `adapter.buildKey(values, options, params)` method as
+    the ergonomic surface. `values` is an object keyed by `keyFields`, validated
+    contiguous-from-start. `options.kind: 'exact' | 'children' | 'partial'`;
+    `options.partial` appends after a separator. Params merge exactly like
+    `buildCondition`. GSIs with user-maintained structural keys use the primitive
+    directly (deferred declarative surface for those, per Q16g). Full shape +
+    rationale in §"Read-side key-condition helpers (A1' / Q12 resolution)".
+13. **Type-detector helper shape** — _resolved._ `adapter.typeOf(item)` method on
+    the Adapter. Detection signals (ordered): (1) `typeDiscriminator.field` value
+    wins when present on the item; (2) structural-key depth mapped through
+    `typeLabels` when declared; (3) raw depth number when `typeLabels` is not
+    declared. `typeLabels` is an array paired 1:1 with `keyFields`. Discriminator
+    field's value space is unconstrained (any string). Multi-Adapter shared-table
+    dispatch deferred to a post-3.x design pass. Full shape + rationale in
+    §"Adapter index declaration" → "Type detection via `adapter.typeOf(item)`".
 14. **Cursor shape for mass-op resume.** `{done, cursor, processed}` is the sketch. Does
     `cursor` encode the `LastEvaluatedKey` opaquely (base64'd), or does it expose
     structure? Opaque is safer; structured helps debugging.
-15. **Async mass-op foundation (A7)** — *resolved.* No separate `TaskAdapter`. Async
+15. **Async mass-op foundation (A7)** — _resolved._ No separate `TaskAdapter`. Async
     orchestration is an application concern implemented against SQS / SNS / Step
     Functions / etc.; the toolkit provides A5 (cursor), `clientRequestToken`
     (idempotency), and a caller-visible chunked-iteration surface. Narrower remaining
     questions fall out as Q19 below.
-16. **Adapter GSI schema.** How does an Adapter declare its GSIs and the field → GSI
-    mapping? A schema option on the Adapter, a separate `indices` config, or something
-    else? This is the narrower remaining piece of Q9.
-17. **Sparse-GSI-by-absence writing.** Does the toolkit provide helpers for
-    conditionally including / excluding technical fields based on object type during
-    `prepare()`, or is that fully user-code? A small per-type `prepareFields` hook
-    could make this ergonomic without being intrusive.
-18. **Sort-parameter → GSI inference.** Explicit hint
-    (`?sort=name&useIndex=by-name`) or automatic from the Adapter's index schema? If
-    automatic, do we need an override escape hatch for the case where the adapter
-    wants to force main-table scan + sort?
+16. **Adapter GSI schema** — _resolved._ Single `indices` map keyed by index name,
+    discriminated by `type: 'gsi' | 'lsi'`. Per-index fields: `pk`, `sk`,
+    `projection`, `sparse`, `indirect`. Concrete shape + rationale in §"Adapter
+    index declaration". Type vocabulary is `'string' | 'number' | 'binary'`, not the
+    raw DynamoDB `S`/`N`/`B`. `keyFields` grows to accept
+    `string | { field, type?, width? }` descriptors; `width` is required on
+    `{type: 'number'}` components in composite keys. Separate
+    `structuralKey: {field, separator}` declaration replaces the implicit "`|`-join
+    to `sk`" default. New opt-in `technicalPrefix` option generalises the
+    prefix-marks-adapter-managed convention (v2's `-t` style); enables automatic
+    revive stripping and prepare-time validation. Legacy `indirectIndices` coexists
+    with `indices` — synthesises a minimal entry internally.
+17. **Sparse-GSI-by-absence writing** — _resolved._ Declaratively via `sparse` on
+    each index: `sparse: true` omits index key fields when undefined; `sparse:
+{ onlyWhen: (item) => boolean }` lets the adapter author write per-type
+    predicates. The built-in `prepare()` step evaluates these before handing off to
+    the user's `prepare` hook. No new `prepareFields` hook needed — the declaration
+    is enough.
+18. **Sort-parameter → GSI inference** — _resolved._ Automatic from the index
+    declaration: `?sort=<field>` (or `?sort=-<field>` for descending) finds the
+    index whose `sk.field === <field>`. LSI preferred over GSI when both match
+    (per Q35). Ambiguous or absent → main-table Query + in-memory sort with a
+    documented cost characteristic. Explicit override via `useIndex: '<name>'` for
+    the cases where the adapter wants a different index or wants to force the
+    main-table path.
+
 ### Idempotent-phases mass-op shape
 
 20. **Idempotent options vs. dedicated primitives.** Do we add
@@ -796,7 +1222,7 @@ choose-one; we will answer them when we sit down for the proper design pass.
     size query), or is this entirely a design-time documentation problem? I
     lean documentation only — runtime guards cost RCU for every write.
 
-33. **Keys-only list shortcut.** Callers that want just the keys today must write
+37. **Keys-only list shortcut.** Callers that want just the keys today must write
     `?fields=state,rentalName,carVin` — verbose and breaks encapsulation because
     the caller has to know the key schema. Options: (a) `?keys` (boolean query
     flag, smallest URL); (b) `?fields=*keys` (wildcard-marker style, consistent
@@ -806,7 +1232,7 @@ choose-one; we will answer them when we sit down for the proper design pass.
     add `?fields=*all` for full projection, the `*keys` form fits). I lean
     `?fields=*keys` for consistency with the eventual fields-wildcard family.
 
-19. **Async primitives audit (verify, not build)** — *resolved.* Toolkit is closer
+38. **Async primitives audit (verify, not build)** — _resolved._ Toolkit is closer
     than expected. Already present:
     - `iterateList` / `iterateItems` async generators
       (`src/mass/iterate-list.js:7-22`) — yield pages with `LastEvaluatedKey` on each.
@@ -833,3 +1259,42 @@ choose-one; we will answer them when we sit down for the proper design pass.
     generators underneath already support it); surface failed-item keys from
     batch-write retries; write the W6 wiki recipe for queue-backed workers. No
     `TaskAdapter` needed; no new architecture.
+
+### Table lifecycle (T1 / T2)
+
+Proposed features from §"Table lifecycle — friction observed in v2". Prerequisite:
+Cluster 3 settled, since T1 / T2 drive from whatever GSI / LSI / sparse-index shape
+Q16 / Q17 / Q18 pin down.
+
+39. **T1 surface shape.** `adapter.ensureTable()` as an Adapter method, a separate
+    module-level helper (`import {ensureTable} from 'dynamodb-toolkit/provisioning'`),
+    or a CLI (`dynamodb-toolkit ensure-table <adapter-path>`)? Lean: module-level
+    helper + thin CLI wrapper. Keeps the Adapter runtime zero-cost for consumers who
+    provision via IaC; provisioning is a tool, not a method.
+40. **T1 destructive-op policy.** Safe: `CreateTable` when absent; `UpdateTable` to
+    add GSIs. Refuse: LSI addition post-creation (impossible), GSI deletion (data
+    loss), PK / sort-key change (impossible), table deletion (always caller's
+    explicit `dropTable()` if we even ship one — probably not). Print a plan and
+    require confirmation (or `--yes` on the CLI) before any write. Open: do we
+    support `--dry-run` that prints CloudFormation-equivalent JSON, or just a plain-
+    text plan?
+41. **T2 verification scope.** `adapter.verifyTable()` compares: key schema, GSI key
+    schemas + projection specs, LSI key schemas + projection, billing mode (optional),
+    stream config (optional). Open: does verification report as a structured result
+    (`{ok, diffs: [...]}`), throw on mismatch, or both modes? Lean: structured result
+    by default, `{throwOnMismatch: true}` option for CI.
+42. **Descriptor record — yes / no / optional.** A reserved record (e.g., key
+    `__adapter__` or `__toolkit__`) carrying a serialised snapshot of the adapter's
+    declaration. Adds value when: multiple adapters share a table; verification wants
+    to catch changes `DescribeTable` cannot see (field marshalling, search mirrors,
+    version-field name). Costs: reserved-key namespace pollution; coordination when
+    multiple adapters contribute. Lean: opt-in via `{descriptorKey: '__adapter__'}`,
+    defaults off. Shape: JSON document with `{version, generatedAt, keyFields,
+structuralIndex, gsis, lsis, sparseFields, marshalling}`; adapters that opt in
+    write on first `ensureTable` / `verifyTable` and re-check on subsequent calls.
+43. **Interaction with IaC workflows.** Teams running Terraform / CDK /
+    CloudFormation own the table and do not want the toolkit touching it. T1 must
+    be opt-in; T2 must be read-only. Open: should T2 skip gracefully when the
+    descriptor record is absent (implying "not a toolkit-managed table"), or treat
+    its absence as a verify failure unless `{allowMissingDescriptor: true}`? Lean:
+    absent descriptor is fine; only declared-vs-actual schema mismatches fail.
