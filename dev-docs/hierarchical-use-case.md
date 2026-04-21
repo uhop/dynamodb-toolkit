@@ -988,6 +988,37 @@ documentation problem, not a code problem.
   with a wiki recipe, not a toolkit feature. Audit the current toolkit for what is
   genuinely missing before designing anything new.
 
+## User-supplied callbacks throw; toolkit does not wrap
+
+Corollary of the SDK-helper principle, pinned 2026-04-21 second session.
+When caller-supplied code throws, the error propagates unchanged. The toolkit
+does not catch, wrap, or rename.
+
+**Applies to:**
+
+- `prepare` / `revive` / `validateItem` / `checkConsistency` hooks.
+- `mapFn` on clone / move / edit.
+- `sparse.onlyWhen` predicates.
+- `exampleFromContext` adapter callback.
+- Custom marshaller functions passed to container marshallers like
+  `marshallMap(map, valueTransform)`.
+- Any other caller-provided function the toolkit invokes.
+
+**Rationale:** introducing toolkit wrapper error classes (`PrepareHookFailed`,
+`SparsePredicateFailed`, `MapFnFailed`, etc.) is new concept surface for zero
+incremental diagnostic value. The user's own stack trace and error message
+already name the offending function; a toolkit wrapper only adds a layer
+between the user's code and the surface error, making debugging harder.
+
+**What the toolkit does own:** errors it detects itself, naming constraints
+that come from toolkit logic — `NoIndexForSortField`, `ConsistentReadOnGSIRejected`,
+`CascadeNotDeclared`, `KeyFieldChanged`, `CreatedAtFieldNotDeclared`,
+`AmbiguousDestination`, `TableVerificationFailed`, and similar. These
+originate inside the toolkit; a named error class is the right signal.
+
+**What the toolkit does not own:** errors thrown from caller-supplied code.
+Those stay caller-shaped and propagate unchanged.
+
 ## Open design questions (parked for later)
 
 Unanswered questions, logged as they arise so they do not get lost. Each is a yes/no or
@@ -1084,9 +1115,14 @@ above.
     field's value space is unconstrained (any string). Multi-Adapter shared-table
     dispatch deferred to a post-3.x design pass. Full shape + rationale in
     §"Adapter index declaration" → "Type detection via `adapter.typeOf(item)`".
-14. **Cursor shape for mass-op resume.** `{done, cursor, processed}` is the sketch. Does
-    `cursor` encode the `LastEvaluatedKey` opaquely (base64'd), or does it expose
-    structure? Opaque is safer; structured helps debugging.
+14. **Cursor shape for mass-op resume** — _resolved._ Opaque base64-encoded JSON:
+    `cursor` is an opaque `string` to callers, payload is
+    `{LastEvaluatedKey, op?, phase?, meta?}` under the hood. Ship `decodeCursor(cursor)`
+    as a named export in `mass/` for debugging/logging, flagged "not a stable API —
+    cursor payload may change across versions." Callers persist and hand back
+    verbatim; the debug helper is the only blessed way to peek inside. Opaque wins on
+    safety (payload can grow — add `phase`, `processedCount`, batch-chunk offsets —
+    without breaking callers).
 15. **Async mass-op foundation (A7)** — _resolved._ No separate `TaskAdapter`. Async
     orchestration is an application concern implemented against SQS / SNS / Step
     Functions / etc.; the toolkit provides A5 (cursor), `clientRequestToken`
@@ -1104,133 +1140,442 @@ above.
     prefix-marks-adapter-managed convention (v2's `-t` style); enables automatic
     revive stripping and prepare-time validation. Legacy `indirectIndices` coexists
     with `indices` — synthesises a minimal entry internally.
-17. **Sparse-GSI-by-absence writing** — _resolved._ Declaratively via `sparse` on
-    each index: `sparse: true` omits index key fields when undefined; `sparse:
-{ onlyWhen: (item) => boolean }` lets the adapter author write per-type
-    predicates. The built-in `prepare()` step evaluates these before handing off to
-    the user's `prepare` hook. No new `prepareFields` hook needed — the declaration
-    is enough.
-18. **Sort-parameter → GSI inference** — _resolved._ Automatic from the index
-    declaration: `?sort=<field>` (or `?sort=-<field>` for descending) finds the
-    index whose `sk.field === <field>`. LSI preferred over GSI when both match
-    (per Q35). Ambiguous or absent → main-table Query + in-memory sort with a
-    documented cost characteristic. Explicit override via `useIndex: '<name>'` for
-    the cases where the adapter wants a different index or wants to force the
-    main-table path.
+17. **Sparse-GSI-by-absence writing** — _resolved (extended 2026-04-21 second
+    session with D5 throw policy)._ Declaratively via `sparse` on each
+    index: `sparse: true` omits index key fields when undefined;
+    `sparse: { onlyWhen: (item) => boolean }` lets the adapter author write
+    per-type predicates. The built-in `prepare()` step evaluates these
+    before handing off to the user's `prepare` hook. No new `prepareFields`
+    hook needed — the declaration is enough.
+
+    **Predicate throw policy (D5):** if `onlyWhen` throws during a write,
+    the error propagates naturally. The toolkit does **not** catch-and-wrap.
+    Write aborts; user sees their own error with their own stack. Silent
+    `false` (skip populating) or silent `true` (populate) both hide bugs
+    and are rejected. See §"User-supplied callbacks throw; toolkit does
+    not wrap" for the general rule this applies.
+18. **Sort-parameter → GSI inference** — _resolved (corrected 2026-04-21 second
+    session)._ Automatic from the index declaration: `?sort=<field>` (or
+    `?sort=-<field>` for descending) finds the index whose `sk.field === <field>`.
+    LSI preferred over GSI when both match (per Q35). **No matching index →
+    refuse with `NoIndexForSortField`** (per the no-client-side-list-manipulation
+    principle — the toolkit does not in-memory-sort). Explicit override via
+    `useIndex: '<name>'` when the adapter wants a different index. Callers who
+    need sort on a non-indexed field do it in the application layer after
+    pulling bounded results themselves.
 
 ### Idempotent-phases mass-op shape
 
-20. **Idempotent options vs. dedicated primitives.** Do we add
-    `{ifNotExists: true}` / `{ifExists: true}` as options on existing mass ops
-    (`cloneByKeys`, `deleteAllByParams`, etc.), or ship dedicated primitives
-    (`copyIfNotExists`, `deleteIfExists`)? Options are ergonomically cleaner and reuse
-    current APIs; primitives are more explicit in code review.
-21. **Return shape.** `{processed, skipped, failed, cursor?}` — is this the right
-    partition? `skipped` for condition-satisfied-no-op, `failed` for the recovery
-    list. Does `failed` carry full item details or just keys?
-22. **Composed macros.** Does the toolkit ship `rename(...)` (copy-if-not-exists +
-    delete-if-exists) and `cloneWithOverwrite(...)` (delete-if-exists + copy-if-not-
-    exists) as convenience, or is composition left to the caller? Argument for
-    shipping: the correct phase order is non-obvious (destructive-before-constructive
-    for overwrite; constructive-before-destructive for rename); shipping prevents
-    users from getting the order wrong. Argument against: more API surface.
-23. **`mapFn` × existence check.** The destination key can only be known after
-    `mapFn` runs, so existence checks cannot be pre-batched. Per-item Put with
-    `ConditionExpression` is the natural implementation. Verify there is no
-    significant perf penalty vs. BatchWriteItem (which cannot carry per-item
-    conditions). Possibly some ops stay BatchWrite when no `mapFn` and no check
-    are requested.
-24. **`edit(mapFn)` diff mechanics.** Three options for how the toolkit knows which
-    fields changed: (a) mapFn returns the full object, toolkit computes the diff
-    against the input (simple, implicit); (b) mapFn returns an explicit patch
-    descriptor (`{patch: {...}, remove: [...]}`) — more verbose but explicit in code
-    review; (c) Proxy-based read-and-write tracking (no caller declaration, runtime
-    cost). I lean (a): callers already write mapFns in this shape for clone/move, so
-    the ergonomics carry over. Also: does `edit` accept a `readFields` option to
-    project-limit the Read, or always read the full item and optimise only the Write?
-25. **`edit` × key-field change detection.** How does the toolkit detect that the
-    mapFn's diff touched a `keyFields` entry, and what does it do? Options: (a)
-    throw immediately with "use `move` instead"; (b) auto-promote to a move
-    (silent); (c) accept a flag `{allowKeyChange: true}` that opts into the
-    auto-promotion explicitly. I lean (a) — silent promotion changes cost
-    (BatchWrite-amount of work vs. single-Update) and hides a semantic shift.
+All resolved 2026-04-21. Concrete shape consolidated in §"Mass clone / move / edit —
+pinned write model" below.
+
+20. **Idempotent options vs. dedicated primitives** — _resolved._ **Options on the
+    existing mass ops.** `cloneByKeys(keys, {ifNotExists: true})`,
+    `deleteAllByParams(example, {ifExists: true})`. No new
+    `copyIfNotExists` / `deleteIfExists` names. Rationale: the semantics _are_ an
+    idempotency flag on the existing op, not a new primitive. Dedicated names would
+    proliferate across `cloneByKeys` / `cloneByParams` / `moveList` /
+    `deleteAllByParams` etc. Options compose cleanly with the rest of the bag
+    (`{maxItems, resumeToken, ifNotExists}`).
+21. **Return shape** — _resolved (updated 2026-04-21 second session with
+    `sdkError` per D3)._ `{processed: number, skipped: number, failed:
+    Array<{key, reason, details?, sdkError?}>, conflicts:
+    Array<{key, reason: 'VersionConflict', sdkError?}>, cursor?: string}`.
+    `failed` carries `{key, reason, details?, sdkError?}` pairs, _not_ full
+    items (recoverable via `BatchGetItem` if truly needed). `reason` is a
+    closed enum: `'ConditionalCheckFailed' | 'ValidationException' |
+    'ProvisionedThroughputExceeded' | 'Unknown'`. Callers switch on known
+    values and log `'Unknown'`. **`sdkError?: unknown`** carries the raw SDK
+    error instance when available — preserves error-class identity, stack,
+    and raw fields (e.g., `CancellationReasons` on transaction failures) for
+    power-users who want to `instanceof ConditionalCheckFailedException` or
+    inspect the original SDK payload. Typed as `unknown` because enumerating
+    every SDK error class in the union is churn; callers narrow with
+    `instanceof` or `.name` duck-type.
+22. **Composed macros** — _resolved._ **Ship both** `rename` and `cloneWithOverwrite`
+    for API symmetry. Under the idempotent-phases model, `cloneWithOverwrite`'s
+    destructive-first phase order is safe across reruns: a failed second phase
+    (copy) re-runs at the recorded cursor phase and converges. Phase order:
+    - `rename(from, to, {mapFn})` — copy-if-not-exists then delete-if-exists.
+      Constructive-before-destructive; safe against failed second phase.
+    - `cloneWithOverwrite(from, to, {mapFn})` — delete-if-exists then
+      copy-if-not-exists. Destructive-before-constructive; safe via idempotent
+      rerun. Naming placeholder — revisit at implementation if a better word lands.
+23. **`mapFn` × existence check** — _resolved._ **`mapFn` is mandatory** on all mass
+    clone/move (TS type-level, with a runtime `AmbiguousDestination` guard for JS
+    callers). Clone/move always do `PutItem` (+ `DeleteItem` for move) because
+    changing DynamoDB primary-key components is impossible in place. Strategy table
+    (chosen at call time from the options bag — no Adapter-declaration dependency,
+    since primary-key components always change):
+
+    | Case                                                 | Strategy                                             | Round trips          |
+    | ---------------------------------------------------- | ---------------------------------------------------- | -------------------- |
+    | Clone, no conditions, no `versionField`              | `BatchWriteItem` (Put chunks)                        | ~1 per 25 items      |
+    | Move, no conditions, no `versionField`               | `BatchWriteItem` (Put + Delete pairs, chunked)       | ~1 per 25 items      |
+    | Any case with `{ifNotExists}` / `{ifExists}`         | per-item `PutItem` (+ `DeleteItem`) + `ConditionExpression` | 1× per item   |
+    | Any case with `versionField`                         | per-item `PutItem` + version `ConditionExpression`   | 1× per item          |
+    | Transactional atomicity (future option)              | `TransactWriteItems` (100 ops max)                   | ~1 per 100 items     |
+
+    `mapFn` runs in the chunk-builder loop; destination keys are resolved per-item as
+    the loop iterates. Document the latency delta in the W6 wiki recipe (BatchWrite
+    ≈ 1 round trip per 25 items vs. 25 round trips per 25 items; WCU cost equal).
+
+    **Toolkit-provided `mapFn` builders** (ship in `mass/map-fns.js` or equivalent):
+    - `adapter.swapPrefix(srcPrefix, dstPrefix)` — subtree clone/move. Rewrites
+      `keyFields` components matching `srcPrefix` to `dstPrefix`. Adapter method
+      (needs `keyFields` / `structuralKey` / separator).
+    - `adapter.overlayFields(obj)` — static field overlay. Merges `obj` into each
+      item; if `obj` touches a keyField, destination key shifts accordingly. Adapter
+      method (needs `keyFields` for validation).
+    - `mergeMapFn(...fns)` — composes multiple mapFn builders into one. Free
+      function.
+
+    Callers pass one of these (or a custom mapFn). Call sites read as prose:
+    `clone(keys, {mapFn: adapter.swapPrefix({state: 'TX'}, {state: 'FL'})})`.
+    Naming placeholder (`withPrefix` / `withFields` / `chainMapFn` all alternatives);
+    pin at implementation.
+
+24. **`edit(mapFn)` diff mechanics** — _resolved._ **(a) mapFn returns the full
+    object, toolkit computes the diff** against the input. Shape:
+    `mapFn: (item) => item'` — same as clone/move. Shallow field-by-field comparison
+    emits `SET` / `REMOVE` clauses; deep-equal short-circuit for unchanged nested
+    fields (if any nested value changed, the whole top-level field gets `SET`).
+
+    **`readFields: string[]` option ships from day one** — limits the read
+    projection (`ProjectionExpression` on `GetItem`) to the listed fields. Saves RCU
+    on large items where `edit` only touches a few attributes. Default reads the
+    full item (safe).
+
+    **Write path is per-item `UpdateItem`.** `BatchWriteItem` doesn't support
+    `UpdateItem`, so `edit` has no batched fast path — each item is its own round
+    trip. Acceptable because `edit` is for in-place mutations (non-key changes), not
+    bulk rewrites.
+
+25. **`edit` × key-field change detection** — _resolved._ **Default: throw
+    `KeyFieldChanged`** with `"edit() cannot change key fields [<fields>]. Use
+    adapter.move() instead, or pass {allowKeyChange: true}."`. Escape hatch:
+    **`{allowKeyChange: true}` opts into auto-promotion to `move`** — the toolkit
+    detects the key-field change in the diff and switches to the clone+delete path
+    transparently. Silent auto-promotion (the naive "just do the right thing")
+    rejected because the cost profile changes (single `UpdateItem` → `PutItem` +
+    `DeleteItem` = 2× round trips and WCU); callers should opt in explicitly if
+    they want that.
+
+### Mass clone / move / edit — pinned write model
+
+Consolidated summary of Q23–Q25 for implementation reference:
+
+- **Clone/move change keys.** `mapFn` is mandatory. Write path is
+  `PutItem` (+ `DeleteItem` for move), because DynamoDB primary-key components are
+  immutable on an existing item. BatchWrite is the fast path when no conditions;
+  per-item with `ConditionExpression` when `{ifNotExists}` / `{ifExists}` /
+  `versionField` is requested.
+- **Edit changes non-key fields in place.** `mapFn` mandatory, key-field changes
+  throw (or auto-promote with `{allowKeyChange: true}`). Write path is per-item
+  `UpdateItem` — no BatchWrite analogue exists.
+- **Idempotency bolts on via options**, not new methods. `{ifNotExists}` /
+  `{ifExists}` on clone/move/delete; `versionField` on the Adapter for optimistic
+  concurrency.
+- **Return shape uniform**: `{processed, skipped, failed: [{key, reason}], cursor?}`.
+  `skipped` = condition-satisfied no-op. `failed` = retry-worthy errors with closed
+  `reason` enum.
+- **Cursor is opaque.** Callers persist as `string`. `decodeCursor(cursor)` debug
+  helper for logging only; payload shape unstable across versions.
+- **Canned mapFn builders** for common transforms: `adapter.swapPrefix`,
+  `adapter.overlayFields`, `mergeMapFn`. Callers still free to write custom mapFns;
+  builders make the common cases one-liners.
 
 ### Concurrency-support mechanisms
 
-26. **`versionField` Adapter option — exact shape.** Opt-in per Adapter with
-    `{versionField: 'v'}`; the toolkit auto-injects `ConditionExpression` on writes
-    and auto-increments. Open: what about the initial insert (no prior version)?
-    Probably: `attribute_not_exists(<pk>) OR <versionField> = :v`. Also: does the
-    toolkit increment the version for patch operations, or only when the caller
-    explicitly touches it? Auto-increment is cleaner but surprising on `patch`.
-27. **`createdAt ≤ T` scope-freeze helper.** Ships as what — an option on mass ops
-    (`{asOf: Date}`), a FilterExpression builder the adapter writer composes, or a
-    bulk `prepareListInput` override? Requires the caller's schema to carry a
-    timestamp field; the toolkit neither mandates nor auto-manages it. Naming: is
-    `asOf` the right word, or `scopedAt`, or `snapshot`?
-28. **Conflict-failure surfacing.** When `ConditionExpression` fails mid-mass-op
-    because of a version conflict, does it land in `failed` (retry-worthy) or
-    `conflicts` (separate bucket)? Separating them helps the caller distinguish
-    "something broke, fix before retry" from "race lost, safe to retry". I lean
-    separate bucket.
-29. **Key-migration across cursor boundary — documented non-coverage.** How
-    prominently does the wiki warn about this case, and how explicit is the
-    application-level-lock recommendation? Possibly a dedicated "Caveats" section
-    in W6 (mass-operation semantics).
-30. **Missed-item sweep.** Does the toolkit offer a post-mass-op sweep pass
-    (re-scan, re-apply idempotent phase) as a convenience, or is this entirely
-    caller-composed? The idempotent phases already make re-scan safe — question
-    is ergonomic packaging.
+All resolved 2026-04-21 (second session). Concrete shapes below; wiki prominence
+for Q29 lands in W6.
+
+26. **`versionField` Adapter option** — _resolved._ Opt-in per Adapter:
+    `{versionField: 'v'}`. Validation: when `technicalPrefix` is declared, the
+    field name must start with it (so it auto-strips on revive).
+    - **Initial-insert guard**: canonical optimistic-concurrency form
+      `attribute_not_exists(<pk>) OR <versionField> = :v`. One condition
+      handles both the first-write (no prior version) and subsequent-write
+      cases.
+    - **Auto-increment on every successful write** (put + update). The toolkit
+      bumps `<versionField>` by 1 and re-asserts the old value. Exempting
+      patch would create a silent blind spot where two concurrent patches can
+      clobber each other without noticing — the whole point of `versionField`
+      is optimistic concurrency across all writes.
+    - **Delete**: conditional on version match (`ConditionExpression:
+      <versionField> = :v`), does **not** increment (record is gone).
+    - **Surprise mitigation**: documented loudly on the Adapter-declaration
+      wiki page — "do not declare `versionField` unless you plan to
+      round-trip it on every write."
+
+27. **`asOf` scope-freeze helper** — _resolved._
+    - **Shape**: `{asOf: Date | string}` option on mass ops and list-paginate
+      ops. Emits `FilterExpression: <createdAtField> <= :asOf`, AND-combined
+      with whatever `FilterExpression` the caller already carries.
+    - **Adapter declares the timestamp field**: `{createdAtField: 'createdAt'}`
+      at Adapter construction. Without it, passing `asOf` throws
+      `CreatedAtFieldNotDeclared`. The toolkit neither mandates the field nor
+      auto-populates it — the caller's schema owns it.
+    - **Naming: `asOf`** (keep). Rejected: `scopedAt` (ambiguous — "scoped at"
+      vs. "scoped to"); `snapshot` (implies a consistency guarantee DynamoDB
+      cannot provide — a `FilterExpression` is not a snapshot read). `asOf`
+      is idiomatic and matches industry usage (Snowflake, Delta Lake, temporal
+      SQL).
+
+28. **Conflict-failure surfacing** — _resolved._ Separate `conflicts` bucket on
+    the return envelope. Final shape:
+
+    ```ts
+    {processed: number, skipped: number, failed: Array<{key, reason, details?}>,
+     conflicts: Array<{key, reason: 'VersionConflict'}>, cursor?: string}
+    ```
+
+    - `conflicts` is the subset of `ConditionalCheckFailedException` caused by
+      the `versionField` check — retry-worthy (re-read, reapply change, retry).
+    - `failed` is everything else (including `ifNotExists` / `ifExists`
+      condition failures and non-conflict errors).
+    - Distinguishing them is free at the call site: the toolkit knows which
+      condition it sent on each write. Tag the error as `conflict` vs. `failed`
+      in the per-item error handler.
+    - `reason` enum stays closed: `failed` reasons are `'ConditionalCheckFailed'
+      | 'ValidationException' | 'ProvisionedThroughputExceeded' | 'Unknown'`;
+      `conflicts` entries always `reason: 'VersionConflict'` (redundant but
+      consistent with the shape).
+
+29. **Key-migration caveat prominence** — _resolved._ Dedicated "Concurrency
+    caveats" section in W6 (mass-operation semantics wiki page), three
+    subsections:
+    1. **Optimistic concurrency via `versionField`** — when it helps (edits
+       during scan), when it doesn't (key migrations, insertions in already-
+       scanned range).
+    2. **Scope-freeze via `asOf`** — covers most insertion-during-scan cases
+       when the schema carries a `createdAtField`.
+    3. **Application-level locking** — only option for strict "nothing
+       changes during mass op" requirements. Pattern: set `locked: true` on
+       the parent before cascade, clear after. Toolkit does not ship a lock
+       primitive; two-line wiki example is enough.
+
+    No runtime guard. Document loudly; do not engineer.
+
+30. **Missed-item sweep** — _resolved._ Caller-composed. No toolkit-level
+    sweep option.
+    - The idempotent phases already make rerun safe and cheap. Callers who
+      want "rerun until cursor is empty" write a three-line loop.
+    - W6 recipe includes the one-liner:
+
+      ```js
+      let cursor;
+      do {
+        ({cursor, processed, conflicts} = await adapter.deleteAllByParams(
+          example,
+          {cursor, ifExists: true},
+        ));
+      } while (cursor);
+      ```
+
+    - Shipping a `{sweep: true}` option would hide the cursor mechanic from
+      callers who need to understand it. Docs win over magic.
 
 ### Marshalling helpers
 
-31. **Scope and API shape for standard-class marshalling.** Minimum set is
-    `marshallMap` / `reviveMap` and `marshallDate` / `reviveDate`. Open questions:
-    (a) which others pay off — `RegExp`, `URL`, maybe `Error`, Temporal API types
-    when they reach stage 4? (b) do the helpers live in a new `marshalling/`
-    submodule, or fold into an existing one (`paths/`, `adapter/`)? (c) API shape
-    — standalone functions the caller wires into `prepare` / `revive`
-    (simple, composable), or a declarative per-field schema like
-    `{marshalling: {tags: 'map', createdAt: 'date'}}` that auto-builds `prepare` /
-    `revive` (ergonomic but starts duplicating the adapter schema)? I lean
-    standalone functions for the first pass — the schema version is a bigger
-    design conversation and can come later if demand warrants.
-32. **Date encoding.** ISO string (sortable lexicographically, human-readable,
-    GSI-friendly as a sort key) or epoch number (compact, no timezone surprises,
-    also sortable)? Both have use cases. Possibly ship both
-    (`marshallDateISO` / `marshallDateEpoch`) with a recommendation rather than
-    picking one.
+31. **Scope and API shape for standard-class marshalling** — _resolved._
+    Ship set, naming, location, and shape consolidated here. See also Q31' below
+    for the parked registry follow-up.
+
+    **What SDK v3 handles natively** (we do not duplicate): primitives,
+    `Array`, plain `Object`, `Set` (homogeneous → `SS` / `NS` / `BS`),
+    `Uint8Array` / `Buffer` → `B`. With `convertClassInstanceToMap: true`, the
+    SDK coerces class instances and `Map` to `M` (lossy — loses `Map` key types
+    and identity). With `wrapNumbers: true`, high-precision numbers survive via
+    `NumberValue` wrappers.
+
+    **Toolkit ship set** — only types the SDK cannot round-trip faithfully:
+    - `Date` — SDK has no handling.
+    - `Map` (the JS class) — SDK coerces to `M` but drops key types and
+      ordering; round-tripping `Map<number, X>` loses the number keys.
+    - `URL` — SDK's Object-enumeration path yields `{}` (URL has no own
+      enumerable properties).
+
+    **Deferred:** `RegExp`, `Error`, Temporal API types (wait for stage 4 +
+    broad runtime support), any other classes — revisit when a concrete user
+    case surfaces.
+
+    **Naming in the SDK `marshall` / `unmarshall` family**:
+    - `marshallDateISO` / `unmarshallDateISO`
+    - `marshallDateEpoch` / `unmarshallDateEpoch`
+    - `marshallMap` / `unmarshallMap`
+    - `marshallURL` / `unmarshallURL`
+
+    Rationale (foundational SDK-helper principle): these helpers augment the
+    SDK marshalling layer — same verb family, same semantics, type-specific.
+    Users who know SDK's `marshall` recognise the pattern immediately.
+    Rejected: `dateToDb` / `fromDb` (invents vocabulary); `prepareDate` /
+    `reviveDate` (conflates with the hook-name abstraction layer).
+
+    **Module location: `src/marshalling/` standalone.** Not folded into
+    `src/adapter/` because these are composable primitives the user wires into
+    `prepare` / `revive` hooks (or patch builders, filter builders, anywhere
+    the value shows up). Separate concern from hook wiring.
+
+    **API shape: standalone functions, no declarative per-field schema in v1.**
+    Callers wire `item.createdAt = marshallDateISO(item.createdAt)` in their
+    `prepare` hook; symmetric `item.createdAt = unmarshallDateISO(...)` in
+    `revive`. Declarative schema (`{marshalling: {createdAt: 'date'}}`) would
+    add parallel vocabulary on top of the Adapter declaration — per the
+    foundational principle, not strictly needed when a one-line function call
+    already works.
+
+    **Container marshallers take an optional value-transform for
+    recursion/nesting.** Containers (`Map`, future `Array` if needed) accept a
+    second argument that lets callers compose per-value marshalling without a
+    runtime walker:
+
+    ```js
+    export const marshallMap = (map, valueTransform = x => x) => {...};
+    export const unmarshallMap = (obj, valueTransform = x => x) => {...};
+    ```
+
+    Usage:
+
+    ```js
+    // Map<string, Date>
+    item.timestamps = marshallMap(item.timestamps, marshallDateISO);
+    item.timestamps = unmarshallMap(item.timestamps, unmarshallDateISO);
+
+    // Map<string, Map<string, Date>>
+    item.nested = marshallMap(item.nested, inner =>
+      marshallMap(inner, marshallDateISO)
+    );
+
+    // Map<string, User> where User has a Date field
+    item.users = marshallMap(item.users, u => ({
+      ...u,
+      birthday: marshallDateISO(u.birthday),
+    }));
+    ```
+
+    Composition is explicit and reads top-down. Same pattern extends to
+    `marshallArray` if a case surfaces (SDK handles arrays fine for primitive
+    element types; toolkit would add this only to compose with nested class
+    values).
+
+    **Symmetry enforcement — documentation first, structure second:**
+    - Wiki callout on the marshalling page: "Every `marshallX` on a field
+      needs a symmetric `unmarshallX` in `revive` on the same field.
+      Asymmetric wiring corrupts data silently."
+    - TypeScript `Marshaller<TRuntime, TStored>` type pair in
+      `marshalling.d.ts` — nudge toward the right shape without forcing.
+    - Wiki test recipe: "Round-trip every marshalled field — call `prepare`,
+      then `revive`, assert deep-equal to original. Cheap; catches 100% of
+      forgotten pairs."
+
+31'. **Adapter-registry walker (future, parked for v2)** — _parked._ A
+    deeper-ergonomics layer: `adapter.addType(Ctor, marshallFn, unmarshallFn)`
+    registers a type → marshaller pair; `adapter.marshallObject(item)` /
+    `adapter.unmarshallObject(item)` walk the item recursively and apply
+    registered marshallers wherever they match.
+
+    - **Benefit:** pair-ness enforced by construction (register both together);
+      nested-type ergonomics simplify (register `Date` once, nested
+      `Map<string, Date>` just works).
+    - **Cost:** new Adapter concept (registration lifecycle + walker + realm-
+      crossing `instanceof` questions). Opt-in — zero runtime cost if
+      `addType` is never called.
+    - **Non-blocking:** the standalone functions remain the underlying
+      primitives; registry layers on top. Can ship in a later minor when a
+      concrete user hits the nested-Map ergonomics, or when a declarative
+      schema integration (zod, schema-from-TS-types) makes the registry the
+      natural bridge.
+
+32. **Date encoding — ISO or epoch** — _resolved._ Ship both explicitly; no
+    generic `marshallDate` alias.
+
+    - **`marshallDateISO` / `unmarshallDateISO`** — `Date` ↔
+      `"2026-04-21T22:15:30.000Z"`. Sortable lexicographically. Queryable with
+      `begins_with(sk, '2026-04')` for time-range buckets. Readable in the
+      console.
+    - **`marshallDateEpoch` / `unmarshallDateEpoch`** — `Date` ↔
+      `1745275530000` (ms since epoch). Arithmetic-friendly. Compact (8-byte
+      `N` vs. ~28-byte `S`). Preserved across timezone serialisation edge
+      cases because there's no timezone in the wire form.
+
+    **Why both:**
+    - ISO wins as a sort key, for `begins_with` time buckets, and for direct
+      human reading of the DB.
+    - Epoch wins for arithmetic (TTL, duration), for schemas needing smaller
+      storage at scale, and for avoiding round-trip surprises when the server
+      produces dates in multiple timezones.
+
+    **Why no default** (no bare `marshallDate`): forcing the encoding into the
+    call site kills a class of "which encoding did I pick?" bugs. One extra
+    word in the function name buys explicit intent. DynamoDB stores both
+    equally well (`S` or `N`); SDK treats both uniformly. The pick is a
+    design-time pattern — document the trade-off in the wiki, don't pick for
+    them.
+
+    **Deferred niceties:**
+    - `marshallDateISODate` (date-only, `"2026-04-21"`) — for schemas storing
+      calendar dates without timezone ambiguity.
+    - Temporal-aware variants (`Temporal.Instant`, `Temporal.PlainDate`, …) —
+      wait for stage 4.
 
 ### Projection ergonomics
 
-34. **Strong-consistency on index-backed queries.** `GetOptions.consistent: true`
-    already threads `ConsistentRead` through. DynamoDB accepts it on base-table and
-    LSI Query; rejects it on GSI Query. What does the toolkit do when the caller
-    asks for consistent read on a GSI-backed query? Options: (a) refuse up front
-    with a clear error; (b) silently fall back to eventually consistent; (c)
-    surface DynamoDB's native rejection unchanged. I lean (a) — refusal is
-    explicit and prevents silent correctness surprises.
-35. **LSI vs. GSI selection when both apply.** For a partition-bounded query with
-    a requested sort, if both an LSI and a GSI would satisfy it, the toolkit
-    should prefer LSI (cheaper, consistency-capable). Open: is this an automatic
-    preference from the index schema, or does the caller have to hint? I lean
-    automatic with an explicit override (`useIndex: 'explicit-name'`) for the
-    rare case where the caller knows better.
-36. **10 GB per-partition LSI hazard.** Runtime detection is impractical and the
-    toolkit cannot guard against it. Open: do we add a check at `prepare()` time
-    that refuses writes when the partition is approaching the cap (requires a
-    size query), or is this entirely a design-time documentation problem? I
-    lean documentation only — runtime guards cost RCU for every write.
+All resolved 2026-04-21 (second session). Detailed rationale in
+[[projects/dynamodb-toolkit/decisions]] §"Projection ergonomics — Q34–Q37".
 
-37. **Keys-only list shortcut.** Callers that want just the keys today must write
-    `?fields=state,rentalName,carVin` — verbose and breaks encapsulation because
-    the caller has to know the key schema. Options: (a) `?keys` (boolean query
-    flag, smallest URL); (b) `?fields=*keys` (wildcard-marker style, consistent
-    with a future `*` for "everything"); (c) `keysOnly=true` on the programmatic
-    API with a query-param alias. This interacts with Q4 / Q7 on filter grammar:
-    whatever wildcard convention we pick should generalise (e.g., if we later
-    add `?fields=*all` for full projection, the `*keys` form fits). I lean
-    `?fields=*keys` for consistency with the eventual fields-wildcard family.
+34. **Strong-consistency on GSI Query** — _resolved._ **Refuse up front with
+    `ConsistentReadOnGSIRejected`.** DynamoDB rejects `ConsistentRead: true`
+    on GSI Query; the toolkit knows the constraint and names it before
+    sending, with an error message citing the AWS doc and suggesting an LSI
+    as the alternative. Rejected: silent fall-back (degrades correctness
+    without caller awareness); surface SDK error as-is (misses the chance to
+    help). Aligns with the no-client-side-list-manipulation principle —
+    toolkit refuses rather than synthesising a degraded answer.
+
+35. **LSI vs. GSI selection when both apply** — _resolved (corrected
+    2026-04-21 second session)._ Automatic preference for LSI via:
+
+    1. `useIndex: '<name>'` explicit — honoured verbatim.
+    2. Query provides the base table's partition-key value **AND** the
+       requested sort / filter field matches an LSI's sort key — select
+       that LSI.
+    3. Otherwise, select the first GSI whose key schema can serve the
+       request.
+    4. **No index matches → refuse with `NoIndexForSortField`.** No
+       in-memory sort (per the no-client-side-list-manipulation principle).
+       Error suggests declaring an LSI / GSI or dropping the sort param.
+
+    LSI wins when viable because it's cheaper (shared capacity with base
+    table) and supports strong consistency. Callers who know better
+    override with `useIndex`.
+
+36. **10 GB per-partition LSI hazard** — _resolved._ Documentation only, no
+    runtime guard. Runtime detection would add an RCU cost per write for an
+    edge case; the partition-size signal comes from `DescribeTable` or a
+    maintained counter, both expensive to sniff. Document in W4 (multi-type
+    tables) and W6 (mass-operation semantics): LSIs share partition capacity
+    with the base table; combined content counts toward the 10 GB cap. Use
+    GSIs (auto-spread across partitions) when the base table can approach
+    that size per partition. When DynamoDB raises
+    `ItemCollectionSizeLimitExceededException`, the toolkit re-raises with
+    the AWS doc link — no magic resolution, signpost only.
+
+37. **Keys-only list shortcut** — _resolved._ Two aliases for the same
+    result, aligned with a future wildcard family:
+
+    - **REST wire**: `?fields=*keys`. Consistent with a future
+      `?fields=*all` (full projection) and any other `?fields=*<slice>`
+      predefined subsets. Keeps the `?fields=` surface uniform.
+    - **Programmatic**: `adapter.getAllByParams(example, {keysOnly: true})`.
+      Reads naturally at the call site; compiles to `?fields=*keys` when
+      routed through the REST handler.
+
+    Both are legitimate entry points. Rejected `?keys` (doesn't compose
+    with the `?fields=` wildcard family). Parses to
+    `ProjectionExpression: <keyFields joined, plus structural-key field>`.
+    No caller needs to know the key schema; the toolkit expands `*keys`
+    from the Adapter declaration.
 
 38. **Async primitives audit (verify, not build)** — _resolved._ Toolkit is closer
     than expected. Already present:
@@ -1266,35 +1611,116 @@ Proposed features from §"Table lifecycle — friction observed in v2". Prerequi
 Cluster 3 settled, since T1 / T2 drive from whatever GSI / LSI / sparse-index shape
 Q16 / Q17 / Q18 pin down.
 
-39. **T1 surface shape.** `adapter.ensureTable()` as an Adapter method, a separate
-    module-level helper (`import {ensureTable} from 'dynamodb-toolkit/provisioning'`),
-    or a CLI (`dynamodb-toolkit ensure-table <adapter-path>`)? Lean: module-level
-    helper + thin CLI wrapper. Keeps the Adapter runtime zero-cost for consumers who
-    provision via IaC; provisioning is a tool, not a method.
-40. **T1 destructive-op policy.** Safe: `CreateTable` when absent; `UpdateTable` to
-    add GSIs. Refuse: LSI addition post-creation (impossible), GSI deletion (data
-    loss), PK / sort-key change (impossible), table deletion (always caller's
-    explicit `dropTable()` if we even ship one — probably not). Print a plan and
-    require confirmation (or `--yes` on the CLI) before any write. Open: do we
-    support `--dry-run` that prints CloudFormation-equivalent JSON, or just a plain-
-    text plan?
-41. **T2 verification scope.** `adapter.verifyTable()` compares: key schema, GSI key
-    schemas + projection specs, LSI key schemas + projection, billing mode (optional),
-    stream config (optional). Open: does verification report as a structured result
-    (`{ok, diffs: [...]}`), throw on mismatch, or both modes? Lean: structured result
-    by default, `{throwOnMismatch: true}` option for CI.
-42. **Descriptor record — yes / no / optional.** A reserved record (e.g., key
-    `__adapter__` or `__toolkit__`) carrying a serialised snapshot of the adapter's
-    declaration. Adds value when: multiple adapters share a table; verification wants
-    to catch changes `DescribeTable` cannot see (field marshalling, search mirrors,
-    version-field name). Costs: reserved-key namespace pollution; coordination when
-    multiple adapters contribute. Lean: opt-in via `{descriptorKey: '__adapter__'}`,
-    defaults off. Shape: JSON document with `{version, generatedAt, keyFields,
-structuralIndex, gsis, lsis, sparseFields, marshalling}`; adapters that opt in
-    write on first `ensureTable` / `verifyTable` and re-check on subsequent calls.
-43. **Interaction with IaC workflows.** Teams running Terraform / CDK /
-    CloudFormation own the table and do not want the toolkit touching it. T1 must
-    be opt-in; T2 must be read-only. Open: should T2 skip gracefully when the
-    descriptor record is absent (implying "not a toolkit-managed table"), or treat
-    its absence as a verify failure unless `{allowMissingDescriptor: true}`? Lean:
-    absent descriptor is fine; only declared-vs-actual schema mismatches fail.
+All resolved 2026-04-21 (second session). Throughout: **IaC** = Infrastructure
+as Code (Terraform / AWS CDK / CloudFormation / Pulumi — declarative tools that
+version-control cloud resources).
+
+39. **T1 surface shape** — _resolved._ **Module-level helper + thin CLI
+    wrapper, not an Adapter method.**
+    - `import {ensureTable, verifyTable} from 'dynamodb-toolkit/provisioning'`
+      — programmatic entry point. Accepts an Adapter instance (or a bare
+      declaration object) and a DynamoDB client.
+    - `dynamodb-toolkit ensure-table <adapter-module>` — CLI that imports the
+      module, extracts its declaration, and calls the helper.
+    - **Not an Adapter method** because IaC-based deployments provision the
+      table via Terraform / CDK / CloudFormation and do not want the Adapter
+      runtime touching schema. Keeping provisioning in a separate submodule
+      keeps the Adapter runtime cost zero for those users.
+
+40. **T1 destructive-op policy + dry-run format** — _resolved (2026-04-21
+    second session)._ **Toolkit owns policy; DynamoDB owns legality.**
+
+    **Toolkit generates ADD-only plans:**
+    - `CreateTable` when absent.
+    - `UpdateTable` with `GlobalSecondaryIndexUpdates: [{Create: {...}}]` for
+      missing GSIs.
+
+    **Toolkit never emits destructive operations** (policy, not DynamoDB
+    restriction):
+    - No `DeleteTable` — users drop tables via AWS CLI / SDK if truly needed.
+    - No `UpdateTable` with `{Delete: {...}}` for GSIs. GSIs present in the
+      live table but absent from the declaration are **reported** ("extra GSI
+      `<name>` not in declaration — skipped") — no action taken.
+    - No throughput updates in v1 (scope creep).
+
+    **Toolkit does NOT pre-check DynamoDB's legality constraints.** If the
+    declaration requests something DynamoDB cannot do (LSI on existing table,
+    key-schema change), the toolkit still emits the intended operation; the
+    SDK rejects at execution; the error surfaces unchanged. DynamoDB is
+    authoritative for what is legal. This keeps toolkit code minimal and
+    prevents drift from AWS's evolving rules.
+
+    **Confirmation gate:**
+    - CLI: `--yes` required before any mutating call. Default prints the
+      plan and exits.
+    - Programmatic: `{yes: true}` option on `ensureTable`. Default returns
+      the plan without writing.
+
+    **Dry-run output: plain-text plan only.**
+    - `"Would CREATE table Rentals"`, `"Would ADD GSI by-status-date
+      (pk=status, sk=createdAt)"`, `"Extra GSI by-legacy present in table,
+      not in declaration (skipped)"`.
+    - No CloudFormation-equivalent JSON in v1 — would invite "generate CFN
+      from Adapter declaration" feature-creep and duplicate the declaration
+      in a different syntax.
+
+41. **T2 verification scope + report vs. throw** — _resolved._ **Structured
+    result by default, `{throwOnMismatch: true}` option.**
+    - `verifyTable(adapter, {throwOnMismatch?})` returns
+      `{ok: boolean, diffs: Array<{path, expected, actual, severity}>}`.
+    - **Compares**: key schema, GSI key schemas + projection specs, LSI key
+      schemas + projection. Billing mode and stream config compared only when
+      declared on the Adapter (optional — not every Adapter pins these).
+    - `throwOnMismatch: true` makes it throw `TableVerificationFailed` with
+      the same diff structure. For CI use.
+    - Default structured return lets callers log + continue with a warning
+      rather than halting the process.
+    - Verification does not validate the declaration's internal consistency
+      — DynamoDB would reject a bad declaration at `CreateTable` time; a
+      nonsensical declaration that never provisioned produces
+      `TableNotFound` or wall-to-wall diffs. User fixes their declaration.
+
+42. **Descriptor record** — _resolved._ **Opt-in via
+    `{descriptorKey: '__adapter__'}`; defaults off.** Shape pinned.
+    - **When opted in**: `ensureTable` (and the first `verifyTable` against a
+      table without one) writes a reserved-key record carrying a JSON snapshot
+      of the Adapter declaration. Subsequent `verifyTable` reads and
+      compares.
+    - **Detects what `DescribeTable` cannot**: marshalling helpers in use,
+      search-mirror field names, `versionField` / `createdAtField` names,
+      `filterable` allowlist, sparse-index predicates.
+    - **Shape** (JSON body of the descriptor record):
+
+      ```json
+      {
+        "version": 1,
+        "generatedAt": "2026-04-21T22:00:00.000Z",
+        "adapter": "<name>",
+        "keyFields": [...],
+        "structuralKey": {...},
+        "indices": {...},
+        "searchable": {...},
+        "filterable": {...},
+        "marshalling": {...},
+        "versionField": "...",
+        "createdAtField": "..."
+      }
+      ```
+
+    - **Real payoff** when two Adapters share a table (multi-type tables) and
+      need consistency. Single-Adapter tables rarely need the descriptor.
+
+43. **Interaction with IaC workflows** — _resolved._ **Absent descriptor is
+    fine by default; only declared-vs-actual schema mismatches fail
+    verification.**
+    - **Default behaviour**: `verifyTable` treats missing descriptor as
+      neutral — most tables are IaC-managed and never had the toolkit write
+      anything. Treating absence as failure would break every Terraform /
+      CDK / CloudFormation deployment.
+    - **Opt-in strictness**: `{requireDescriptor: true}` option on
+      `verifyTable` for the minority who want "this table must have been
+      provisioned by the toolkit." Fails when descriptor is missing.
+    - **IaC-managed tables**: skip T1 entirely (they own `CreateTable`). Run
+      T2 on boot or in CI as a drift check against the Adapter declaration.
+    - **Toolkit-managed tables**: run T1 at setup, T2 at boot. Descriptor
+      record (if opted in) makes the "toolkit-managed" status self-verifying.
