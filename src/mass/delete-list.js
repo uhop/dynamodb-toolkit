@@ -22,7 +22,7 @@ export const deleteList = async (client, params, keyFn = identity) => {
   return processed;
 };
 
-export const deleteListByKeys = async (client, tableName, keys) =>
+export const deleteByKeys = async (client, tableName, keys) =>
   applyBatch(
     client,
     keys.map(key => ({action: 'delete', params: {TableName: tableName, Key: key}}))

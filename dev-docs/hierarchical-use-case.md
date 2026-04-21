@@ -1154,6 +1154,7 @@ above.
     `false` (skip populating) or silent `true` (populate) both hide bugs
     and are rejected. See §"User-supplied callbacks throw; toolkit does
     not wrap" for the general rule this applies.
+
 18. **Sort-parameter → GSI inference** — _resolved (corrected 2026-04-21 second
     session)._ Automatic from the index declaration: `?sort=<field>` (or
     `?sort=-<field>` for descending) finds the index whose `sk.field === <field>`.
@@ -1179,12 +1180,12 @@ pinned write model" below.
     (`{maxItems, resumeToken, ifNotExists}`).
 21. **Return shape** — _resolved (updated 2026-04-21 second session with
     `sdkError` per D3)._ `{processed: number, skipped: number, failed:
-    Array<{key, reason, details?, sdkError?}>, conflicts:
-    Array<{key, reason: 'VersionConflict', sdkError?}>, cursor?: string}`.
+Array<{key, reason, details?, sdkError?}>, conflicts:
+Array<{key, reason: 'VersionConflict', sdkError?}>, cursor?: string}`.
     `failed` carries `{key, reason, details?, sdkError?}` pairs, _not_ full
     items (recoverable via `BatchGetItem` if truly needed). `reason` is a
     closed enum: `'ConditionalCheckFailed' | 'ValidationException' |
-    'ProvisionedThroughputExceeded' | 'Unknown'`. Callers switch on known
+'ProvisionedThroughputExceeded' | 'Unknown'`. Callers switch on known
     values and log `'Unknown'`. **`sdkError?: unknown`** carries the raw SDK
     error instance when available — preserves error-class identity, stack,
     and raw fields (e.g., `CancellationReasons` on transaction failures) for
@@ -1208,13 +1209,13 @@ pinned write model" below.
     (chosen at call time from the options bag — no Adapter-declaration dependency,
     since primary-key components always change):
 
-    | Case                                                 | Strategy                                             | Round trips          |
-    | ---------------------------------------------------- | ---------------------------------------------------- | -------------------- |
-    | Clone, no conditions, no `versionField`              | `BatchWriteItem` (Put chunks)                        | ~1 per 25 items      |
-    | Move, no conditions, no `versionField`               | `BatchWriteItem` (Put + Delete pairs, chunked)       | ~1 per 25 items      |
-    | Any case with `{ifNotExists}` / `{ifExists}`         | per-item `PutItem` (+ `DeleteItem`) + `ConditionExpression` | 1× per item   |
-    | Any case with `versionField`                         | per-item `PutItem` + version `ConditionExpression`   | 1× per item          |
-    | Transactional atomicity (future option)              | `TransactWriteItems` (100 ops max)                   | ~1 per 100 items     |
+    | Case                                         | Strategy                                                    | Round trips      |
+    | -------------------------------------------- | ----------------------------------------------------------- | ---------------- |
+    | Clone, no conditions, no `versionField`      | `BatchWriteItem` (Put chunks)                               | ~1 per 25 items  |
+    | Move, no conditions, no `versionField`       | `BatchWriteItem` (Put + Delete pairs, chunked)              | ~1 per 25 items  |
+    | Any case with `{ifNotExists}` / `{ifExists}` | per-item `PutItem` (+ `DeleteItem`) + `ConditionExpression` | 1× per item      |
+    | Any case with `versionField`                 | per-item `PutItem` + version `ConditionExpression`          | 1× per item      |
+    | Transactional atomicity (future option)      | `TransactWriteItems` (100 ops max)                          | ~1 per 100 items |
 
     `mapFn` runs in the chunk-builder loop; destination keys are resolved per-item as
     the loop iterates. Document the latency delta in the W6 wiki recipe (BatchWrite
@@ -1253,7 +1254,7 @@ pinned write model" below.
 
 25. **`edit` × key-field change detection** — _resolved._ **Default: throw
     `KeyFieldChanged`** with `"edit() cannot change key fields [<fields>]. Use
-    adapter.move() instead, or pass {allowKeyChange: true}."`. Escape hatch:
+adapter.move() instead, or pass {allowKeyChange: true}."`. Escape hatch:
     **`{allowKeyChange: true}` opts into auto-promotion to `move`** — the toolkit
     detects the key-field change in the diff and switches to the clone+delete path
     transparently. Silent auto-promotion (the naive "just do the right thing")
@@ -1292,21 +1293,17 @@ for Q29 lands in W6.
 
 26. **`versionField` Adapter option** — _resolved._ Opt-in per Adapter:
     `{versionField: 'v'}`. Validation: when `technicalPrefix` is declared, the
-    field name must start with it (so it auto-strips on revive).
-    - **Initial-insert guard**: canonical optimistic-concurrency form
-      `attribute_not_exists(<pk>) OR <versionField> = :v`. One condition
-      handles both the first-write (no prior version) and subsequent-write
-      cases.
-    - **Auto-increment on every successful write** (put + update). The toolkit
-      bumps `<versionField>` by 1 and re-asserts the old value. Exempting
-      patch would create a silent blind spot where two concurrent patches can
-      clobber each other without noticing — the whole point of `versionField`
-      is optimistic concurrency across all writes.
-    - **Delete**: conditional on version match (`ConditionExpression:
-      <versionField> = :v`), does **not** increment (record is gone).
-    - **Surprise mitigation**: documented loudly on the Adapter-declaration
-      wiki page — "do not declare `versionField` unless you plan to
-      round-trip it on every write."
+    field name must start with it (so it auto-strips on revive). - **Initial-insert guard**: canonical optimistic-concurrency form
+    `attribute_not_exists(<pk>) OR <versionField> = :v`. One condition
+    handles both the first-write (no prior version) and subsequent-write
+    cases. - **Auto-increment on every successful write** (put + update). The toolkit
+    bumps `<versionField>` by 1 and re-asserts the old value. Exempting
+    patch would create a silent blind spot where two concurrent patches can
+    clobber each other without noticing — the whole point of `versionField`
+    is optimistic concurrency across all writes. - **Delete**: conditional on version match (`ConditionExpression:
+<versionField> = :v`), does **not** increment (record is gone). - **Surprise mitigation**: documented loudly on the Adapter-declaration
+    wiki page — "do not declare `versionField` unless you plan to
+    round-trip it on every write."
 
 27. **`asOf` scope-freeze helper** — _resolved._
     - **Shape**: `{asOf: Date | string}` option on mass ops and list-paginate
@@ -1325,22 +1322,20 @@ for Q29 lands in W6.
 28. **Conflict-failure surfacing** — _resolved._ Separate `conflicts` bucket on
     the return envelope. Final shape:
 
-    ```ts
-    {processed: number, skipped: number, failed: Array<{key, reason, details?}>,
-     conflicts: Array<{key, reason: 'VersionConflict'}>, cursor?: string}
-    ```
+        ```ts
+        {processed: number, skipped: number, failed: Array<{key, reason, details?}>,
+         conflicts: Array<{key, reason: 'VersionConflict'}>, cursor?: string}
+        ```
 
-    - `conflicts` is the subset of `ConditionalCheckFailedException` caused by
-      the `versionField` check — retry-worthy (re-read, reapply change, retry).
-    - `failed` is everything else (including `ifNotExists` / `ifExists`
-      condition failures and non-conflict errors).
-    - Distinguishing them is free at the call site: the toolkit knows which
-      condition it sent on each write. Tag the error as `conflict` vs. `failed`
-      in the per-item error handler.
-    - `reason` enum stays closed: `failed` reasons are `'ConditionalCheckFailed'
-      | 'ValidationException' | 'ProvisionedThroughputExceeded' | 'Unknown'`;
-      `conflicts` entries always `reason: 'VersionConflict'` (redundant but
-      consistent with the shape).
+        - `conflicts` is the subset of `ConditionalCheckFailedException` caused by
+          the `versionField` check — retry-worthy (re-read, reapply change, retry).
+        - `failed` is everything else (including `ifNotExists` / `ifExists`
+          condition failures and non-conflict errors).
+        - Distinguishing them is free at the call site: the toolkit knows which
+          condition it sent on each write. Tag the error as `conflict` vs. `failed`
+          in the per-item error handler.
+
+    - `reason` enum stays closed: `failed` reasons are `'ConditionalCheckFailed' | 'ValidationException' | 'ProvisionedThroughputExceeded' | 'Unknown'`; `conflicts` entries always `reason: 'VersionConflict'` (redundant but consistent with the shape).
 
 29. **Key-migration caveat prominence** — _resolved._ Dedicated "Concurrency
     caveats" section in W6 (mass-operation semantics wiki page), three
@@ -1366,10 +1361,7 @@ for Q29 lands in W6.
       ```js
       let cursor;
       do {
-        ({cursor, processed, conflicts} = await adapter.deleteAllByParams(
-          example,
-          {cursor, ifExists: true},
-        ));
+        ({cursor, processed, conflicts} = await adapter.deleteAllByParams(example, {cursor, ifExists: true}));
       } while (cursor);
       ```
 
@@ -1443,14 +1435,12 @@ for Q29 lands in W6.
     item.timestamps = unmarshallMap(item.timestamps, unmarshallDateISO);
 
     // Map<string, Map<string, Date>>
-    item.nested = marshallMap(item.nested, inner =>
-      marshallMap(inner, marshallDateISO)
-    );
+    item.nested = marshallMap(item.nested, inner => marshallMap(inner, marshallDateISO));
 
     // Map<string, User> where User has a Date field
     item.users = marshallMap(item.users, u => ({
       ...u,
-      birthday: marshallDateISO(u.birthday),
+      birthday: marshallDateISO(u.birthday)
     }));
     ```
 
@@ -1470,10 +1460,10 @@ for Q29 lands in W6.
       forgotten pairs."
 
 31'. **Adapter-registry walker (future, parked for v2)** — _parked._ A
-    deeper-ergonomics layer: `adapter.addType(Ctor, marshallFn, unmarshallFn)`
-    registers a type → marshaller pair; `adapter.marshallObject(item)` /
-    `adapter.unmarshallObject(item)` walk the item recursively and apply
-    registered marshallers wherever they match.
+deeper-ergonomics layer: `adapter.addType(Ctor, marshallFn, unmarshallFn)`
+registers a type → marshaller pair; `adapter.marshallObject(item)` /
+`adapter.unmarshallObject(item)` walk the item recursively and apply
+registered marshallers wherever they match.
 
     - **Benefit:** pair-ness enforced by construction (register both together);
       nested-type ergonomics simplify (register `Date` once, nested
@@ -1489,7 +1479,6 @@ for Q29 lands in W6.
 
 32. **Date encoding — ISO or epoch** — _resolved._ Ship both explicitly; no
     generic `marshallDate` alias.
-
     - **`marshallDateISO` / `unmarshallDateISO`** — `Date` ↔
       `"2026-04-21T22:15:30.000Z"`. Sortable lexicographically. Queryable with
       `begins_with(sk, '2026-04')` for time-range buckets. Readable in the
@@ -1535,7 +1524,6 @@ All resolved 2026-04-21 (second session). Detailed rationale in
 
 35. **LSI vs. GSI selection when both apply** — _resolved (corrected
     2026-04-21 second session)._ Automatic preference for LSI via:
-
     1. `useIndex: '<name>'` explicit — honoured verbatim.
     2. Query provides the base table's partition-key value **AND** the
        requested sort / filter field matches an LSI's sort key — select
@@ -1563,7 +1551,6 @@ All resolved 2026-04-21 (second session). Detailed rationale in
 
 37. **Keys-only list shortcut** — _resolved._ Two aliases for the same
     result, aligned with a future wildcard family:
-
     - **REST wire**: `?fields=*keys`. Consistent with a future
       `?fields=*all` (full projection) and any other `?fields=*<slice>`
       predefined subsets. Keeps the `?fields=` surface uniform.
@@ -1630,39 +1617,39 @@ version-control cloud resources).
 40. **T1 destructive-op policy + dry-run format** — _resolved (2026-04-21
     second session)._ **Toolkit owns policy; DynamoDB owns legality.**
 
-    **Toolkit generates ADD-only plans:**
-    - `CreateTable` when absent.
-    - `UpdateTable` with `GlobalSecondaryIndexUpdates: [{Create: {...}}]` for
-      missing GSIs.
+        **Toolkit generates ADD-only plans:**
+        - `CreateTable` when absent.
+        - `UpdateTable` with `GlobalSecondaryIndexUpdates: [{Create: {...}}]` for
+          missing GSIs.
 
-    **Toolkit never emits destructive operations** (policy, not DynamoDB
-    restriction):
-    - No `DeleteTable` — users drop tables via AWS CLI / SDK if truly needed.
-    - No `UpdateTable` with `{Delete: {...}}` for GSIs. GSIs present in the
-      live table but absent from the declaration are **reported** ("extra GSI
-      `<name>` not in declaration — skipped") — no action taken.
-    - No throughput updates in v1 (scope creep).
+        **Toolkit never emits destructive operations** (policy, not DynamoDB
+        restriction):
+        - No `DeleteTable` — users drop tables via AWS CLI / SDK if truly needed.
+        - No `UpdateTable` with `{Delete: {...}}` for GSIs. GSIs present in the
+          live table but absent from the declaration are **reported** ("extra GSI
+          `<name>` not in declaration — skipped") — no action taken.
+        - No throughput updates in v1 (scope creep).
 
-    **Toolkit does NOT pre-check DynamoDB's legality constraints.** If the
-    declaration requests something DynamoDB cannot do (LSI on existing table,
-    key-schema change), the toolkit still emits the intended operation; the
-    SDK rejects at execution; the error surfaces unchanged. DynamoDB is
-    authoritative for what is legal. This keeps toolkit code minimal and
-    prevents drift from AWS's evolving rules.
+        **Toolkit does NOT pre-check DynamoDB's legality constraints.** If the
+        declaration requests something DynamoDB cannot do (LSI on existing table,
+        key-schema change), the toolkit still emits the intended operation; the
+        SDK rejects at execution; the error surfaces unchanged. DynamoDB is
+        authoritative for what is legal. This keeps toolkit code minimal and
+        prevents drift from AWS's evolving rules.
 
-    **Confirmation gate:**
-    - CLI: `--yes` required before any mutating call. Default prints the
-      plan and exits.
-    - Programmatic: `{yes: true}` option on `ensureTable`. Default returns
-      the plan without writing.
+        **Confirmation gate:**
+        - CLI: `--yes` required before any mutating call. Default prints the
+          plan and exits.
+        - Programmatic: `{yes: true}` option on `ensureTable`. Default returns
+          the plan without writing.
 
-    **Dry-run output: plain-text plan only.**
-    - `"Would CREATE table Rentals"`, `"Would ADD GSI by-status-date
-      (pk=status, sk=createdAt)"`, `"Extra GSI by-legacy present in table,
-      not in declaration (skipped)"`.
-    - No CloudFormation-equivalent JSON in v1 — would invite "generate CFN
-      from Adapter declaration" feature-creep and duplicate the declaration
-      in a different syntax.
+        **Dry-run output: plain-text plan only.**
+        - `"Would CREATE table Rentals"`, `"Would ADD GSI by-status-date
+
+    (pk=status, sk=createdAt)"`, `"Extra GSI by-legacy present in table,
+    not in declaration (skipped)"`. - No CloudFormation-equivalent JSON in v1 — would invite "generate CFN
+    from Adapter declaration" feature-creep and duplicate the declaration
+    in a different syntax.
 
 41. **T2 verification scope + report vs. throw** — _resolved._ **Structured
     result by default, `{throwOnMismatch: true}` option.**

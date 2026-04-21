@@ -172,14 +172,18 @@ test('REST: GET /:key with fields projection', t =>
     t.equal(body.diameter, undefined);
   }));
 
-test('REST: GET /-by-names returns plain array', t =>
+test('REST: GET /-by-names returns length-preserving array with null at misses', t =>
   run(t, async base => {
     const res = await fetch(`${base}/-by-names?names=Hoth,Endor,Bespin,XX&fields=name,diameter`);
     const body = await json(res);
     t.ok(Array.isArray(body));
-    t.equal(body.length, 3, 'XX silently dropped');
-    const sorted = body.map(p => p.name).sort();
-    t.deepEqual(sorted, ['Bespin', 'Endor', 'Hoth']);
+    t.equal(body.length, 4, 'length matches requested names count');
+    // Length-preserving: result[i] corresponds to names[i]. The missing 'XX'
+    // becomes null on the wire (undefined in JS → JSON.stringify → null).
+    t.equal(body[3], null, 'XX missing → null at position 3');
+    // Found items in whichever position their name was requested.
+    const nameAt = i => body[i]?.name;
+    t.deepEqual([nameAt(0), nameAt(1), nameAt(2)], ['Hoth', 'Endor', 'Bespin']);
   }));
 
 // --- collection writes ---

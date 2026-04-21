@@ -211,16 +211,20 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   getByKey(key: TKey | Raw<TKey>, fields?: string | string[] | null, options?: GetOptions): Promise<TItem | undefined>;
 
   /**
-   * Fetch multiple items by key via `BatchGetItem`. Missing keys are silently
-   * dropped. Order is not guaranteed.
+   * Fetch multiple items by key via `BatchGetItem`. Bulk-individual read — the
+   * caller supplies the set and the order; the result is length-preserving
+   * with `undefined` at positions whose key had no matching item. With an
+   * indirect-index hit, automatically performs a second-hop BatchGet against
+   * the base table.
    *
-   * @param keys Keys to fetch.
+   * @param keys Keys to fetch, in the desired result order.
    * @param fields Optional projection spec.
    * @param options Consistency / revive / indirection / extra params.
-   * @returns The found items — may be shorter than `keys` (misses drop out) and in
-   *   arbitrary order (DynamoDB doesn't preserve caller order).
+   * @returns Array aligned 1:1 with `keys` — `result[i]` is the revived item
+   *   for `keys[i]`, or `undefined` when that key had no matching item.
+   *   Callers who want a compact array call `.filter(Boolean)` themselves.
    */
-  getByKeys(keys: (TKey | Raw<TKey>)[], fields?: string | string[] | null, options?: GetOptions): Promise<TItem[]>;
+  getByKeys(keys: (TKey | Raw<TKey>)[], fields?: string | string[] | null, options?: GetOptions): Promise<(TItem | undefined)[]>;
 
   /**
    * Paginated list of items, built via the `prepareListInput` hook.

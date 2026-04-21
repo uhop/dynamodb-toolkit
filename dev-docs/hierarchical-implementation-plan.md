@@ -170,7 +170,7 @@ Mass clone / move / edit become resumable, failure-buckets become structured, in
     ifNotExists?: boolean;
     ifExists?: boolean;
     maxItems?: number;
-    resumeToken?: string;  // opaque cursor
+    resumeToken?: string; // opaque cursor
     // + op-specific: mapFn, readFields, allowKeyChange, ...
   };
   ```
@@ -179,8 +179,13 @@ Mass clone / move / edit become resumable, failure-buckets become structured, in
   type MassOpResult = {
     processed: number;
     skipped: number;
-    failed: Array<{key, reason: 'ConditionalCheckFailed' | 'ValidationException' | 'ProvisionedThroughputExceeded' | 'Unknown', details?: string, sdkError?: unknown}>;
-    conflicts: Array<{key, reason: 'VersionConflict', sdkError?: unknown}>;
+    failed: Array<{
+      key;
+      reason: 'ConditionalCheckFailed' | 'ValidationException' | 'ProvisionedThroughputExceeded' | 'Unknown';
+      details?: string;
+      sdkError?: unknown;
+    }>;
+    conflicts: Array<{key; reason: 'VersionConflict'; sdkError?: unknown}>;
     cursor?: string;
   };
   ```

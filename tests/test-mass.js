@@ -1,16 +1,5 @@
 import test from 'tape-six';
-import {
-  paginateList,
-  iterateList,
-  iterateItems,
-  readOrderedListByKeys,
-  writeList,
-  deleteList,
-  deleteListByKeys,
-  copyList,
-  moveList,
-  getTotal
-} from 'dynamodb-toolkit/mass';
+import {paginateList, iterateList, iterateItems, readByKeys, writeList, deleteList, deleteByKeys, copyList, moveList, getTotal} from 'dynamodb-toolkit/mass';
 import {makeMockClient} from './helpers/mock-client.js';
 
 // Helper: make a simple scan-like mock that returns all items in one page
@@ -76,9 +65,9 @@ test('iterateItems: yields individual items', async t => {
   t.equal(items[1].id, '2');
 });
 
-// readOrderedListByKeys
+// readByKeys
 
-test('readOrderedListByKeys: preserves caller key order', async t => {
+test('readByKeys: preserves caller key order', async t => {
   const client = makeMockClient(async () => ({
     Responses: {
       T: [
@@ -89,23 +78,23 @@ test('readOrderedListByKeys: preserves caller key order', async t => {
     },
     UnprocessedKeys: {}
   }));
-  const result = await readOrderedListByKeys(client, 'T', [{name: 'A'}, {name: 'B'}, {name: 'C'}]);
+  const result = await readByKeys(client, 'T', [{name: 'A'}, {name: 'B'}, {name: 'C'}]);
   t.equal(result[0].val, 1, 'A first');
   t.equal(result[1].val, 2, 'B second');
   t.equal(result[2].val, 3, 'C third');
 });
 
-test('readOrderedListByKeys: missing keys return undefined', async t => {
+test('readByKeys: missing keys return undefined', async t => {
   const client = makeMockClient(async () => ({
     Responses: {T: [{name: 'A', val: 1}]},
     UnprocessedKeys: {}
   }));
-  const result = await readOrderedListByKeys(client, 'T', [{name: 'A'}, {name: 'MISSING'}]);
+  const result = await readByKeys(client, 'T', [{name: 'A'}, {name: 'MISSING'}]);
   t.equal(result[0].val, 1);
   t.equal(result[1], undefined);
 });
 
-test('readOrderedListByKeys: record with partition-key value "__proto__" does not pollute Object.prototype', async t => {
+test('readByKeys: record with partition-key value "__proto__" does not pollute Object.prototype', async t => {
   const client = makeMockClient(async () => ({
     Responses: {
       T: [
@@ -115,7 +104,7 @@ test('readOrderedListByKeys: record with partition-key value "__proto__" does no
     },
     UnprocessedKeys: {}
   }));
-  const result = await readOrderedListByKeys(client, 'T', [
+  const result = await readByKeys(client, 'T', [
     {pk: '__proto__', sk: 'x'},
     {pk: 'real', sk: 'y'}
   ]);
@@ -143,11 +132,11 @@ test('writeList: applies mapFn', async t => {
   t.ok(written[0].extra, 'mapFn applied');
 });
 
-// deleteListByKeys
+// deleteByKeys
 
-test('deleteListByKeys: deletes by keys', async t => {
+test('deleteByKeys: deletes by keys', async t => {
   const client = makeMockClient(async () => ({UnprocessedItems: {}}));
-  const count = await deleteListByKeys(client, 'T', [{id: '1'}, {id: '2'}]);
+  const count = await deleteByKeys(client, 'T', [{id: '1'}, {id: '2'}]);
   t.equal(count, 2);
 });
 

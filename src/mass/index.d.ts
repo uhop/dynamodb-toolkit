@@ -1,12 +1,22 @@
 /**
- * Mass operations — paginated reads, batch reads-by-key, bulk writes, and
- * copy/move primitives. Used internally by the Adapter but callable standalone
- * when you only want a slice of the toolkit.
+ * Mass operations — paginated reads, bulk-individual reads/deletes by key,
+ * bulk writes, and copy/move primitives. Used internally by the Adapter but
+ * callable standalone when you only want a slice of the toolkit.
+ *
+ * Naming convention:
+ * - `readList` / `iterateList` / `paginateList` / `writeList` / `deleteList` /
+ *   `copyList` / `moveList` — **list operations**: the database produces the
+ *   set via Query / Scan.
+ * - `readByKeys` / `deleteByKeys` — **bulk-individual operations**: the caller
+ *   supplies N keys and wants N items back at the positions they named.
+ *
+ * The two categories have different semantics (see
+ * `topics/bulk-individual-vs-list-operations.md` in the knowledge vault).
  */
 
 export {paginateList, type PaginateOptions, type PaginatedResult} from './paginate-list.js';
 export {iterateList, iterateItems} from './iterate-list.js';
-export {readOrderedListByKeys} from './read-ordered-list-by-keys.js';
+export {readByKeys} from './read-by-keys.js';
 
 import type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
 
@@ -38,24 +48,6 @@ export function readListGetItems(
   client: DynamoDBDocumentClient,
   params: Record<string, unknown>
 ): Promise<{nextParams: Record<string, unknown> | null; items: Record<string, unknown>[]}>;
-
-/**
- * Batch-read items by key. Uses {@link getBatch} under the hood. Returns items
- * in an arbitrary order — use `readOrderedListByKeys` when order matters.
- *
- * @param client The DynamoDB DocumentClient.
- * @param tableName Table to read from.
- * @param keys Keys to fetch.
- * @param params Extra DynamoDB input merged into each sub-request.
- * @returns The fetched items — may be shorter than `keys` (missing items drop out),
- *   and order is arbitrary (DynamoDB doesn't preserve it).
- */
-export function readListByKeys<T = Record<string, unknown>>(
-  client: DynamoDBDocumentClient,
-  tableName: string,
-  keys: Record<string, unknown>[],
-  params?: Record<string, unknown>
-): Promise<T[]>;
 
 /**
  * Bulk-write items via chunked `BatchWriteItem`.
@@ -91,15 +83,15 @@ export function deleteList(
 ): Promise<number>;
 
 /**
- * Batch-delete a known list of keys.
+ * Batch-delete a known list of keys. The caller supplies the identities;
+ * DynamoDB-side deletes are idempotent (missing items succeed).
  *
  * @param client The DynamoDB DocumentClient.
  * @param tableName Target table.
  * @param keys Keys to delete.
- * @returns Count of delete operations DynamoDB accepted (one per key; missing items count too —
- *   DynamoDB deletes are idempotent).
+ * @returns Count of delete operations DynamoDB accepted.
  */
-export function deleteListByKeys(client: DynamoDBDocumentClient, tableName: string, keys: Record<string, unknown>[]): Promise<number>;
+export function deleteByKeys(client: DynamoDBDocumentClient, tableName: string, keys: Record<string, unknown>[]): Promise<number>;
 
 /**
  * Copy items matching a `Query` / `Scan` back into the same table, optionally
@@ -144,3 +136,24 @@ export function moveList(
  * @returns Total number of matches across all pages (post-filter when `FilterExpression` is set).
  */
 export function getTotal(client: DynamoDBDocumentClient, params: Record<string, unknown>): Promise<number>;
+
+// Deprecated aliases — removed in a future minor (3.3.0 or 4.0.0).
+
+/** @deprecated Use `readByKeys`. This alias is removed in a future minor. */
+export function readListByKeys<T = Record<string, unknown>>(
+  client: DynamoDBDocumentClient,
+  tableName: string,
+  keys: Record<string, unknown>[],
+  params?: Record<string, unknown>
+): Promise<(T | undefined)[]>;
+
+/** @deprecated Use `readByKeys` (same behaviour, new name). Removed in a future minor. */
+export function readOrderedListByKeys<T = Record<string, unknown>>(
+  client: DynamoDBDocumentClient,
+  tableName: string,
+  keys: Record<string, unknown>[],
+  params?: Record<string, unknown>
+): Promise<(T | undefined)[]>;
+
+/** @deprecated Use `deleteByKeys`. This alias is removed in a future minor. */
+export function deleteListByKeys(client: DynamoDBDocumentClient, tableName: string, keys: Record<string, unknown>[]): Promise<number>;

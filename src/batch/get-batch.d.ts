@@ -20,7 +20,7 @@ export interface BatchGetResult {
  * Chunk and execute `BatchGetItem` calls (limit 100 per call) with
  * `UnprocessedKeys` retry and exponential backoff. Items are returned in
  * arbitrary order (the SDK doesn't preserve caller order — use
- * `readOrderedListByKeys` from the `mass` sub-export when order matters).
+ * `readByKeys` from the `mass` sub-export when order matters).
  *
  * The AWS SDK does **not** resubmit `UnprocessedKeys` — this wrapper does.
  *

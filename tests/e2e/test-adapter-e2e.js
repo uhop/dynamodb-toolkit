@@ -97,11 +97,13 @@ test('e2e: getByKeys returns multiple', async t => {
   t.deepEqual(names, ['Bespin', 'Hoth', 'Tatooine']);
 });
 
-test('e2e: getByKeys missing keys are dropped', async t => {
+test('e2e: getByKeys is length-preserving with undefined at misses', async t => {
   if (skipIfNoDocker(t)) return;
-  const items = await ctx.adapter.getByKeys([{name: 'Hoth'}, {name: 'NeverWas'}]);
-  t.equal(items.length, 1);
-  t.equal(items[0].name, 'Hoth');
+  const items = await ctx.adapter.getByKeys([{name: 'Hoth'}, {name: 'NeverWas'}, {name: 'Tatooine'}]);
+  t.equal(items.length, 3, 'length matches input keys');
+  t.equal(items[0]?.name, 'Hoth');
+  t.equal(items[1], undefined, 'missing key → undefined at same position');
+  t.equal(items[2]?.name, 'Tatooine');
 });
 
 // --- write / read round-trip ---

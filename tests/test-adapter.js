@@ -465,6 +465,24 @@ test('getByKeys: uses BatchGet', async t => {
   t.equal(items.length, 2);
 });
 
+test('getByKeys: length-preserving with undefined at missing positions', async t => {
+  // BatchGet returns in arbitrary order; missing keys don't appear in Responses.
+  const {adapter} = makeAdapter(async () => ({
+    Responses: {
+      [TABLE]: [
+        {name: 'C', x: 3},
+        {name: 'A', x: 1}
+      ]
+    },
+    UnprocessedKeys: {}
+  }));
+  const items = await adapter.getByKeys([{name: 'A'}, {name: 'MISSING'}, {name: 'C'}]);
+  t.equal(items.length, 3, 'length matches input keys');
+  t.equal(items[0]?.x, 1, 'position 0 → A');
+  t.equal(items[1], undefined, 'position 1 → MISSING');
+  t.equal(items[2]?.x, 3, 'position 2 → C');
+});
+
 // --- batch builders ---
 
 test('makeGet/makePost/makePut/makePatch/makeDelete return descriptors', async t => {

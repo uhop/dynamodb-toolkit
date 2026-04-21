@@ -14,10 +14,9 @@ import {applyBatch} from '../batch/apply-batch.js';
 import {applyTransaction} from '../batch/apply-transaction.js';
 
 import {paginateList} from '../mass/paginate-list.js';
-import {readListByKeys} from '../mass/read-list-by-keys.js';
-import {readOrderedListByKeys} from '../mass/read-ordered-list-by-keys.js';
+import {readByKeys} from '../mass/read-by-keys.js';
 import {writeList} from '../mass/write-list.js';
-import {deleteList, deleteListByKeys} from '../mass/delete-list.js';
+import {deleteList, deleteByKeys} from '../mass/delete-list.js';
 import {copyList} from '../mass/copy-list.js';
 import {moveList} from '../mass/move-list.js';
 
@@ -223,26 +222,34 @@ export class Adapter {
     activeParams = cleanParams(activeParams);
     const dynamoKeys = keys.map(k => this._toKey(k, activeParams.IndexName));
 
-    let items = await readListByKeys(this.client, this.table, dynamoKeys, activeParams);
+    let items = await readByKeys(this.client, this.table, dynamoKeys, activeParams);
 
-    if (isIndirect && items.length) {
+    if (isIndirect && items.some(Boolean)) {
       let indirectParams = this._cloneParams(params);
       delete indirectParams.IndexName;
       if (fields) indirectParams = addProjection(indirectParams, fields, this.projectionFieldMap, true);
       indirectParams = cleanParams(indirectParams);
-      items = await readListByKeys(
-        this.client,
-        this.table,
-        items.filter(Boolean).map(item => this._restrictKey(item)),
-        indirectParams
-      );
+      // Second-hop BatchGet against the base table. Only the items that the
+      // first-hop GSI Query found have keys to chase; misses stay misses and
+      // the position alignment with the caller's original `keys` is preserved.
+      const foundIndexes = [];
+      const foundKeys = [];
+      items.forEach((item, i) => {
+        if (item) {
+          foundIndexes.push(i);
+          foundKeys.push(this._restrictKey(item));
+        }
+      });
+      const fetched = await readByKeys(this.client, this.table, foundKeys, indirectParams);
+      const remapped = new Array(items.length).fill(undefined);
+      foundIndexes.forEach((i, j) => (remapped[i] = fetched[j]));
+      items = remapped;
     }
 
-    const out = [];
-    for (const item of items) {
-      if (item) out.push(this._reviveOne(item, fields, options));
-    }
-    return out;
+    // Length-preserving: `result[i]` corresponds to `keys[i]` — `undefined` at
+    // missing positions (per the bulk-individual-read contract). Callers who
+    // want a compact array call `.filter(Boolean)` themselves.
+    return items.map(item => (item ? this._reviveOne(item, fields, options) : undefined));
   }
 
   async getAll(options, example, index) {
@@ -267,7 +274,7 @@ export class Adapter {
       delete indirectParams.IndexName;
       if (options?.fields) indirectParams = addProjection(indirectParams, options.fields, this.projectionFieldMap, true);
       indirectParams = cleanParams(indirectParams);
-      const items = await readOrderedListByKeys(
+      const items = await readByKeys(
         this.client,
         this.table,
         result.data.map(item => this._restrictKey(item)),
@@ -307,7 +314,7 @@ export class Adapter {
       return {processed};
     }
     const dynamoKeys = keys.map(k => this._toKey(k));
-    const processed = await deleteListByKeys(this.client, this.table, dynamoKeys);
+    const processed = await deleteByKeys(this.client, this.table, dynamoKeys);
     return {processed};
   }
 
@@ -321,7 +328,7 @@ export class Adapter {
 
   async cloneByKeys(keys, mapFn, _options) {
     const dynamoKeys = keys.map(k => this._toKey(k));
-    const items = await readListByKeys(this.client, this.table, dynamoKeys);
+    const items = await readByKeys(this.client, this.table, dynamoKeys);
     const cloned = items.filter(Boolean).map(item => {
       const revived = this.hooks.revive(item);
       const mapped = mapFn ? mapFn(revived) : revived;
@@ -346,7 +353,7 @@ export class Adapter {
 
   async moveByKeys(keys, mapFn, _options) {
     const dynamoKeys = keys.map(k => this._toKey(k));
-    const items = await readListByKeys(this.client, this.table, dynamoKeys);
+    const items = await readByKeys(this.client, this.table, dynamoKeys);
     const valid = items.filter(Boolean);
     if (!valid.length) return {processed: 0};
 
