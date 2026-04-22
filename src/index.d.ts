@@ -33,7 +33,8 @@ export {
   BadFilterOp,
   KeyFieldChanged,
   CreatedAtFieldNotDeclared,
-  CascadeNotDeclared
+  CascadeNotDeclared,
+  TableVerificationFailed
 } from './errors.js';
 
 // Type re-exports from SDK peers for convenience.

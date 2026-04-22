@@ -14,5 +14,6 @@ export {
   BadFilterOp,
   KeyFieldChanged,
   CreatedAtFieldNotDeclared,
-  CascadeNotDeclared
+  CascadeNotDeclared,
+  TableVerificationFailed
 } from './errors.js';

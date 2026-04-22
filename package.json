@@ -15,7 +15,11 @@
     "./rest-core": "./src/rest-core/index.js",
     "./handler": "./src/handler/index.js",
     "./marshalling": "./src/marshalling/index.js",
+    "./provisioning": "./src/provisioning/index.js",
     "./*": "./src/*"
+  },
+  "bin": {
+    "dynamodb-toolkit": "./bin/dynamodb-toolkit.js"
   },
   "scripts": {
     "test": "tape6 --flags FO",
@@ -89,6 +93,7 @@
   },
   "files": [
     "src",
+    "bin",
     "llms.txt",
     "llms-full.txt"
   ]

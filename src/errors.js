@@ -106,3 +106,16 @@ export class CascadeNotDeclared extends ToolkitError {
     this.operation = operation;
   }
 }
+
+/**
+ * `verifyTable({throwOnMismatch: true})` detected drift between the
+ * declared schema and the live DynamoDB table. Carries the same
+ * structured `diffs` array the default return surfaces.
+ */
+export class TableVerificationFailed extends ToolkitError {
+  constructor(tableName, diffs) {
+    super(`verifyTable: ${diffs.length} mismatch(es) on table '${tableName}' — see err.diffs for details.`);
+    this.tableName = tableName;
+    this.diffs = diffs.slice();
+  }
+}

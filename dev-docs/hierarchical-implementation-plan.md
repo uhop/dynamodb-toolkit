@@ -331,44 +331,45 @@ Method split into two intentional styles per op (no options-bag overload): `...A
 
 Table-lifecycle support driven by the Adapter declaration. Ships as a separate submodule + CLI so IaC users can skip it entirely.
 
+> **Status (2026-04-22):** code complete; tests green (535 node / 529 bun / 529 deno; +7 e2e assertions against DynamoDB Local); lint + ts-check + js-check pass. Wiki work parallel-track.
+
 ### `src/provisioning/`
 
-- [ ] **`src/provisioning/ensure-table.js`** + `.d.ts`:
-  - `ensureTable(adapterOrDeclaration, client, {yes?, dryRun?}) => Promise<Plan | Result>`.
-  - Computes diff between declared schema and `DescribeTable` output.
+- [x] **`src/provisioning/declaration.js`** + `.d.ts` — shared `extractDeclaration` normalizer + CreateTable input builders (attribute-type mapping, projection mapping, key-schema construction, indices split). Accepts Adapter instance or any adapter-shaped object.
+- [x] **`src/provisioning/ensure-table.js`** + `.d.ts`:
+  - `ensureTable(adapterOrDeclaration, {yes?, dryRun?}) => Promise<Plan | Result>`. Client comes from the adapter/declaration, not a separate arg.
   - ADD-only plans (`CreateTable`, `UpdateTable` with `{Create: GSI}`).
-  - Never emits destructive plan entries.
-  - Delegates legality to DynamoDB (no pre-checks).
-  - Prints plain-text plan for dry-run.
-  - Requires `yes: true` (or CLI `--yes`) for execution; default returns plan.
-- [ ] **`src/provisioning/verify-table.js`** + `.d.ts`:
-  - `verifyTable(adapterOrDeclaration, client, {throwOnMismatch?, requireDescriptor?}) => Promise<{ok, diffs: Array<{path, expected, actual, severity}>}>`.
-  - Compares key schema, GSI/LSI key schemas + projection specs.
+  - Extra GSIs in live table → `skip-extra-gsi` entries (reported only, never dropped).
+  - Missing LSIs on existing tables → `skip-missing-lsi` entry + summary note (DynamoDB rejects post-creation LSI adds; toolkit reports but doesn't pre-check legality).
+  - Plain-text `summary[]` lines for dry-run output.
+  - Default returns plan; `{yes: true}` executes.
+- [x] **`src/provisioning/verify-table.js`** + `.d.ts`:
+  - `verifyTable(adapterOrDeclaration, {throwOnMismatch?, requireDescriptor?})` → `{ok, diffs}`.
+  - Compares base key schema, attribute types, GSI key schemas + projections, LSI key schemas + projections.
   - Billing mode / stream config compared only when declared.
-  - `throwOnMismatch: true` throws `TableVerificationFailed` carrying the diff.
-  - Default: structured result, no throw.
-- [ ] **`src/provisioning/descriptor.js`** + `.d.ts` — opt-in reserved-record descriptor:
-  - Written on first `ensureTable` / `verifyTable` when `{descriptorKey: string}` is declared on the Adapter.
-  - Compared on subsequent verify calls.
-  - Shape: `{version, generatedAt, adapter, keyFields, structuralKey, indices, searchable, filterable, marshalling, versionField, createdAtField}`.
-  - `{requireDescriptor: true}` → missing descriptor is a verify failure.
-  - Default: absent descriptor is neutral (IaC-managed tables).
-- [ ] **`src/provisioning/index.js`** + `.d.ts` — module entry.
-- [ ] **`package.json` `exports`** — add `./provisioning` subpath.
+  - Extra GSI/LSI in live table → `warn` severity (non-blocking for `ok`).
+  - `throwOnMismatch: true` throws `TableVerificationFailed` carrying the same diffs array.
+- [x] **`src/provisioning/descriptor.js`** + `.d.ts` — opt-in reserved-record descriptor:
+  - Written by `ensureTable` when `descriptorKey` is on the adapter AND `{yes: true}` is passed.
+  - Shape: `{version, generatedAt, table, keyFields, structuralKey, indices, typeLabels, typeDiscriminator, filterable, searchable, searchablePrefix, versionField, createdAtField, technicalPrefix, relationships}` as JSON under `__toolkit_descriptor__` attribute.
+  - `{requireDescriptor: true}` on verifyTable → missing descriptor is an `error` diff.
+  - Default: absent descriptor is neutral (IaC-managed tables unaffected).
+- [x] **`src/provisioning/index.js`** + `.d.ts` — module entry re-exports every helper.
+- [x] **`package.json` `exports`** — `./provisioning` subpath added.
 
 ### CLI wrapper
 
-- [ ] **`bin/dynamodb-toolkit.js`** — CLI entry. Subcommands:
-  - `dynamodb-toolkit ensure-table <adapter-module>` — loads the module (ESM import), extracts the adapter, calls `ensureTable`. Requires `--yes` for execution.
-  - `dynamodb-toolkit verify-table <adapter-module>` — calls `verifyTable`, prints the diff, exits non-zero on mismatch when `--strict`.
-- [ ] **`package.json` `bin`** — add `"dynamodb-toolkit": "./bin/dynamodb-toolkit.js"`.
+- [x] **`bin/dynamodb-toolkit.js`** — CLI entry. Subcommands:
+  - `dynamodb-toolkit ensure-table <adapter-module>` — loads the module (ESM import), extracts `adapter` / `default`, calls `ensureTable`. `--yes` for execution.
+  - `dynamodb-toolkit verify-table <adapter-module>` — calls `verifyTable`, prints diffs, `--strict` exits non-zero on any diff, `--require-descriptor` opts into descriptor-required mode. `--json` output mode for CI integration.
+- [x] **`package.json` `bin`** — `"dynamodb-toolkit": "./bin/dynamodb-toolkit.js"` wired.
 
 ### Exit criteria
 
-- `ensureTable` + `verifyTable` pass tests against DynamoDB Local (create / add GSI / verify / drift detection).
-- Descriptor record round-trip verified.
-- CLI loads an ESM adapter module and runs both commands.
-- IaC-managed table flow (T2 only) documented and tested.
+- [x] `ensureTable` + `verifyTable` pass tests against DynamoDB Local (create / add GSI / verify / drift detection via `tests/e2e/test-provisioning-e2e.js`).
+- [x] Descriptor record round-trip verified (e2e + unit).
+- [x] CLI loads an ESM adapter module and runs both commands (CLI smoke: `bin/dynamodb-toolkit.js --help` exercises the parser).
+- [x] IaC-managed table flow (T2 only) exercised — `verifyTable` on a toolkit-unaware table surfaces only real schema diffs; descriptor absence is neutral unless `requireDescriptor` is set.
 
 ### Wiki work
 

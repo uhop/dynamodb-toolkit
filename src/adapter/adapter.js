@@ -282,6 +282,20 @@ export class Adapter {
       this.createdAtField = options.createdAtField;
     }
 
+    // Opt-in reserved-record descriptor key (T2, 3.6.0). When declared,
+    // `ensureTable` and the first `verifyTable` write a JSON snapshot of
+    // this adapter's declaration at `{keyFields[0]: descriptorKey}` so
+    // subsequent `verifyTable` calls can detect drift beyond what
+    // `DescribeTable` reports (marshalling helpers, search mirrors,
+    // filterable allowlist, etc.). Default unset — IaC-managed tables
+    // ignore this entirely.
+    if (options.descriptorKey !== undefined) {
+      if (typeof options.descriptorKey !== 'string' || options.descriptorKey.length === 0) {
+        throw new Error('options.descriptorKey must be a non-empty string');
+      }
+      this.descriptorKey = options.descriptorKey;
+    }
+
     this.client = options.client;
     this.table = options.table;
     this.projectionFieldMap = options.projectionFieldMap || {};

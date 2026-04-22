@@ -202,6 +202,18 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
    * (length > 1) with a declared `structuralKey`.
    */
   relationships?: RelationshipsDeclaration;
+  /**
+   * Opt-in reserved-record descriptor key. When set, the provisioning
+   * helpers (`ensureTable` / `verifyTable`) write a JSON snapshot of
+   * this adapter's declaration at the reserved key and verify it on
+   * subsequent runs — detecting drift beyond what `DescribeTable`
+   * reports (marshalling helpers, search mirrors, `filterable`
+   * allowlist, etc.).
+   *
+   * Default unset — IaC-managed tables ignore the descriptor entirely.
+   * Typical value: `'__adapter__'`.
+   */
+  descriptorKey?: string;
   /** Per-instance hook overrides; merges over {@link defaultHooks}. */
   hooks?: AdapterHooks<TItem>;
 }

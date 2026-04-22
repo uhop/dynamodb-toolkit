@@ -55,3 +55,10 @@ export class CascadeNotDeclared extends ToolkitError {
   operation: string;
   constructor(operation: string);
 }
+
+/** `verifyTable({throwOnMismatch: true})` detected drift. Carries the structured diffs. */
+export class TableVerificationFailed extends ToolkitError {
+  tableName: string;
+  diffs: Array<{path: string; severity: 'error' | 'warn'; expected: unknown; actual: unknown}>;
+  constructor(tableName: string, diffs: Array<{path: string; severity: 'error' | 'warn'; expected: unknown; actual: unknown}>);
+}
