@@ -108,13 +108,128 @@ export class Adapter {
       this.typeDiscriminator = {name: options.typeDiscriminator.name};
     }
 
+    // Optional technicalPrefix — when declared, marks fields that are
+    // adapter-managed (structural key, search mirrors, sparse markers,
+    // future versionField / createdAtField). Incoming user items are
+    // rejected if they carry any field starting with this prefix; on read,
+    // all such fields are stripped from items before the user's revive hook
+    // sees them. Every adapter-managed field name must itself start with
+    // this prefix (validated below).
+    if (options.technicalPrefix !== undefined) {
+      if (typeof options.technicalPrefix !== 'string' || options.technicalPrefix.length === 0) {
+        throw new Error('options.technicalPrefix must be a non-empty string');
+      }
+      this.technicalPrefix = options.technicalPrefix;
+    }
+
     this.client = options.client;
     this.table = options.table;
     this.projectionFieldMap = options.projectionFieldMap || {};
     this.searchable = options.searchable || {};
     this.searchablePrefix = options.searchablePrefix || '-search-';
     this.indirectIndices = options.indirectIndices || {};
-    this.hooks = {...defaultHooks, ...(options.hooks || {})};
+
+    // Validate that all adapter-managed field names start with technicalPrefix
+    // (when declared). This guarantees revive-time stripping catches them
+    // and prepare-time incoming-field validation rejects user collisions.
+    if (this.technicalPrefix) {
+      const prefix = this.technicalPrefix;
+      if (this.structuralKey && !this.structuralKey.name.startsWith(prefix)) {
+        throw new Error(
+          `options.structuralKey.name '${this.structuralKey.name}' must start with options.technicalPrefix '${prefix}'`
+        );
+      }
+      if (Object.keys(this.searchable).length && !this.searchablePrefix.startsWith(prefix)) {
+        throw new Error(
+          `options.searchablePrefix '${this.searchablePrefix}' must start with options.technicalPrefix '${prefix}'`
+        );
+      }
+    }
+
+    // Hook composition: when technicalPrefix is declared, wrap the user's
+    // prepare / revive hooks with built-in steps that run before the user
+    // hook (on prepare: validate incoming fields, write adapter-managed
+    // fields; on revive: strip adapter-managed fields). Without
+    // technicalPrefix, the built-in steps are no-ops and hooks are
+    // byte-for-byte identical to v3.1.2.
+    const userHooks = {...defaultHooks, ...(options.hooks || {})};
+    if (this.technicalPrefix) {
+      const userPrepare = userHooks.prepare;
+      const userRevive = userHooks.revive;
+      userHooks.prepare = (item, isPatch) => userPrepare(this._builtInPrepare(item, isPatch), isPatch);
+      userHooks.revive = (rawItem, fields) => userRevive(this._builtInRevive(rawItem), fields);
+    }
+    this.hooks = userHooks;
+  }
+
+  // --- built-in prepare / revive steps (gated by technicalPrefix) ---
+
+  /**
+   * Validates incoming user fields (reject any starting with
+   * `technicalPrefix`) and computes adapter-managed fields: the structural
+   * key (from `keyFields`, contiguous-from-start rule) and searchable
+   * mirrors. Runs before the user's `prepare` hook.
+   *
+   * For `put` / `post` (isPatch falsy), the structural key is written from
+   * the full item's keyFields values. For `patch`, the structural key is
+   * not touched (it's a primary-key attribute; DynamoDB rejects mutation
+   * via `UpdateExpression`). Searchable mirrors ARE written for any
+   * searchable field present in a patch payload.
+   */
+  _builtInPrepare(item, isPatch) {
+    if (!item || typeof item !== 'object') return item;
+
+    // 1. Reject incoming user fields that start with technicalPrefix.
+    for (const key of Object.keys(item)) {
+      if (key.startsWith(this.technicalPrefix)) {
+        throw new Error(
+          `prepare: incoming field '${key}' starts with technicalPrefix '${this.technicalPrefix}' — this is an adapter-managed namespace and must not appear in caller items`
+        );
+      }
+    }
+
+    const out = {...item};
+
+    // 2. Structural key — full writes only. Patches can't change primary-key
+    //    attributes via UpdateExpression, so skip. Single-field keyFields
+    //    don't have a structural key (the key field itself is the sort key).
+    if (!isPatch && this.structuralKey) {
+      const components = [];
+      for (const field of this.keyFields) {
+        const v = item[field.name];
+        if (v === undefined || v === null) break;
+        components.push(this._formatKeyComponent(field, v));
+      }
+      if (components.length > 0) {
+        out[this.structuralKey.name] = components.join(this.structuralKey.separator);
+      }
+    }
+
+    // 3. Searchable mirrors — write for any searchable field present in
+    //    item (works for full writes and patches alike).
+    for (const searchField of Object.keys(this.searchable)) {
+      const v = item[searchField];
+      if (v !== undefined && v !== null) {
+        out[this.searchablePrefix + searchField] = String(v).toLowerCase();
+      }
+    }
+
+    return out;
+  }
+
+  /**
+   * Strip every field whose name starts with `technicalPrefix` from the raw
+   * item before the user's `revive` hook sees it. Keeps adapter-managed
+   * implementation details off the wire.
+   */
+  _builtInRevive(rawItem) {
+    if (!rawItem || typeof rawItem !== 'object') return rawItem;
+    const prefix = this.technicalPrefix;
+    const out = {};
+    for (const key of Object.keys(rawItem)) {
+      if (!key.startsWith(prefix)) out[key] = rawItem[key];
+    }
+    return out;
   }
 
   // --- type detection ---

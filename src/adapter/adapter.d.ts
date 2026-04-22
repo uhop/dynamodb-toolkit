@@ -39,6 +39,20 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
   /** Base table name. */
   table: string;
   /**
+   * Opt-in marker prefix for adapter-managed fields. When declared:
+   * - Incoming user items are rejected if any field name starts with this prefix.
+   * - On read, every field starting with this prefix is stripped before the
+   *   user's `revive` hook sees it.
+   * - Adapter-managed field names (structural key, search mirrors, version
+   *   field, createdAt field) are validated at construction to start with
+   *   this prefix.
+   * - Built-in `prepare` / `revive` steps are wired into the hooks bag.
+   *
+   * Default: unset — built-in steps are no-ops and adapters behave exactly
+   * as before. Convention is `'-'` when declared.
+   */
+  technicalPrefix?: string;
+  /**
    * Partition key first, optional sort key second. Accepts either bare field
    * names (typed as `'string'`) or full {@link KeyFieldSpec} descriptors.
    * `{type: 'number'}` requires `width` in a composite (length > 1) keyFields.
@@ -224,6 +238,8 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   client: DynamoDBDocumentClient;
   /** Base table name. */
   table: string;
+  /** Opt-in adapter-managed-field prefix, when declared. */
+  technicalPrefix?: string;
   /**
    * Canonical typed descriptors — partition key first, optional sort key
    * second. Always normalized to `{field, type}` (plus `width` when present

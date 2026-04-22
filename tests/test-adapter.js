@@ -985,3 +985,206 @@ test('adapter.overlayFields: non-object input throws', t => {
   t.throws(() => adapter.overlayFields(null), 'null');
   t.throws(() => adapter.overlayFields('a'), 'string');
 });
+
+// --- technicalPrefix + built-in prepare / revive steps ---
+
+test('Adapter: technicalPrefix validation — non-string rejected', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['name'], technicalPrefix: 42}), 'non-string');
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['name'], technicalPrefix: ''}), 'empty string');
+});
+
+test('Adapter: technicalPrefix requires structuralKey.name to start with it', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(
+    () =>
+      new Adapter({
+        client,
+        table: 'T',
+        keyFields: ['state', 'carVin'],
+        structuralKey: {name: 'sk'}, // does not start with '-'
+        technicalPrefix: '-'
+      }),
+    'structuralKey.name without prefix'
+  );
+});
+
+test('Adapter: technicalPrefix requires searchablePrefix to start with it (when searchable declared)', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(
+    () =>
+      new Adapter({
+        client,
+        table: 'T',
+        keyFields: ['name'],
+        searchable: {name: 1},
+        searchablePrefix: 'search-', // does not start with '-'
+        technicalPrefix: '-'
+      }),
+    'searchablePrefix without prefix'
+  );
+});
+
+test('Adapter: technicalPrefix unset → built-in steps are no-ops (back-compat)', t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  // No technicalPrefix — prepare is identity (default hook), revive is identity+subsetObject.
+  const prepared = adapter.hooks.prepare({name: 'Hoth', climate: 'frozen'});
+  t.deepEqual(prepared, {name: 'Hoth', climate: 'frozen'}, 'no built-in rewrite');
+  const revived = adapter.hooks.revive({name: 'Hoth', climate: 'frozen', '-search-name': 'hoth'});
+  t.deepEqual(revived, {name: 'Hoth', climate: 'frozen', '-search-name': 'hoth'}, 'no stripping');
+});
+
+test('built-in prepare: rejects incoming fields starting with technicalPrefix', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({client, table: 'T', keyFields: ['name'], technicalPrefix: '-'});
+  t.throws(() => adapter.hooks.prepare({name: 'x', '-evil': 1}), 'incoming -prefixed field');
+});
+
+test('built-in prepare: computes structural key from composite keyFields', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName', 'carVin'],
+    structuralKey: {name: '-sk'},
+    technicalPrefix: '-'
+  });
+  const out = adapter.hooks.prepare({state: 'TX', rentalName: 'Dallas', carVin: 'V1', extra: 'x'});
+  t.equal(out['-sk'], 'TX|Dallas|V1');
+  t.equal(out.state, 'TX', 'original fields preserved');
+  t.equal(out.extra, 'x', 'non-key fields pass through');
+});
+
+test('built-in prepare: structural key uses contiguous-from-start rule', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName', 'carVin'],
+    structuralKey: {name: '-sk'},
+    technicalPrefix: '-'
+  });
+  // Only state present → -sk = 'TX' (depth 1)
+  const out1 = adapter.hooks.prepare({state: 'TX'});
+  t.equal(out1['-sk'], 'TX');
+  // State + rentalName → -sk = 'TX|Dallas' (depth 2)
+  const out2 = adapter.hooks.prepare({state: 'TX', rentalName: 'Dallas'});
+  t.equal(out2['-sk'], 'TX|Dallas');
+});
+
+test('built-in prepare: number keyFields zero-padded per width', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', {name: 'rentalId', type: 'number', width: 5}, 'carVin'],
+    structuralKey: {name: '-sk'},
+    technicalPrefix: '-'
+  });
+  const out = adapter.hooks.prepare({state: 'TX', rentalId: 42, carVin: 'V1'});
+  t.equal(out['-sk'], 'TX|00042|V1');
+});
+
+test('built-in prepare: single-field keyFields skips structural-key computation', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({client, table: 'T', keyFields: ['name'], technicalPrefix: '-'});
+  const out = adapter.hooks.prepare({name: 'Hoth'});
+  t.equal(out['-sk'], undefined, 'no structural key for single-field keyFields');
+  t.equal(out.name, 'Hoth');
+});
+
+test('built-in prepare: patch skips structural-key write (primary-key immutable)', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'carVin'],
+    structuralKey: {name: '-sk'},
+    technicalPrefix: '-'
+  });
+  const out = adapter.hooks.prepare({climate: 'arctic'}, true /* isPatch */);
+  t.equal(out['-sk'], undefined, 'no structural key on patch');
+  t.equal(out.climate, 'arctic');
+});
+
+test('built-in prepare: writes searchable mirrors lowercase', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    searchable: {name: 1, climate: 1},
+    technicalPrefix: '-'
+  });
+  const out = adapter.hooks.prepare({name: 'Hoth', climate: 'FROZEN'});
+  t.equal(out['-search-name'], 'hoth');
+  t.equal(out['-search-climate'], 'frozen');
+});
+
+test('built-in prepare: searchable mirrors written on patches too', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    searchable: {name: 1},
+    technicalPrefix: '-'
+  });
+  const out = adapter.hooks.prepare({name: 'Tatooine'}, true /* isPatch */);
+  t.equal(out['-search-name'], 'tatooine');
+});
+
+test('built-in revive: strips all fields starting with technicalPrefix', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'carVin'],
+    structuralKey: {name: '-sk'},
+    technicalPrefix: '-'
+  });
+  const revived = adapter.hooks.revive({
+    state: 'TX',
+    carVin: 'V1',
+    climate: 'dry',
+    '-sk': 'TX|V1',
+    '-search-carVin': 'v1'
+  });
+  t.equal(revived.state, 'TX');
+  t.equal(revived.carVin, 'V1');
+  t.equal(revived.climate, 'dry');
+  t.equal(revived['-sk'], undefined, '-sk stripped');
+  t.equal(revived['-search-carVin'], undefined, 'search mirror stripped');
+});
+
+test('built-in prepare / revive compose with user hooks (run before user)', t => {
+  const client = makeMockClient(async () => ({}));
+  let prepareCalledWith, reviveCalledWith;
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'carVin'],
+    structuralKey: {name: '-sk'},
+    technicalPrefix: '-',
+    hooks: {
+      prepare: (item, isPatch) => {
+        prepareCalledWith = item;
+        return {...item, _userFlag: true};
+      },
+      revive: (rawItem, fields) => {
+        reviveCalledWith = rawItem;
+        return {...rawItem, _reviveFlag: true};
+      }
+    }
+  });
+
+  const prepared = adapter.hooks.prepare({state: 'TX', carVin: 'V1'});
+  // User's prepare sees the post-built-in item (with -sk written).
+  t.equal(prepareCalledWith['-sk'], 'TX|V1', 'user hook sees structural key');
+  t.equal(prepared._userFlag, true, 'user hook ran after built-in');
+
+  const revived = adapter.hooks.revive({state: 'TX', carVin: 'V1', '-sk': 'TX|V1'});
+  // User's revive sees the post-built-in item (with -sk stripped).
+  t.equal(reviveCalledWith['-sk'], undefined, 'user hook sees stripped item');
+  t.equal(revived._reviveFlag, true, 'user hook ran after built-in');
+});
