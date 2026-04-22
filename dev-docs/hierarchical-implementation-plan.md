@@ -32,9 +32,11 @@ Each phase can ship standalone. Later phases build on earlier but do not require
 
 Biggest release of the workstream. Makes hierarchical adapters declarative instead of hook-coded, ships the read-side key-condition helpers, lands the final filter grammar, and cleans up the misleading "List" names.
 
+> **Status (2026-04-21):** code complete across all sections; tests green (407 node / 401 bun / 401 deno); lint + ts-check + js-check pass. Wiki work parallel-track; release notes pending.
+
 ### Adapter declaration shape (§"Adapter index declaration" in design doc)
 
-- [ ] **`src/adapter/adapter.js`** — accept new construction options:
+- [x] **`src/adapter/adapter.js`** — accept new construction options:
   - `technicalPrefix?: string` (opt-in; default unset)
   - `keyFields: Array<string | {name, type?: 'string' | 'number' | 'binary', width?: number}>` — string shorthand = `{name, type: 'string'}`; `width` required on `{type: 'number'}` in composite keys
   - `structuralKey?: string | {name: string, separator?: string}` — required when `keyFields.length > 1`; string shorthand expands to `{name, separator: '|'}`; separator defaults to `'|'`
@@ -44,74 +46,74 @@ Biggest release of the workstream. Makes hierarchical adapters declarative inste
   - `filterable?: Record<string, Array<'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'in' | 'btw' | 'beg' | 'ct' | 'ex' | 'nx'>>` — allowlist for `f-` filter grammar
   - Legacy `indirectIndices` coexists; auto-synthesises `{type: 'gsi', indirect: true, projection: 'keys-only'}` entries into `indices`.
 
-- [ ] **`src/adapter/adapter.d.ts`** — full typings for the above. `Adapter<TItem, TKey>` generics unchanged at the signature level.
+- [x] **`src/adapter/adapter.d.ts`** — full typings for the above. `Adapter<TItem, TKey>` generics unchanged at the signature level.
 
-- [ ] **`adapter.keyFields` becomes the canonical typed array** — `Required<KeyFieldSpec>[]` (each entry `{name, type, width?}`). Callers reading just the name use `keyFields[i].name`; string-names array via `keyFields.map(f => f.name)`. Breaking for external code that reads `adapter.keyFields` as a string array — adapter projects touched in 0.3.0 (see §Framework adapters coordination).
+- [x] **`adapter.keyFields` becomes the canonical typed array** — `Required<KeyFieldSpec>[]` (each entry `{name, type, width?}`). Callers reading just the name use `keyFields[i].name`; string-names array via `keyFields.map(f => f.name)`. Breaking for external code that reads `adapter.keyFields` as a string array — adapter projects touched in 0.3.0 (see §Framework adapters coordination).
 
-- [ ] **Validation at construction:**
+- [x] **Validation at construction:**
   - `typeLabels.length === keyFields.length` (when both declared).
   - Every adapter-managed field name (structural key, search mirror, sparse markers, versionField, createdAtField when they land) starts with `technicalPrefix` (when declared).
   - Composite `keyFields` with number components require `width`.
 
 ### Built-in `prepare` / `revive` steps (gated by `technicalPrefix`)
 
-- [ ] **`src/adapter/hooks.js`** — add two built-in steps that run before the user hook:
+- [x] **`src/adapter/hooks.js`** — add two built-in steps that run before the user hook:
   - **Built-in prepare**: reject incoming fields starting with `technicalPrefix` (input validation); compute `structuralKey` field from `keyFields` per the contiguous-from-start rule (with number zero-padding); write `searchable` mirrors; write sparse-GSI marker fields per `indices[*].sparse` predicates.
   - **Built-in revive**: strip every field starting with `technicalPrefix`.
-- [ ] **`technicalPrefix` unset → built-in steps are no-ops.** Existing adapters without the declaration are byte-for-byte identical.
-- [ ] **Sparse predicate throw policy**: errors from `onlyWhen` propagate unchanged (per the standing "user callbacks throw" rule). No toolkit wrap.
+- [x] **`technicalPrefix` unset → built-in steps are no-ops.** Existing adapters without the declaration are byte-for-byte identical.
+- [x] **Sparse predicate throw policy**: errors from `onlyWhen` propagate unchanged (per the standing "user callbacks throw" rule). No toolkit wrap.
 
 ### A1' helpers (§"Read-side key-condition helpers")
 
-- [ ] **`src/expressions/key-condition.js`** + `.d.ts` — new primitive:
+- [x] **`src/expressions/key-condition.js`** + `.d.ts` — new primitive:
   ```js
   buildKeyCondition({name, value, kind, pkName?, pkValue?}, params = {}) => params
   ```
   Adapter-agnostic; merges into `params` with counter-based placeholders (`#kc0` / `:kcv0`), AND-combined with existing `KeyConditionExpression`.
-- [ ] **`src/adapter/adapter.js`** — `adapter.buildKey(values, {kind?: 'exact' | 'children' | 'partial', partial?: string, indexName?: string}, params = {}) => params`. Validates `values` contiguous-from-start against declared `keyFields`; joins using declared `structuralKey.separator`; delegates to the primitive.
+- [x] **`src/adapter/adapter.js`** — `adapter.buildKey(values, {kind?: 'exact' | 'children' | 'partial', partial?: string, indexName?: string}, params = {}) => params`. Validates `values` contiguous-from-start against declared `keyFields`; joins using declared `structuralKey.separator`; delegates to the primitive.
 
 ### `adapter.typeOf(item)` (§"Type detection via `adapter.typeOf(item)`")
 
-- [ ] **`src/adapter/adapter.js`** — method returning:
+- [x] **`src/adapter/adapter.js`** — method returning:
   1. `typeDiscriminator.name` value when present on the item.
   2. `typeLabels[depth - 1]` where `depth` is contiguous-from-start defined `keyFields` count.
   3. Raw depth number when `typeLabels` is not declared.
 
 ### Canned `mapFn` builders (§"Mass clone / move / edit" → "Canned `mapFn` builders")
 
-- [ ] **`src/mass/map-fns.js`** + `.d.ts`:
+- [x] **`src/mass/map-fns.js`** + `.d.ts`:
   - `mergeMapFn(...fns)` — free function, pipes multiple mapFns.
-- [ ] **`src/adapter/adapter.js`** — adapter methods (need access to `keyFields` / `structuralKey`):
+- [x] **`src/adapter/adapter.js`** — adapter methods (need access to `keyFields` / `structuralKey`):
   - `adapter.swapPrefix(srcPrefix, dstPrefix)` — subtree clone/move prefix swap.
   - `adapter.overlayFields(obj)` — static overlay; validates against `keyFields`.
 
 ### Filter grammar `f-<field>-<op>=<value>` (§"Filter surface")
 
-- [ ] **`src/rest-core/parsers/parse-filter.js`** (or new file) — parser that:
+- [x] **`src/rest-core/parsers/parse-f-filter.js`** — pure URL parser that:
   - Strips `f-` prefix.
   - Splits field and op from the right against the closed op set.
-  - Applies `filterable` allowlist (400 `BadFilterField` or `BadFilterOp` on rejection).
-  - Emits `FilterExpression` by default; auto-promotes to `KeyConditionExpression` per rules:
-    - `eq` on partition key → KC.
-    - `beg` on sort key → `begins_with(sk, :v)` in KC.
-    - `btw` on sort key → `BETWEEN` in KC.
-    - Pairs (`ge` + `le`) on the same indexed sort key merge to `BETWEEN`.
+  - Emits `{field, op, values}` clauses; validation deferred to adapter.
   - Multi-value (`in`, `btw`): first-character-delimiter with `,` fallback. `btw` requires exactly 2 values; `in` requires 1..N.
-  - Type coercion from declared `keyFields` / `indices` types.
-
+- [x] **`adapter.applyFFilter(params, clauses)`** — validator + compiler:
+  - Applies `filterable` allowlist (throws `BadFilterField` or `BadFilterOp` on rejection).
+  - Coerces values to declared types via `_typeOfField` / `_coerceFilterValue`.
+  - Emits `FilterExpression` by default; auto-promotes `eq` on pk, `eq`/`beg`/`btw` on sk to `KeyConditionExpression`.
+  - Uses `#ff<n>` / `:ffv<n>` placeholders to avoid collision with existing expression merges.
+- [x] **Wired through `handler.buildListOptions`** via `parseFFilter`; `options.fFilter` on Adapter list calls.
 - [ ] **Replace `?prefix=…`** with `f-<sort-key-field>-beg=…`. Parse both for one minor; then drop `?prefix=` in 3.3.0 release notes.
+      (Deferred: `?prefix=` still works; `f-` is additive. Drop-flip scheduled for 3.3.0.)
 
 ### Projection ergonomics (§"Projection ergonomics")
 
-- [ ] **Refuse `consistent: true` on GSI Query** — emit `ConsistentReadOnGSIRejected` with message citing the AWS doc. Detect at request-build time.
-- [ ] **Sort → index inference** — `?sort=<field>` / `?sort=-<field>` finds an index where `sk.name === <field>`. LSI preferred over GSI when both match.
-- [ ] **No matching index → refuse** with `NoIndexForSortField`. No in-memory sort (per the no-client-side-list-manipulation principle).
-- [ ] **Keys-only list shortcut** — `?fields=*keys` expands to `ProjectionExpression` from declared `keyFields` names (plus `structuralKey.name` when declared). Programmatic alias: `{keysOnly: true}`.
+- [x] **Refuse `consistent: true` on GSI Query** — emit `ConsistentReadOnGSIRejected` with message citing the AWS doc. Detect at request-build time.
+- [x] **Sort → index inference** — `?sort=<field>` / `?sort=-<field>` finds an index where `sk.name === <field>`. LSI preferred over GSI when both match.
+- [x] **No matching index → refuse** with `NoIndexForSortField`. No in-memory sort (per the no-client-side-list-manipulation principle).
+- [x] **Keys-only list shortcut** — `?fields=*keys` expands to `ProjectionExpression` from declared `keyFields` names (plus `structuralKey.name` when declared). Programmatic alias: `{keysOnly: true}`.
 
 ### Naming cleanup (§"Naming cleanup — drop 'List' from bulk-individual-read helpers")
 
-- [ ] **Rename `writeList` → `writeItems`** — bulk-individual write, not a list op. Same behaviour; drops "List" per the classification rule.
-- [ ] **Unify Adapter-surface bulk/list naming** — verb + qualifier pattern. Renames:
+- [x] **Rename `writeList` → `writeItems`** — bulk-individual write, not a list op. Same behaviour; drops "List" per the classification rule.
+- [x] **Unify Adapter-surface bulk/list naming** — verb + qualifier pattern. Renames:
   - `putAll(items)` → `putItems(items)` (bulk-individual; `Items` suffix signals items-input).
   - `getAll(options, example, index)` → `getList(options, example, index)` (list convenience).
   - `getAllByParams(params, options)` → `getListByParams(params, options)` (list direct).
@@ -119,29 +121,30 @@ Biggest release of the workstream. Makes hierarchical adapters declarative inste
   - `cloneAllByParams` → `cloneListByParams`.
   - `moveAllByParams` → `moveListByParams`.
   - Deprecated aliases preserved on `Adapter.prototype` with one-time `console.warn`, removed in 3.3.0 or 4.0.0.
-- [ ] **Consolidate `readListByKeys` + `readOrderedListByKeys` → `readByKeys`** — always ordered, length-preserving, `undefined` at missing positions.
+- [x] **Consolidate `readListByKeys` + `readOrderedListByKeys` → `readByKeys`** — always ordered, length-preserving, `undefined` at missing positions.
   - New file: `src/mass/read-by-keys.js` + `.d.ts` (content = current `read-ordered-list-by-keys.js`).
   - Delete: `src/mass/read-list-by-keys.js`, `src/mass/read-ordered-list-by-keys.js` (old content).
-- [ ] **Rename `deleteListByKeys` → `deleteByKeys`** — file rename, same content.
-- [ ] **Deprecated aliases** in `src/mass/index.js`: `readListByKeys`, `readOrderedListByKeys`, `deleteListByKeys` exported as aliases with a one-time `console.warn` pointing at the rename. Aliases removed in 3.3.0 or 4.0.0.
-- [ ] **Switch internal callers** in `src/adapter/adapter.js`:
-  - `getByKeys` (line ~226) → uses `readByKeys` (consolidated, ordered). **Fixes D2** (missing-items silently dropped).
-  - `getAllByParams` indirect second hop (line ~270) → uses `readByKeys`.
+- [x] **Rename `deleteListByKeys` → `deleteByKeys`** — export rename; `delete-list.js` retained as filename because it also hosts the `deleteList` (list-op-from-params) function.
+- [x] **Deprecated aliases** in `src/mass/index.js`: `readListByKeys`, `readOrderedListByKeys`, `deleteListByKeys`, `writeList` exported as aliases with a one-time `console.warn` pointing at the rename. Aliases removed in 3.3.0 or 4.0.0.
+- [x] **Switch internal callers** in `src/adapter/adapter.js`:
+  - `getByKeys` → uses `readByKeys` (consolidated, ordered). **Fixes D2** (missing-items silently dropped).
+  - `getListByParams` indirect second hop → uses `readByKeys`.
   - `cloneByKeys` / `moveByKeys` internals → use `readByKeys`; order doesn't matter for these but consistent API.
 
 ### D2 fix (length-preserving arrays for bulk-individual reads)
 
-- [ ] **`src/adapter/adapter.js`** — `getByKeys` returns `Array<Item | undefined>` (length matches input keys). Drop the `if (item) out.push(...)` filter.
-- [ ] **Wire-level `-by-names`** — update handler response serialization to emit `null` at missing positions instead of omitting.
+- [x] **`src/adapter/adapter.js`** — `getByKeys` returns `Array<Item | undefined>` (length matches input keys). Drop the `if (item) out.push(...)` filter.
+- [x] **Wire-level `-by-names`** — update handler response serialization to emit `null` at missing positions instead of omitting.
 - [ ] **Release notes** — call out the wire-level break; most consumers who spread the array are unaffected, consumers that assume `result.length === names.length` now get correct behaviour.
 
 ### New toolkit-named error classes
 
-- [ ] **`src/errors.js`** (or co-located) + `.d.ts` — introduce named error classes for constraints the toolkit detects:
+- [x] **`src/errors.js`** (or co-located) + `.d.ts` — introduce named error classes for constraints the toolkit detects:
   - `NoIndexForSortField`
   - `ConsistentReadOnGSIRejected`
   - `AmbiguousDestination` (thrown when clone/move has no `mapFn`)
   - `BadFilterField` / `BadFilterOp` (thrown by `filterable` allowlist rejections at the parser layer)
+  - `KeyFieldChanged`, `CreatedAtFieldNotDeclared`, `CascadeNotDeclared` (pre-staged for 3.3.0–3.5.0)
   - Existing `BadBody` / `BadContentLength` stay in the handler layer.
 
 ### Exit criteria

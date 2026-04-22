@@ -9,6 +9,7 @@ import {
   parseNames,
   parsePaging,
   parseFlag,
+  parseFFilter,
   buildEnvelope,
   paginationLinks,
   mergePolicy,
@@ -115,6 +116,7 @@ export const createHandler = (adapter, options = {}) => {
   const buildListOptions = query => {
     const fields = expandFieldsWildcards(parseFields(query.fields));
     const filter = parseFilter(query.filter);
+    const fFilter = parseFFilter(query);
     const paging = parsePaging(query, {defaultLimit: policy.defaultLimit, maxLimit: policy.maxLimit, maxOffset: policy.maxOffset});
     const consistent = parseFlag(query.consistent);
     /** @type {import('../adapter/adapter.js').ListOptions} */
@@ -125,6 +127,7 @@ export const createHandler = (adapter, options = {}) => {
     };
     if (fields) out.fields = fields;
     if (filter) out.filter = filter.query;
+    if (fFilter.length) out.fFilter = fFilter;
     return out;
   };
 

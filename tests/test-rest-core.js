@@ -7,6 +7,7 @@ import {
   parseNames,
   parsePaging,
   parseFlag,
+  parseFFilter,
   coerceStringQuery,
   buildEnvelope,
   buildErrorBody,
@@ -822,4 +823,63 @@ test('createHandler: no wildcard → fields pass through', async t => {
   await waitForResponse(res);
   await p;
   t.deepEqual(capturedOpts.fields, ['a', 'b']);
+});
+
+// --- parseFFilter ---
+
+test('parseFFilter: empty / missing query returns empty list', t => {
+  t.deepEqual(parseFFilter({}), []);
+  t.deepEqual(parseFFilter(null), []);
+});
+
+test('parseFFilter: basic single-value op', t => {
+  const out = parseFFilter({'f-status-eq': 'active'});
+  t.deepEqual(out, [{field: 'status', op: 'eq', values: ['active']}]);
+});
+
+test('parseFFilter: field name with dash (parse from right)', t => {
+  const out = parseFFilter({'f-rental-name-eq': 'Dallas'});
+  t.deepEqual(out, [{field: 'rental-name', op: 'eq', values: ['Dallas']}]);
+});
+
+test('parseFFilter: unknown op silently skipped (no `f-X-op` match)', t => {
+  // f-X-zz isn't a known op — treat as ordinary query param, skip.
+  const out = parseFFilter({'f-x-zz': 'v', 'f-y-eq': 'w'});
+  t.deepEqual(out, [{field: 'y', op: 'eq', values: ['w']}]);
+});
+
+test('parseFFilter: multi-value `in` with default comma delimiter', t => {
+  const out = parseFFilter({'f-cost-in': '1,3,5'});
+  t.deepEqual(out[0].values, ['1', '3', '5']);
+});
+
+test('parseFFilter: multi-value `in` with first-char delimiter', t => {
+  const out = parseFFilter({'f-name-in': '|a,b|c,d'});
+  t.deepEqual(out[0].values, ['a,b', 'c,d']);
+});
+
+test('parseFFilter: multi-value `btw` with caret delimiter', t => {
+  const out = parseFFilter({'f-cost-btw': '^1^10'});
+  t.deepEqual(out[0].values, ['1', '10']);
+});
+
+test('parseFFilter: no-value ops carry empty values array', t => {
+  const outEx = parseFFilter({'f-status-ex': ''});
+  t.deepEqual(outEx[0].values, []);
+  t.equal(outEx[0].op, 'ex');
+  const outNx = parseFFilter({'f-status-nx': '1'});
+  t.deepEqual(outNx[0].values, []);
+  t.equal(outNx[0].op, 'nx');
+});
+
+test('parseFFilter: drops leading/trailing empties in multi-value', t => {
+  // Leading delim produces leading empty → drop; same for trailing.
+  const out = parseFFilter({'f-cost-in': ',1,2,'});
+  t.deepEqual(out[0].values, ['1', '2']);
+});
+
+test('parseFFilter: leaves non-f query keys alone', t => {
+  const out = parseFFilter({offset: '0', limit: '10', 'f-status-eq': 'active'});
+  t.equal(out.length, 1);
+  t.equal(out[0].field, 'status');
 });

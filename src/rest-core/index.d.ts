@@ -10,6 +10,7 @@ export {parsePatch, type ParsedPatch, type ParsePatchOptions} from './parsers/pa
 export {parseNames} from './parsers/parse-names.js';
 export {parsePaging, type ParsedPaging, type ParsePagingOptions} from './parsers/parse-paging.js';
 export {parseFlag} from './parsers/parse-flag.js';
+export {parseFFilter, type FFilterClause} from './parsers/parse-f-filter.js';
 export {coerceStringQuery} from './parsers/coerce-string-query.js';
 
 export {buildEnvelope, type EnvelopeKeys, type BuildEnvelopeOptions} from './builders/build-envelope.js';

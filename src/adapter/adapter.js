@@ -23,9 +23,15 @@ import {moveList} from '../mass/move-list.js';
 
 import {defaultHooks, restrictKey} from './hooks.js';
 import {dispatchWrite} from './transaction-upgrade.js';
-import {ConsistentReadOnGSIRejected, NoIndexForSortField} from '../errors.js';
+import {ConsistentReadOnGSIRejected, NoIndexForSortField, BadFilterField, BadFilterOp} from '../errors.js';
 
 const MOVE_CHUNK = 12;
+
+// Closed op vocabulary for the `f-<field>-<op>=<value>` filter grammar.
+// Kept in sync with the rest-core `parseFFilter` parser's op set.
+const ALL_F_OPS = new Set(['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'in', 'btw', 'beg', 'ct', 'ex', 'nx']);
+const F_OP_COMPARISON = {eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>='};
+const F_OP_NO_VALUE = new Set(['ex', 'nx']);
 
 // Normalize an index-key entry (GSI/LSI pk or sk) — accepts a bare string or
 // a `{name, type?}` descriptor. Width is not applicable to index keys (no
@@ -221,6 +227,30 @@ export class Adapter {
     this.searchable = options.searchable || {};
     this.searchablePrefix = options.searchablePrefix || '-search-';
     this.indirectIndices = options.indirectIndices || {};
+
+    // `filterable` — allowlist for the `f-<field>-<op>=<value>` filter
+    // grammar. Shape `{<fieldName>: ['eq', 'beg', ...]}`. Validated at
+    // construction: every op string must be from the closed vocabulary.
+    this.filterable = {};
+    if (options.filterable !== undefined) {
+      if (typeof options.filterable !== 'object' || options.filterable === null) {
+        throw new Error('options.filterable must be a plain object');
+      }
+      for (const field of Object.keys(options.filterable)) {
+        const ops = options.filterable[field];
+        if (!Array.isArray(ops) || ops.length === 0) {
+          throw new Error(`options.filterable['${field}'] must be a non-empty array of ops`);
+        }
+        for (const op of ops) {
+          if (typeof op !== 'string' || !ALL_F_OPS.has(op)) {
+            throw new Error(
+              `options.filterable['${field}'] contains invalid op '${op}'. Allowed: ${[...ALL_F_OPS].join(', ')}`
+            );
+          }
+        }
+        this.filterable[field] = ops.slice();
+      }
+    }
 
     // Normalize the `indices` map. Legacy `indirectIndices: {name: 1}` entries
     // are synthesised into minimal `{type: 'gsi', indirect: true,
@@ -675,6 +705,142 @@ export class Adapter {
   }
 
   /**
+   * Resolve the declared type of a field for `f-filter` value coercion.
+   * Walks keyFields → indices (pk then sk). Fields not declared anywhere
+   * fall back to `'string'` (DynamoDB's default attribute shape).
+   */
+  _typeOfField(name) {
+    for (const f of this.keyFields) if (f.name === name) return f.type;
+    for (const spec of Object.values(this.indices)) {
+      if (spec.pk && spec.pk.name === name) return spec.pk.type;
+      if (spec.sk && spec.sk.name === name) return spec.sk.type;
+    }
+    return 'string';
+  }
+
+  _coerceFilterValue(name, value) {
+    const type = this._typeOfField(name);
+    if (type === 'number') {
+      const n = Number(value);
+      if (Number.isNaN(n)) throw new Error(`f-filter value for '${name}' is not a valid number: '${value}'`);
+      return n;
+    }
+    // 'string' and 'binary' both passed through as-is for now; binary
+    // typically arrives already-encoded (base64 string), which DynamoDB's
+    // DocumentClient accepts as a Buffer/Uint8Array — callers coerce ahead
+    // of time if they need binary filter values.
+    return value;
+  }
+
+  /**
+   * Compile parsed `f-<field>-<op>=<value>` clauses into `params`. Validates
+   * each clause against the adapter's `filterable` allowlist; coerces
+   * value(s) to the declared field type; auto-promotes index-compatible
+   * clauses to `KeyConditionExpression` when the target (base table or
+   * `params.IndexName`) has matching pk/sk; everything else lands in
+   * `FilterExpression`. Counter-based placeholders live alongside any
+   * existing aliases so merging with other builders is safe.
+   *
+   * @throws `BadFilterField` when a clause names a field not in `filterable`.
+   * @throws `BadFilterOp` when the op isn't allowlisted for that field.
+   */
+  applyFFilter(params, clauses) {
+    if (!clauses || clauses.length === 0) return params;
+    // Validate allowlist first — fail fast on the whole request.
+    for (const c of clauses) {
+      const allowed = this.filterable[c.field];
+      if (!allowed) throw new BadFilterField(c.field);
+      if (!allowed.includes(c.op)) throw new BadFilterOp(c.field, c.op);
+    }
+
+    // Determine the target pk/sk for auto-promotion.
+    const idxName = params?.IndexName;
+    let pkName, skName;
+    if (idxName && this.indices[idxName]) {
+      const idx = this.indices[idxName];
+      pkName = idx.pk ? idx.pk.name : this.keyFields[0].name; // LSI inherits base pk
+      skName = idx.sk ? idx.sk.name : undefined;
+    } else if (!idxName) {
+      pkName = this.keyFields[0].name;
+      skName = this.structuralKey ? this.structuralKey.name : undefined;
+    }
+
+    const names = params.ExpressionAttributeNames || {};
+    const values = params.ExpressionAttributeValues || {};
+    let nameCounter = Object.keys(names).length;
+    let valueCounter = Object.keys(values).length;
+    const allocName = n => {
+      const k = '#ff' + nameCounter++;
+      names[k] = n;
+      return k;
+    };
+    const allocValue = v => {
+      const k = ':ffv' + valueCounter++;
+      values[k] = v;
+      return k;
+    };
+
+    const kcParts = [];
+    const feParts = [];
+
+    for (const c of clauses) {
+      const canPromote =
+        (c.op === 'eq' && pkName && c.field === pkName) ||
+        (skName && c.field === skName && (c.op === 'eq' || c.op === 'beg' || c.op === 'btw'));
+      const target = canPromote ? kcParts : feParts;
+      const nameAlias = allocName(c.field);
+
+      if (F_OP_NO_VALUE.has(c.op)) {
+        target.push(c.op === 'ex' ? 'attribute_exists(' + nameAlias + ')' : 'attribute_not_exists(' + nameAlias + ')');
+        continue;
+      }
+      if (c.op === 'in') {
+        if (c.values.length === 0) throw new Error(`f-filter 'in' on '${c.field}' requires at least one value`);
+        const aliases = c.values.map(v => allocValue(this._coerceFilterValue(c.field, v)));
+        target.push(nameAlias + ' IN (' + aliases.join(', ') + ')');
+        continue;
+      }
+      if (c.op === 'btw') {
+        if (c.values.length !== 2) throw new Error(`f-filter 'btw' on '${c.field}' requires exactly 2 values`);
+        const lo = allocValue(this._coerceFilterValue(c.field, c.values[0]));
+        const hi = allocValue(this._coerceFilterValue(c.field, c.values[1]));
+        target.push(nameAlias + ' BETWEEN ' + lo + ' AND ' + hi);
+        continue;
+      }
+      if (c.op === 'beg') {
+        const v = allocValue(this._coerceFilterValue(c.field, c.values[0]));
+        target.push('begins_with(' + nameAlias + ', ' + v + ')');
+        continue;
+      }
+      if (c.op === 'ct') {
+        const v = allocValue(this._coerceFilterValue(c.field, c.values[0]));
+        target.push('contains(' + nameAlias + ', ' + v + ')');
+        continue;
+      }
+      // Comparison ops: eq ne lt le gt ge.
+      const op = F_OP_COMPARISON[c.op];
+      const v = allocValue(this._coerceFilterValue(c.field, c.values[0]));
+      target.push(nameAlias + ' ' + op + ' ' + v);
+    }
+
+    if (kcParts.length) {
+      const expr = kcParts.join(' AND ');
+      params.KeyConditionExpression = params.KeyConditionExpression
+        ? '(' + params.KeyConditionExpression + ') AND (' + expr + ')'
+        : expr;
+    }
+    if (feParts.length) {
+      const expr = feParts.join(' AND ');
+      params.FilterExpression = params.FilterExpression
+        ? '(' + params.FilterExpression + ') AND (' + expr + ')'
+        : expr;
+    }
+    if (Object.keys(names).length) params.ExpressionAttributeNames = names;
+    if (Object.keys(values).length) params.ExpressionAttributeValues = values;
+    return params;
+  }
+
+  /**
    * Find the declared secondary index whose sort key (`sk.name`) matches
    * the requested sort field. Prefers LSI over GSI when both match.
    * Throws `NoIndexForSortField` when no declared index matches — the
@@ -1072,6 +1238,11 @@ export class Adapter {
       } else if (options?.fields) {
         p = addProjection(p, options.fields, this.projectionFieldMap);
       }
+    }
+    // `f-<field>-<op>=<value>` clauses. Parsed by rest-core; compiled here
+    // against the declared `filterable` allowlist + index metadata.
+    if (options?.fFilter && options.fFilter.length) {
+      p = this.applyFFilter(p, options.fFilter);
     }
     if (options?.filter) {
       p = buildFilter(

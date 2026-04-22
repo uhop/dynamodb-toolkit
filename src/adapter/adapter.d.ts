@@ -134,6 +134,14 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
   typeDiscriminator?: string | {name: string};
   /** Alias map for projections — rewrites the first segment of each requested field. */
   projectionFieldMap?: Record<string, string>;
+  /**
+   * Allowlist for the `f-<field>-<op>=<value>` filter grammar. Shape
+   * `{<fieldName>: [ops]}`. Requests that name an unlisted field or use
+   * an op not in the allowlist are rejected with `BadFilterField` /
+   * `BadFilterOp`. Type coercion for filter values comes from
+   * `keyFields` / `indices` declarations (default `'string'`).
+   */
+  filterable?: Record<string, Array<'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'in' | 'btw' | 'beg' | 'ct' | 'ex' | 'nx'>>;
   /** Fields that get a `searchablePrefix + field` lowercase mirror for substring filtering. */
   searchable?: Record<string, 1 | true>;
   /** Mirror-column prefix. Default `'-search-'`. */
@@ -276,6 +284,12 @@ export interface ListOptions {
   fields?: string | string[] | null;
   /** Substring filter over `searchable` fields. */
   filter?: string;
+  /**
+   * Parsed `f-<field>-<op>=<value>` clauses (from the REST layer's
+   * `parseFFilter`). Compiled by `adapter.applyFFilter` into
+   * `FilterExpression` / `KeyConditionExpression`.
+   */
+  fFilter?: Array<{field: string; op: string; values: string[]}>;
   /** Mirror-column prefix override for the filter. Default `'-search-'`. */
   prefix?: string;
   /** When `true`, the filter query is not lowercased. */
@@ -342,6 +356,8 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   projectionFieldMap: Record<string, string>;
   /** Searchable-field map for substring filtering. */
   searchable: Record<string, 1 | true>;
+  /** Allowlist for the `f-<field>-<op>=<value>` filter grammar. */
+  filterable: Record<string, string[]>;
   /** Mirror-column prefix. Default `'-search-'`. */
   searchablePrefix: string;
   /** Indirect-index map — reads against these GSIs do a second-hop BatchGet. */
@@ -379,6 +395,17 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @throws NoIndexForSortField when nothing matches.
    */
   findIndexForSort(field: string): string;
+
+  /**
+   * Compile parsed `f-<field>-<op>=<value>` clauses into `params`.
+   * Validates against `filterable`, coerces values to declared types,
+   * auto-promotes index-compatible clauses to `KeyConditionExpression`;
+   * rest land in `FilterExpression`. Mutates and returns `params`.
+   *
+   * @throws BadFilterField when a clause names a field not in `filterable`.
+   * @throws BadFilterOp when the op isn't allowlisted for that field.
+   */
+  applyFFilter(params: Record<string, unknown>, clauses: Array<{field: string; op: string; values: string[]}>): Record<string, unknown>;
 
   /**
    * Build a `KeyConditionExpression` for a Query against this Adapter's main
