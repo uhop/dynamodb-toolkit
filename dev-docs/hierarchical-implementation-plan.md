@@ -248,29 +248,31 @@ Mass clone / move / edit become resumable, failure-buckets become structured, in
 
 Optimistic concurrency and the marshalling helpers for types the SDK can't round-trip cleanly.
 
+> **Status (2026-04-22):** code complete. Tests green (497 node / 491 bun / 491 deno / 37 e2e); lint + ts-check + js-check clean. Ready to tag 3.4.0.
+
 ### `versionField` (§"Concurrency-support mechanisms" → Q26)
 
-- [ ] **`src/adapter/adapter.js`** — accept `{versionField: string}` at construction.
-- [ ] **Auto-condition** on all writes (put, update): `ConditionExpression: attribute_not_exists(<pk>) OR <versionField> = :v`. Auto-increment the field on success.
-- [ ] **Delete** uses `ConditionExpression: <versionField> = :v`; does not increment.
-- [ ] **Mass-op integration** — `conflicts` bucket populates when version check fails; distinguished from other `ConditionalCheckFailed` cases.
-- [ ] **Declaration validation** — `versionField` must start with `technicalPrefix` when declared (auto-strips on revive).
+- [x] **`src/adapter/adapter.js`** — accept `{versionField: string}` at construction.
+- [x] **Auto-condition** on all writes (put, update): `ConditionExpression: attribute_not_exists(<pk>) OR <versionField> = :v`. Auto-increment the field on success.
+- [x] **Delete** uses `ConditionExpression: <versionField> = :v` when `expectedVersion` supplied; does not increment.
+- [x] **Mass-op integration** — `editListByParams` CCF routes to `conflicts` bucket when `versionField` declared. Other mass ops (clone/move/rename/cloneWithOverwrite) keep CCF routing to `skipped`/`failed`: their CCFs arise from `ifNotExists` / `ifExists` / `attribute_not_exists` guards (expected semantic outcomes), not version mismatches. Correct behaviour — not an omission.
+- [x] **Declaration validation** — `versionField` must start with `technicalPrefix` (both required). Revive preserves the field so callers round-trip it; prepare's "no technicalPrefix collision" guard carves it out.
 
 ### `asOf` scope-freeze (§Q27)
 
-- [ ] **`src/adapter/adapter.js`** — accept `{createdAtField: string}` at construction.
-- [ ] **Mass-op option** `{asOf: Date | string}` — emits `FilterExpression: <createdAtField> <= :asOf`, AND-combined with caller's FilterExpression.
-- [ ] **Without `createdAtField`** declared → throws `CreatedAtFieldNotDeclared`.
+- [x] **`src/adapter/adapter.js`** — accept `{createdAtField: string}` at construction.
+- [x] **Mass-op option** `{asOf: Date | string | number}` — emits `FilterExpression: <createdAtField> <= :asOf`, AND-combined with caller's FilterExpression. Wired across all six mass ops: `deleteListByParams`, `cloneListByParams`, `moveListByParams`, `editListByParams`, `rename`, `cloneWithOverwrite`.
+- [x] **Without `createdAtField`** declared → throws `CreatedAtFieldNotDeclared`.
 
 ### Marshalling helpers (§"Marshalling helpers" → Q31 / Q32)
 
-- [ ] **`src/marshalling/index.js`** + `.d.ts` — module entry, re-exports.
-- [ ] **`src/marshalling/date.js`** — `marshallDateISO` / `unmarshallDateISO`, `marshallDateEpoch` / `unmarshallDateEpoch`. No generic `marshallDate` alias.
-- [ ] **`src/marshalling/map.js`** — `marshallMap(map, valueTransform = x => x)`, `unmarshallMap(obj, valueTransform = x => x)`.
-- [ ] **`src/marshalling/url.js`** — `marshallURL`, `unmarshallURL`.
-- [ ] **`package.json` `exports`** — add `./marshalling` subpath.
-- [ ] **TypeScript `Marshaller<TRuntime, TStored>`** pair helper in `marshalling.d.ts` — nudges toward symmetric wiring.
-- [ ] **Deferred: `RegExp`, `Error`, Temporal types, Q31' registry.** Documented as future-additive in the wiki, parked in the queue.
+- [x] **`src/marshalling/index.js`** + `.d.ts` — module entry, re-exports.
+- [x] **`src/marshalling/date.js`** — `marshallDateISO` / `unmarshallDateISO`, `marshallDateEpoch` / `unmarshallDateEpoch`. No generic `marshallDate` alias.
+- [x] **`src/marshalling/map.js`** — `marshallMap(map, valueTransform = x => x)`, `unmarshallMap(obj, valueTransform = x => x)`.
+- [x] **`src/marshalling/url.js`** — `marshallURL`, `unmarshallURL`.
+- [x] **`package.json` `exports`** — add `./marshalling` subpath.
+- [x] **TypeScript `Marshaller<TRuntime, TStored>`** pair helper in `marshalling.d.ts` — concrete pairs `dateISO`, `dateEpoch`, `url`.
+- [ ] **Deferred: `RegExp`, `Error`, Temporal types, Q31' registry.** Documented as future-additive in the wiki, parked in the queue. (Intentional — unchecked to retain in queue.)
 
 ### Exit criteria
 
