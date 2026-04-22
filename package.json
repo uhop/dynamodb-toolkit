@@ -14,6 +14,7 @@
     "./paths": "./src/paths/index.js",
     "./rest-core": "./src/rest-core/index.js",
     "./handler": "./src/handler/index.js",
+    "./marshalling": "./src/marshalling/index.js",
     "./*": "./src/*"
   },
   "scripts": {
