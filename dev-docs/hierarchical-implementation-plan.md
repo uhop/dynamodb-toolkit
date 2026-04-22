@@ -292,37 +292,38 @@ Optimistic concurrency and the marshalling helpers for types the SDK can't round
 
 Developer-primitive cascade for hierarchical deletes / clones / moves. The declaration surface (A6') and the cascade methods.
 
+> **Status (2026-04-22):** code complete; tests green (510 node / 504 bun / 504 deno); lint + ts-check + js-check pass. Wiki work parallel-track.
+
 ### Relationship declaration
 
-- [ ] **`src/adapter/adapter.js`** — accept `{relationships?: ...}` at construction. Shape TBD at implementation-kickoff micro-design — candidates:
-  - Parent → children mapping by `keyFields` depth.
-  - Parent → children mapping by type label (from `typeLabels`).
-  - Per-relationship cascade policy (e.g., "rename propagates to all descendants").
-
-  Spec the shape in a short follow-up design note before coding. Commit to one shape before tests land.
+- [x] **`src/adapter/adapter.js`** — `{relationships?: {structural?: boolean}}` at construction. Opt-in declaration; `{structural: true}` treats the composite structural key as the parent-child hierarchy. Validated at construction (requires `keyFields.length > 1` + `structuralKey`). Shape chosen for forward compat — later relationship kinds (e.g., cross-adapter, via-GSI) extend the object.
 
 ### Cascade primitives
 
-- [ ] **`adapter.deleteAllUnder(key)`** — leaf-first delete of the subtree rooted at `key`.
-- [ ] **`adapter.cloneAllUnder(srcKey, dstKey, {mapFn?})`** — root-first subtree clone. `mapFn` for per-item transform.
-- [ ] **`adapter.moveAllUnder(srcKey, dstKey, {mapFn?})`** — copy-then-delete subtree.
-- [ ] **Throw `CascadeNotDeclared`** when called without a relationship declaration.
-- [ ] **Naming final call** — `...Under` or `...Cascade` — pin at implementation.
+Method split into two intentional styles per op (no options-bag overload): `...AllUnder(srcKey, dstKey, options)` for uniform prefix-swap, `...AllUnderBy(srcKey, mapFn, options)` for caller-supplied-mapFn fan-out. Both gated by the A6' declaration.
+
+- [x] **`adapter.deleteAllUnder(srcKey, options)`** — leaf-first delete of the subtree rooted at `srcKey`. Descendants via `deleteListByParams(buildKey(srcKey, {kind: 'children'}))`; self via `ifExists` `DeleteCommand` (absent → `skipped` bucket). Resumable — self-delete deferred until pagination completes.
+- [x] **`adapter.cloneAllUnder(srcKey, dstKey, options)`** — root-first subtree clone via `swapPrefix(srcKey, dstKey)`. `options.mapFn` composes after the swap (same as `rename`). Source stays intact.
+- [x] **`adapter.cloneAllUnderBy(srcKey, mapFn, options)`** — mapFn-driven clone; destinations wholly determined by `mapFn`. Useful for fan-out.
+- [x] **`adapter.moveAllUnder(srcKey, dstKey, options)`** — leaf-first subtree move via `swapPrefix`; two-phase idempotent copy+delete (shared `_subtreeRename` with `rename`). `options.mapFn` composes.
+- [x] **`adapter.moveAllUnderBy(srcKey, mapFn, options)`** — mapFn-driven move.
+- [x] **Throw `CascadeNotDeclared`** when called without `relationships.structural` on the adapter.
+- [x] **Naming pinned** — `...Under` (dst subtree) + `...UnderBy` (mapFn-driven).
 
 ### REST integration
 
-- [ ] **Default REST handler unchanged.** `DELETE /key` stays single-row. Developers wire cascade endpoints themselves by calling `adapter.deleteAllUnder(key)` from their handler.
+- [x] **Default REST handler unchanged.** `DELETE /key` stays single-row. Developers wire cascade endpoints themselves by calling `adapter.deleteAllUnder(key)` from their handler.
 
 ### Exit criteria
 
-- Relationship declaration validated at construction.
-- Cascade primitives pass tests against multi-level hierarchies.
-- `CascadeNotDeclared` thrown when relationships absent.
-- Default `DELETE /key` behaviour verified unchanged.
+- [x] Relationship declaration validated at construction.
+- [x] Cascade primitives pass tests against multi-level hierarchies.
+- [x] `CascadeNotDeclared` thrown when relationships absent.
+- [x] Default `DELETE /key` behaviour verified unchanged.
 
 ### Wiki work
 
-- [ ] **Cascade surface page** — developer primitive vs. URL convention distinction, relationship-declaration shape, examples.
+- [ ] **Cascade surface page** — developer primitive vs. URL convention distinction, relationship-declaration shape, `-Under` vs `-UnderBy` method variants, examples.
 
 ---
 

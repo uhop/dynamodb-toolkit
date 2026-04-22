@@ -1383,6 +1383,297 @@ test('rename: resumable via maxItems + resumeToken', async t => {
   t.ok(r.cursor);
 });
 
+// --- cascade primitives (A6' / 3.5.0) ---
+
+const makeCascadeAdapter = clientHandler =>
+  makeAdapter(clientHandler, {
+    keyFields: [
+      {name: 'state', type: 'string'},
+      {name: 'city', type: 'string'},
+      {name: 'rentalName', type: 'string'}
+    ],
+    structuralKey: {name: '_sk', separator: '|'},
+    technicalPrefix: '_',
+    relationships: {structural: true}
+  });
+
+test('relationships: {structural: true} requires composite keyFields + structuralKey', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['name'], relationships: {structural: true}}), 'single-field keyFields rejected');
+  // composite but structuralKey is auto-required; the toolkit already throws before relationships fires,
+  // so this path would hit the earlier structuralKey-required check.
+  t.doesNotThrow(
+    () =>
+      new Adapter({
+        client,
+        table: 'T',
+        keyFields: ['state', 'city'],
+        structuralKey: {name: '_sk'},
+        relationships: {structural: true}
+      }),
+    'composite + structuralKey accepted'
+  );
+});
+
+test('relationships: rejects non-object and non-boolean structural', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['a'], relationships: 'yes'}), 'non-object');
+  t.throws(
+    () =>
+      new Adapter({
+        client,
+        table: 'T',
+        keyFields: ['state', 'city'],
+        structuralKey: {name: '_sk'},
+        relationships: {structural: 'yes'}
+      }),
+    'non-boolean structural'
+  );
+});
+
+test('cascade: methods throw CascadeNotDeclared without relationships declaration', async t => {
+  const {adapter} = makeAdapter(async () => ({}), {
+    keyFields: [
+      {name: 'state', type: 'string'},
+      {name: 'city', type: 'string'}
+    ],
+    structuralKey: {name: '_sk'},
+    technicalPrefix: '_'
+  });
+  await t.rejects(adapter.deleteAllUnder({state: 'TX'}), 'deleteAllUnder refuses');
+  await t.rejects(adapter.cloneAllUnder({state: 'TX'}, {state: 'FL'}), 'cloneAllUnder refuses');
+  await t.rejects(
+    adapter.cloneAllUnderBy({state: 'TX'}, item => item),
+    'cloneAllUnderBy refuses'
+  );
+  await t.rejects(adapter.moveAllUnder({state: 'TX'}, {state: 'FL'}), 'moveAllUnder refuses');
+  await t.rejects(
+    adapter.moveAllUnderBy({state: 'TX'}, item => item),
+    'moveAllUnderBy refuses'
+  );
+});
+
+test('deleteAllUnder: deletes descendants via BatchWrite + self via ifExists delete', async t => {
+  const sent = [];
+  const {adapter} = makeCascadeAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') {
+      return {
+        Items: [
+          {state: 'TX', city: 'Austin', rentalName: 'R1', _sk: 'TX|Austin|R1'},
+          {state: 'TX', city: 'Austin', rentalName: 'R2', _sk: 'TX|Austin|R2'}
+        ]
+      };
+    }
+    return {};
+  });
+  const r = await adapter.deleteAllUnder({state: 'TX', city: 'Austin'});
+  t.equal(r.processed, 3, 'two descendants + self');
+  const selfDelete = sent.find(c => c.constructor.name === 'DeleteCommand' && c.input.ConditionExpression);
+  t.ok(selfDelete, 'self delete uses ConditionExpression');
+  t.matchString(selfDelete.input.ConditionExpression, /attribute_exists/);
+});
+
+test('deleteAllUnder: self absent → skipped bucket increments', async t => {
+  const {adapter} = makeCascadeAdapter(async cmd => {
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') return {Items: []};
+    if (n === 'DeleteCommand' && cmd.input.ConditionExpression) {
+      const err = new Error('no such item');
+      err.name = 'ConditionalCheckFailedException';
+      throw err;
+    }
+    return {};
+  });
+  const r = await adapter.deleteAllUnder({state: 'TX', city: 'Austin'});
+  t.equal(r.processed, 0);
+  t.equal(r.skipped, 1, 'self was absent');
+});
+
+test('deleteAllUnder: cursor from descendants → self deferred', async t => {
+  let call = 0;
+  const pages = [
+    {Items: [{state: 'TX', city: 'Austin', rentalName: 'R1', _sk: 'TX|Austin|R1'}], LastEvaluatedKey: {_sk: 'TX|Austin|R1'}},
+    {Items: [{state: 'TX', city: 'Austin', rentalName: 'R2', _sk: 'TX|Austin|R2'}]}
+  ];
+  const sent = [];
+  const {adapter} = makeCascadeAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') return pages[call++];
+    return {};
+  });
+  const r = await adapter.deleteAllUnder({state: 'TX', city: 'Austin'}, {maxItems: 1});
+  t.ok(r.cursor, 'cursor returned');
+  t.equal(sent.filter(c => c.constructor.name === 'DeleteCommand' && c.input.ConditionExpression).length, 0, 'self-delete not run while paginating');
+});
+
+test('cloneAllUnder: prefix-swap subtree with self-clone; source stays', async t => {
+  const sent = [];
+  const {adapter} = makeCascadeAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') {
+      return {Items: [{state: 'TX', city: 'Austin', rentalName: 'R1', _sk: 'TX|Austin|R1'}]};
+    }
+    if (n === 'GetCommand') {
+      return {Item: {state: 'TX', city: 'Austin', _sk: 'TX|Austin'}};
+    }
+    return {};
+  });
+  const r = await adapter.cloneAllUnder({state: 'TX', city: 'Austin'}, {state: 'TX', city: 'Dallas'});
+  t.equal(r.processed, 2, 'self + 1 descendant');
+  // Self-clone goes through PutCommand (single-op path);
+  // descendant goes through BatchWriteCommand (mass-op path).
+  const selfPut = sent.find(c => c.constructor.name === 'PutCommand');
+  t.ok(selfPut, 'self-clone via PutCommand');
+  t.equal(selfPut.input.Item.city, 'Dallas', 'self city shifted');
+  const batch = sent.find(c => c.constructor.name === 'BatchWriteCommand');
+  t.ok(batch, 'descendant via BatchWrite');
+  const batchPut = batch.input.RequestItems[TABLE][0].PutRequest.Item;
+  t.equal(batchPut.city, 'Dallas', 'descendant city shifted');
+  t.equal(sent.filter(c => c.constructor.name === 'DeleteCommand').length, 0, 'source untouched');
+});
+
+test('cloneAllUnder: options.mapFn composes after prefix swap', async t => {
+  const puts = [];
+  const {adapter} = makeCascadeAdapter(async cmd => {
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') {
+      return {Items: [{state: 'TX', city: 'Austin', rentalName: 'R1', _sk: 'TX|Austin|R1', hp: 5}]};
+    }
+    if (n === 'GetCommand') {
+      return {Item: {state: 'TX', city: 'Austin', _sk: 'TX|Austin'}};
+    }
+    if (n === 'PutCommand') puts.push(cmd.input.Item);
+    if (n === 'BatchWriteCommand') {
+      for (const req of cmd.input.RequestItems[TABLE]) puts.push(req.PutRequest.Item);
+    }
+    return {};
+  });
+  await adapter.cloneAllUnder({state: 'TX', city: 'Austin'}, {state: 'TX', city: 'Dallas'}, {mapFn: item => ({...item, marked: true})});
+  t.equal(puts.length, 2, 'self + descendant');
+  t.ok(
+    puts.every(p => p.marked === true),
+    'mapFn applied'
+  );
+  t.ok(
+    puts.every(p => p.city === 'Dallas'),
+    'swap still in effect'
+  );
+});
+
+test('cloneAllUnder: resumeToken skips self-clone', async t => {
+  const sent = [];
+  const {adapter} = makeCascadeAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') return {Items: []};
+    return {};
+  });
+  await adapter.cloneAllUnder({state: 'TX', city: 'Austin'}, {state: 'TX', city: 'Dallas'}, {resumeToken: 'eyJfc2siOiJUWHxBdXN0aW58UjEifQ=='});
+  t.equal(sent.filter(c => c.constructor.name === 'GetCommand').length, 0, 'self-clone skipped');
+});
+
+test('cloneAllUnderBy: mapFn drives destinations, supports fan-out', async t => {
+  const puts = [];
+  const {adapter} = makeCascadeAdapter(async cmd => {
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') {
+      return {
+        Items: [
+          {state: 'TX', city: 'Austin', rentalName: 'R1', _sk: 'TX|Austin|R1', size: 'big'},
+          {state: 'TX', city: 'Austin', rentalName: 'R2', _sk: 'TX|Austin|R2', size: 'small'}
+        ]
+      };
+    }
+    if (n === 'GetCommand') {
+      return {Item: {state: 'TX', city: 'Austin', _sk: 'TX|Austin', size: 'parent'}};
+    }
+    if (n === 'PutCommand') puts.push(cmd.input.Item);
+    if (n === 'BatchWriteCommand') {
+      for (const req of cmd.input.RequestItems[TABLE]) puts.push(req.PutRequest.Item);
+    }
+    return {};
+  });
+  await adapter.cloneAllUnderBy({state: 'TX', city: 'Austin'}, item => ({
+    ...item,
+    state: item.size === 'big' ? 'CA' : 'FL'
+  }));
+  const rentalPuts = puts.filter(p => p.rentalName);
+  t.equal(rentalPuts.find(p => p.rentalName === 'R1').state, 'CA', 'big → CA');
+  t.equal(rentalPuts.find(p => p.rentalName === 'R2').state, 'FL', 'small → FL');
+});
+
+test('moveAllUnder: descendants migrated via rename pattern, then self', async t => {
+  const sent = [];
+  const {adapter} = makeCascadeAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') {
+      return {Items: [{state: 'TX', city: 'Austin', rentalName: 'R1', _sk: 'TX|Austin|R1'}]};
+    }
+    if (n === 'GetCommand') {
+      return {Item: {state: 'TX', city: 'Austin', _sk: 'TX|Austin'}};
+    }
+    return {};
+  });
+  const r = await adapter.moveAllUnder({state: 'TX', city: 'Austin'}, {state: 'TX', city: 'Dallas'});
+  t.equal(r.processed, 2, 'descendant + self');
+  const puts = sent.filter(c => c.constructor.name === 'PutCommand');
+  const deletes = sent.filter(c => c.constructor.name === 'DeleteCommand');
+  t.equal(puts.length, 2, 'two puts');
+  t.equal(deletes.length, 2, 'two deletes (src)');
+  t.ok(
+    puts.every(p => p.input.Item.city === 'Dallas'),
+    'city shifted'
+  );
+  t.ok(
+    puts.every(p => p.input.ConditionExpression && /attribute_not_exists/.test(p.input.ConditionExpression)),
+    'puts use ifNotExists'
+  );
+});
+
+test('moveAllUnder: cursor from descendants → self deferred', async t => {
+  const pages = [{Items: [{state: 'TX', city: 'Austin', rentalName: 'R1', _sk: 'TX|Austin|R1'}], LastEvaluatedKey: {_sk: 'TX|Austin|R1'}}, {Items: []}];
+  let call = 0;
+  const sent = [];
+  const {adapter} = makeCascadeAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') return pages[call++];
+    return {};
+  });
+  const r = await adapter.moveAllUnder({state: 'TX', city: 'Austin'}, {state: 'TX', city: 'Dallas'}, {maxItems: 1});
+  t.ok(r.cursor, 'cursor returned');
+  t.equal(sent.filter(c => c.constructor.name === 'GetCommand').length, 0, 'self-move not started');
+});
+
+test('moveAllUnderBy: mapFn drives destinations', async t => {
+  const puts = [];
+  const {adapter} = makeCascadeAdapter(async cmd => {
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') {
+      return {Items: [{state: 'TX', city: 'Austin', rentalName: 'R1', _sk: 'TX|Austin|R1'}]};
+    }
+    if (n === 'GetCommand') {
+      return {Item: {state: 'TX', city: 'Austin', _sk: 'TX|Austin'}};
+    }
+    if (n === 'PutCommand') puts.push(cmd.input.Item);
+    return {};
+  });
+  await adapter.moveAllUnderBy({state: 'TX', city: 'Austin'}, item => ({
+    ...item,
+    state: 'CA',
+    city: 'LA'
+  }));
+  t.ok(
+    puts.every(p => p.state === 'CA' && p.city === 'LA'),
+    'mapFn-driven destinations'
+  );
+});
+
 // --- editListByParams ---
 
 test('editListByParams: updates per item, buckets no-ops as skipped', async t => {

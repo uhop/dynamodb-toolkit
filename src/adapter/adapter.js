@@ -23,7 +23,7 @@ import {runPaged} from '../mass/run-paged.js';
 
 import {defaultHooks, restrictKey} from './hooks.js';
 import {dispatchWrite} from './transaction-upgrade.js';
-import {ConsistentReadOnGSIRejected, NoIndexForSortField, BadFilterField, BadFilterOp, KeyFieldChanged, CreatedAtFieldNotDeclared} from '../errors.js';
+import {ConsistentReadOnGSIRejected, NoIndexForSortField, BadFilterField, BadFilterOp, KeyFieldChanged, CreatedAtFieldNotDeclared, CascadeNotDeclared} from '../errors.js';
 
 const MOVE_CHUNK = 12;
 
@@ -336,6 +336,31 @@ export class Adapter {
       } else {
         this.indices[name] = {type: 'gsi', indirect: true, projection: 'keys-only', sparse: false};
       }
+    }
+
+    // A6': parent-child relationship declaration for cascade primitives.
+    // `{structural: true}` opts into treating the composite structural key
+    // as a parent-child hierarchy. Without a declaration, cascade
+    // primitives (`deleteAllUnder` / `cloneAllUnder` / `moveAllUnder`)
+    // throw `CascadeNotDeclared`. The toolkit does not infer cascade
+    // scope from composite `keyFields` alone — a composite key is a join
+    // pattern, which is not the same as a parent-child declaration.
+    this.relationships = null;
+    if (options.relationships !== undefined) {
+      if (typeof options.relationships !== 'object' || options.relationships === null) {
+        throw new Error('options.relationships must be a plain object');
+      }
+      if (options.relationships.structural !== undefined && typeof options.relationships.structural !== 'boolean') {
+        throw new Error('options.relationships.structural must be a boolean');
+      }
+      if (options.relationships.structural === true) {
+        if (this.keyFields.length < 2 || !this.structuralKey) {
+          throw new Error(
+            'options.relationships.structural requires composite keyFields (length > 1) with a declared structuralKey'
+          );
+        }
+      }
+      this.relationships = {structural: Boolean(options.relationships.structural)};
     }
 
     // Validate that all adapter-managed field names start with technicalPrefix
@@ -1389,54 +1414,7 @@ export class Adapter {
     const keyShifter = this.swapPrefix(fromExample, toExample);
     const mapFn = options?.mapFn ? mergeMapFn(keyShifter, options.mapFn) : keyShifter;
 
-    return runPaged(this.client, queryParams, options, async items => {
-      let processed = 0;
-      let skipped = 0;
-      /** @type {import('../mass/index.js').MassOpFailure[]} */
-      const failed = [];
-
-      for (const rawItem of items) {
-        const srcKey = this._restrictKey(rawItem);
-        const revived = this.hooks.revive(rawItem);
-        const mapped = mapFn(revived);
-        if (!mapped) {
-          skipped++;
-          continue;
-        }
-        const prepared = this._prepareItem(mapped);
-
-        // Phase 1: put to dst with ifNotExists. CCF means the
-        // destination already exists — refuse to overwrite, leave src
-        // intact. This protects against accidental collisions without
-        // the caller having to enumerate dst beforehand.
-        try {
-          const putParams = this._checkExistence({TableName: this.table, Item: prepared}, true);
-          await this.client.send(new PutCommand(putParams));
-        } catch (err) {
-          if (isConditionFailure(err)) {
-            skipped++;
-            continue;
-          }
-          failed.push({key: srcKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
-          continue;
-        }
-
-        // Phase 2: delete src unconditionally. Idempotent. If this
-        // fails and a retry runs, phase 1 on the now-completed item
-        // CCFs (since dst already exists — the retry bucket is
-        // skipped), and phase 2 retries. A delete failure here leaves
-        // a duplicate — bucket as failed so the caller knows to clean
-        // up.
-        try {
-          await this.client.send(new DeleteCommand({TableName: this.table, Key: srcKey}));
-          processed++;
-        } catch (err) {
-          failed.push({key: srcKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
-        }
-      }
-
-      return {processed, skipped, failed};
-    });
+    return this._subtreeRename(queryParams, mapFn, options);
   }
 
   async cloneWithOverwrite(fromExample, toExample, options) {
@@ -1482,6 +1460,258 @@ export class Adapter {
         // new content. Source stays intact (clone, not move).
         try {
           await this.client.send(new PutCommand({TableName: this.table, Item: prepared}));
+          processed++;
+        } catch (err) {
+          failed.push({key: srcKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
+        }
+      }
+
+      return {processed, skipped, failed};
+    });
+  }
+
+  // --- cascade primitives (A6' — 3.5.0) ---
+  //
+  // Subtree operations rooted at a partial `srcKey`. "Under" means self +
+  // strict descendants (the key itself plus everything declared to hang
+  // off it via the structural key). Require an explicit `relationships`
+  // declaration — the toolkit will not infer cascade scope from composite
+  // `keyFields` alone.
+  //
+  // Two method families per op (deliberately separate, no overload):
+  //   - `...AllUnder(srcKey, dstKey, options)` — uniform prefix-swap to
+  //     a single destination subtree. `options.mapFn` composes after the
+  //     swap (same pattern as `rename`/`cloneWithOverwrite`).
+  //   - `...AllUnderBy(srcKey, mapFn, options)` — caller-supplied mapFn
+  //     drives destinations. Useful for fan-out (e.g., clone Austin
+  //     records to different cities based on a property).
+
+  _requireStructuralCascade(op) {
+    if (!this.relationships?.structural) {
+      throw new CascadeNotDeclared(op);
+    }
+  }
+
+  _mergeMassOpResults(a, b) {
+    return {
+      processed: (a.processed ?? 0) + (b.processed ?? 0),
+      skipped: (a.skipped ?? 0) + (b.skipped ?? 0),
+      failed: [...(a.failed ?? []), ...(b.failed ?? [])],
+      conflicts: [...(a.conflicts ?? []), ...(b.conflicts ?? [])]
+    };
+  }
+
+  async _getRawSelf(srcKey) {
+    const dbKey = this._toKey(srcKey);
+    const data = await this.client.send(new GetCommand({TableName: this.table, Key: dbKey}));
+    return data.Item;
+  }
+
+  async _cascadeSelfDelete(srcKey) {
+    const dbKey = this._toKey(srcKey);
+    // ifExists: distinguish "deleted the self node" from "self was absent"
+    // in the return shape (processed vs skipped).
+    const params = this._checkExistence({TableName: this.table, Key: dbKey}, false);
+    try {
+      await this.client.send(new DeleteCommand(params));
+      return {processed: 1, skipped: 0, failed: [], conflicts: []};
+    } catch (err) {
+      if (isConditionFailure(err)) return {processed: 0, skipped: 1, failed: [], conflicts: []};
+      return {
+        processed: 0,
+        skipped: 0,
+        failed: [{key: dbKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err}],
+        conflicts: []
+      };
+    }
+  }
+
+  async _cascadeSelfClone(srcKey, mapFn, options) {
+    const rawItem = await this._getRawSelf(srcKey);
+    if (!rawItem) return {processed: 0, skipped: 0, failed: [], conflicts: []};
+
+    const revived = this.hooks.revive(rawItem);
+    const mapped = mapFn(revived);
+    if (!mapped) return {processed: 0, skipped: 1, failed: [], conflicts: []};
+
+    const prepared = this._prepareItem(mapped);
+
+    if (options?.ifNotExists || options?.ifExists) {
+      const result = await this._putWithCondition([prepared], options);
+      return {
+        processed: result.processed,
+        skipped: result.skipped,
+        failed: result.failed,
+        conflicts: []
+      };
+    }
+
+    try {
+      await this.client.send(new PutCommand({TableName: this.table, Item: prepared}));
+      return {processed: 1, skipped: 0, failed: [], conflicts: []};
+    } catch (err) {
+      return {
+        processed: 0,
+        skipped: 0,
+        failed: [{key: this._restrictKey(prepared), reason: classifyMassOpError(err), details: err?.message, sdkError: err}],
+        conflicts: []
+      };
+    }
+  }
+
+  async _cascadeSelfMove(srcKey, mapFn) {
+    const rawItem = await this._getRawSelf(srcKey);
+    if (!rawItem) return {processed: 0, skipped: 0, failed: [], conflicts: []};
+
+    const revived = this.hooks.revive(rawItem);
+    const mapped = mapFn(revived);
+    if (!mapped) return {processed: 0, skipped: 1, failed: [], conflicts: []};
+
+    const prepared = this._prepareItem(mapped);
+    const srcDbKey = this._restrictKey(rawItem);
+
+    // Phase 1: put dst ifNotExists (rename's constructive-before-destructive).
+    try {
+      const putParams = this._checkExistence({TableName: this.table, Item: prepared}, true);
+      await this.client.send(new PutCommand(putParams));
+    } catch (err) {
+      if (isConditionFailure(err)) return {processed: 0, skipped: 1, failed: [], conflicts: []};
+      return {
+        processed: 0,
+        skipped: 0,
+        failed: [{key: srcDbKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err}],
+        conflicts: []
+      };
+    }
+
+    // Phase 2: delete src. Partial failure leaves a duplicate — bucket as
+    // failed so the caller knows to clean up.
+    try {
+      await this.client.send(new DeleteCommand({TableName: this.table, Key: srcDbKey}));
+      return {processed: 1, skipped: 0, failed: [], conflicts: []};
+    } catch (err) {
+      return {
+        processed: 0,
+        skipped: 0,
+        failed: [{key: srcDbKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err}],
+        conflicts: []
+      };
+    }
+  }
+
+  async deleteAllUnder(srcKey, options) {
+    this._requireStructuralCascade('deleteAllUnder');
+    // Leaf-first: delete descendants before self. Self-delete deferred
+    // until pagination of descendants completes.
+    const queryParams = this.buildKey(srcKey, {kind: 'children'});
+    queryParams.TableName = this.table;
+    const childrenResult = await this.deleteListByParams(queryParams, options);
+    if (childrenResult.cursor) return childrenResult;
+    const selfResult = await this._cascadeSelfDelete(srcKey);
+    return this._mergeMassOpResults(childrenResult, selfResult);
+  }
+
+  // cloneAllUnder(srcKey, dstKey, options): uniform prefix-swap subtree
+  // clone. `options.mapFn` composes after the swapPrefix shift, same as
+  // `rename` / `cloneWithOverwrite`. Root-first; source stays intact.
+  async cloneAllUnder(srcKey, dstKey, options) {
+    this._requireStructuralCascade('cloneAllUnder');
+    const keyShifter = this.swapPrefix(srcKey, dstKey);
+    const mapFn = options?.mapFn ? mergeMapFn(keyShifter, options.mapFn) : keyShifter;
+    return this._cascadeCloneCore(srcKey, mapFn, options);
+  }
+
+  // cloneAllUnderBy(srcKey, mapFn, options): mapFn-driven subtree clone —
+  // destinations are whatever mapFn computes per item. Useful for fan-out
+  // (e.g., route Austin records to CA / FL based on a property). Source
+  // stays intact; same root-first / skip-on-mapFn-falsy semantics.
+  async cloneAllUnderBy(srcKey, mapFn, options) {
+    this._requireStructuralCascade('cloneAllUnderBy');
+    return this._cascadeCloneCore(srcKey, mapFn, options);
+  }
+
+  async _cascadeCloneCore(srcKey, mapFn, options) {
+    // Root-first: self before descendants. Self-clone runs only on the
+    // first page (no resumeToken) so resuming doesn't re-process it.
+    let selfResult;
+    if (!options?.resumeToken) {
+      selfResult = await this._cascadeSelfClone(srcKey, mapFn, options);
+    }
+
+    const queryParams = this.buildKey(srcKey, {kind: 'children'});
+    queryParams.TableName = this.table;
+    const childrenResult = await this.cloneListByParams(queryParams, mapFn, options);
+
+    return selfResult ? this._mergeMassOpResults(selfResult, childrenResult) : childrenResult;
+  }
+
+  // moveAllUnder(srcKey, dstKey, options): uniform prefix-swap subtree
+  // move. `options.mapFn` composes after the swapPrefix shift. Leaf-first
+  // — descendants migrate before the self node.
+  async moveAllUnder(srcKey, dstKey, options) {
+    this._requireStructuralCascade('moveAllUnder');
+    const keyShifter = this.swapPrefix(srcKey, dstKey);
+    const mapFn = options?.mapFn ? mergeMapFn(keyShifter, options.mapFn) : keyShifter;
+    return this._cascadeMoveCore(srcKey, mapFn, options);
+  }
+
+  // moveAllUnderBy(srcKey, mapFn, options): mapFn-driven subtree move.
+  // Destinations per item as mapFn dictates. Same leaf-first semantics;
+  // source items removed after their copy lands at the mapFn-computed
+  // destination.
+  async moveAllUnderBy(srcKey, mapFn, options) {
+    this._requireStructuralCascade('moveAllUnderBy');
+    return this._cascadeMoveCore(srcKey, mapFn, options);
+  }
+
+  async _cascadeMoveCore(srcKey, mapFn, options) {
+    // Leaf-first for the delete phase: process descendants first, then
+    // self. Per-item copy+delete is interleaved inside `_subtreeRename`,
+    // so children migrate fully before self.
+    let queryParams = this.buildKey(srcKey, {kind: 'children'});
+    queryParams.TableName = this.table;
+    queryParams = this._applyAsOf(queryParams, options?.asOf);
+    const childrenResult = await this._subtreeRename(queryParams, mapFn, options);
+    if (childrenResult.cursor) return childrenResult;
+
+    const selfResult = await this._cascadeSelfMove(srcKey, mapFn);
+    return this._mergeMassOpResults(childrenResult, selfResult);
+  }
+
+  // Shared scan-rename loop used by `rename` and `moveAllUnder`. Emits
+  // the two-phase idempotent put-ifNotExists → delete-src pattern per
+  // item. See the rename docstring above for semantics.
+  _subtreeRename(queryParams, mapFn, options) {
+    return runPaged(this.client, queryParams, options, async items => {
+      let processed = 0;
+      let skipped = 0;
+      /** @type {import('../mass/index.js').MassOpFailure[]} */
+      const failed = [];
+
+      for (const rawItem of items) {
+        const srcKey = this._restrictKey(rawItem);
+        const revived = this.hooks.revive(rawItem);
+        const mapped = mapFn(revived);
+        if (!mapped) {
+          skipped++;
+          continue;
+        }
+        const prepared = this._prepareItem(mapped);
+
+        try {
+          const putParams = this._checkExistence({TableName: this.table, Item: prepared}, true);
+          await this.client.send(new PutCommand(putParams));
+        } catch (err) {
+          if (isConditionFailure(err)) {
+            skipped++;
+            continue;
+          }
+          failed.push({key: srcKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
+          continue;
+        }
+
+        try {
+          await this.client.send(new DeleteCommand({TableName: this.table, Key: srcKey}));
           processed++;
         } catch (err) {
           failed.push({key: srcKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err});

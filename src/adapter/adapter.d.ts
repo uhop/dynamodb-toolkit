@@ -190,8 +190,45 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
    * Preserved across `revive`.
    */
   createdAtField?: string;
+  /**
+   * Parent-child relationship declaration (A6'). Gates the cascade
+   * primitives ({@link Adapter.deleteAllUnder} / {@link Adapter.cloneAllUnder}
+   * / {@link Adapter.moveAllUnder}) — without a declaration they throw
+   * {@link CascadeNotDeclared}. The toolkit does not infer cascade scope
+   * from composite `keyFields` alone.
+   *
+   * `{structural: true}` opts into treating the composite structural key
+   * as the parent-child hierarchy. Requires composite `keyFields`
+   * (length > 1) with a declared `structuralKey`.
+   */
+  relationships?: RelationshipsDeclaration;
   /** Per-instance hook overrides; merges over {@link defaultHooks}. */
   hooks?: AdapterHooks<TItem>;
+}
+
+/** Parent-child relationship declaration for the cascade primitives. */
+export interface RelationshipsDeclaration {
+  /**
+   * Treat the composite structural key as a parent-child hierarchy.
+   * Requires `keyFields.length > 1` + `structuralKey` declared.
+   */
+  structural?: boolean;
+}
+
+/** Options for `cloneAllUnder` — prefix-swap cascade clone. `mapFn` composes after the swap. */
+export interface CloneAllUnderOptions<TItem extends Record<string, unknown>> extends MassOptions {
+  /**
+   * Optional per-item transform, composed after `swapPrefix(srcKey, dstKey)`
+   * via `mergeMapFn`. Runs last and can override anything the swap
+   * touched. Return a falsy value to skip an item.
+   */
+  mapFn?: (item: TItem) => TItem | null | undefined;
+}
+
+/** Options for `moveAllUnder` — prefix-swap cascade move. `mapFn` composes after the swap. */
+export interface MoveAllUnderOptions<TItem extends Record<string, unknown>> extends MassOptions {
+  /** See {@link CloneAllUnderOptions.mapFn}. */
+  mapFn?: (item: TItem) => TItem | null | undefined;
 }
 
 /** Options for read methods. */
@@ -878,6 +915,70 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
     toExample: Partial<TItem>,
     options?: MassOptions & {mapFn?: (item: TItem) => TItem; kind?: 'exact' | 'children'}
   ): Promise<MassOpResult>;
+
+  /**
+   * Cascade subtree delete: delete the self node at `srcKey` and every
+   * descendant declared to hang off it. Leaf-first — descendants are
+   * removed via `deleteListByParams(buildKey(srcKey, {kind: 'children'}))`
+   * before the self node is deleted.
+   *
+   * Requires `options.relationships.structural` on the adapter; throws
+   * {@link CascadeNotDeclared} otherwise.
+   *
+   * Resumable via `options.maxItems` + `options.resumeToken` on the
+   * descendants phase. The self-delete runs only when pagination
+   * completes (no `cursor` in the descendants result); intermediate
+   * returns surface the cursor so the caller can resume.
+   */
+  deleteAllUnder(srcKey: Partial<TItem>, options?: MassOptions): Promise<MassOpResult>;
+  /**
+   * Cascade subtree clone — prefix-swap flavour: copy the self node at
+   * `srcKey` plus every descendant to a `dstKey` subtree via
+   * `swapPrefix(srcKey, dstKey)`. Root-first — self node written before
+   * descendants. Source stays intact.
+   *
+   * Requires `options.relationships.structural` on the adapter; throws
+   * {@link CascadeNotDeclared} otherwise.
+   *
+   * `options.mapFn` composes after the prefix swap (same pattern as
+   * {@link Adapter.rename}); use {@link Adapter.cloneAllUnderBy} when
+   * the destination is not a uniform subtree.
+   *
+   * `ifNotExists` / `ifExists` route the per-item write through the
+   * conditional put path. Resumable via `maxItems` + `resumeToken` on
+   * the descendants phase; the self-clone runs only on the first call.
+   */
+  cloneAllUnder(srcKey: Partial<TItem>, dstKey: Partial<TItem>, options?: CloneAllUnderOptions<TItem>): Promise<MassOpResult>;
+  /**
+   * Cascade subtree clone — `mapFn`-driven flavour: the caller's `mapFn`
+   * wholly determines per-item destinations. Useful for fan-out across
+   * different subtrees based on item properties.
+   *
+   * Same root-first semantics and declaration gate as
+   * {@link Adapter.cloneAllUnder}; no `dstKey` concept.
+   */
+  cloneAllUnderBy(srcKey: Partial<TItem>, mapFn: (item: TItem) => TItem | null | undefined, options?: MassOptions): Promise<MassOpResult>;
+  /**
+   * Cascade subtree move — prefix-swap flavour: copy-then-delete the
+   * self node at `srcKey` plus every descendant to a `dstKey` subtree
+   * via `swapPrefix(srcKey, dstKey)`. Leaf-first — descendants migrate
+   * first, self node last. Two-phase idempotent pattern shared with
+   * {@link Adapter.rename}.
+   *
+   * Requires `options.relationships.structural` on the adapter; throws
+   * {@link CascadeNotDeclared} otherwise.
+   *
+   * `options.mapFn` composes after the prefix swap. Resumable via
+   * `maxItems` + `resumeToken` on the descendants phase; the self-move
+   * runs only when pagination completes.
+   */
+  moveAllUnder(srcKey: Partial<TItem>, dstKey: Partial<TItem>, options?: MoveAllUnderOptions<TItem>): Promise<MassOpResult>;
+  /**
+   * Cascade subtree move — `mapFn`-driven flavour: destinations as
+   * `mapFn` dictates. Same leaf-first semantics and declaration gate as
+   * {@link Adapter.moveAllUnder}; no `dstKey` concept.
+   */
+  moveAllUnderBy(srcKey: Partial<TItem>, mapFn: (item: TItem) => TItem | null | undefined, options?: MassOptions): Promise<MassOpResult>;
 
   /** @deprecated Use {@link Adapter.putItems}. Removed in a future minor. */
   putAll(items: (TItem | Raw<TItem>)[], options?: MassOptions): Promise<{processed: number}>;
