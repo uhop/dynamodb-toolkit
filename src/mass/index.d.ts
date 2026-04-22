@@ -17,6 +17,7 @@
 export {paginateList, type PaginateOptions, type PaginatedResult} from './paginate-list.js';
 export {iterateList, iterateItems} from './iterate-list.js';
 export {readByKeys} from './read-by-keys.js';
+export {mergeMapFn, type MapFn} from './map-fns.js';
 
 import type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
 

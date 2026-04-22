@@ -1,19 +1,19 @@
 /**
  * Input for `buildKeyCondition` — describes one Query's KeyCondition.
- * `field` + `value` name the sort/structural key and its already-prepared
- * query value; `kind` picks `=` or `begins_with`; `pkField` / `pkValue`
+ * `name` + `value` name the sort/structural key and its already-prepared
+ * query value; `kind` picks `=` or `begins_with`; `pkName` / `pkValue`
  * optionally add the partition-key equality clause.
  */
 export interface KeyConditionInput {
   /** Field name of the sort or structural key (e.g. `'-sk'`). */
-  field: string;
+  name: string;
   /** Fully-prepared value — caller joins keyFields components if using a structural key. */
   value: string;
-  /** `'exact'` → `field = :v`; `'prefix'` → `begins_with(field, :v)`. */
+  /** `'exact'` → `name = :v`; `'prefix'` → `begins_with(name, :v)`. */
   kind: 'exact' | 'prefix';
-  /** Partition-key field name (optional). When set, adds `pkField = :pk` to the clause. */
-  pkField?: string;
-  /** Partition-key value (required when `pkField` is set). */
+  /** Partition-key field name (optional). When set, adds `pkName = :pk` to the clause. */
+  pkName?: string;
+  /** Partition-key value (required when `pkName` is set). */
   pkValue?: unknown;
 }
 

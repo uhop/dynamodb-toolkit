@@ -2,6 +2,7 @@ export {paginateList} from './paginate-list.js';
 export {iterateList, iterateItems} from './iterate-list.js';
 export {readList, readListGetItems} from './read-list.js';
 export {readByKeys} from './read-by-keys.js';
+export {mergeMapFn} from './map-fns.js';
 export {writeList} from './write-list.js';
 export {deleteList, deleteByKeys} from './delete-list.js';
 export {copyList} from './copy-list.js';

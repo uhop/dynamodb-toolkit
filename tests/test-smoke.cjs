@@ -64,5 +64,5 @@ test('cjs: Adapter constructor enforces required options', t => {
     keyFields: ['name']
   });
   t.equal(adapter.table, 'Planets');
-  t.deepEqual(adapter.keyFields, ['name']);
+  t.deepEqual(adapter.keyFields, [{name: 'name', type: 'string'}]);
 });

@@ -27,31 +27,31 @@ import {dispatchWrite} from './transaction-upgrade.js';
 const MOVE_CHUNK = 12;
 
 // Normalize a keyFields entry — accepts a bare string or a full descriptor.
-// Bare string `'state'` → `{field: 'state', type: 'string'}`.
+// Bare string `'state'` → `{name: 'state', type: 'string'}`.
 const normalizeKeyFieldSpec = (entry, index, composite) => {
-  if (typeof entry === 'string') return {field: entry, type: 'string'};
-  if (!entry || typeof entry !== 'object' || typeof entry.field !== 'string') {
-    throw new Error(`options.keyFields[${index}] must be a string or {field, type?, width?}`);
+  if (typeof entry === 'string') return {name: entry, type: 'string'};
+  if (!entry || typeof entry !== 'object' || typeof entry.name !== 'string') {
+    throw new Error(`options.keyFields[${index}] must be a string or {name, type?, width?}`);
   }
   const type = entry.type || 'string';
   if (type !== 'string' && type !== 'number' && type !== 'binary') {
     throw new Error(`options.keyFields[${index}].type must be 'string' | 'number' | 'binary'`);
   }
-  const spec = {field: entry.field, type};
+  const field = {name: entry.name, type};
   if (entry.width !== undefined) {
     if (!Number.isInteger(entry.width) || entry.width < 1) {
       throw new Error(`options.keyFields[${index}].width must be a positive integer`);
     }
-    spec.width = entry.width;
+    field.width = entry.width;
   }
   // width is required for {type: 'number'} in composite keys — zero-padding
   // preserves lexicographic sort on the joined string key.
-  if (composite && type === 'number' && spec.width === undefined) {
+  if (composite && type === 'number' && field.width === undefined) {
     throw new Error(
-      `options.keyFields[${index}] ({field: '${spec.field}', type: 'number'}) requires 'width' in a composite keyFields`
+      `options.keyFields[${index}] ({name: '${field.name}', type: 'number'}) requires 'width' in a composite keyFields`
     );
   }
-  return spec;
+  return field;
 };
 
 export class Adapter {
@@ -63,24 +63,24 @@ export class Adapter {
       throw new Error('options.keyFields must be a non-empty array');
     }
 
-    // Normalize typed keyFields descriptors. `keyFieldSpecs` carries the full
-    // info (type, width); `keyFields` stays as bare names for back-compat.
+    // Normalize typed keyFields descriptors — canonical typed array, each
+    // entry `{field, type, width?}`. Bare-string inputs are normalized into
+    // this shape. Callers reading just the name use `keyFields[i].name`.
     const composite = options.keyFields.length > 1;
-    this.keyFieldSpecs = options.keyFields.map((e, i) => normalizeKeyFieldSpec(e, i, composite));
-    this.keyFields = this.keyFieldSpecs.map(s => s.field);
+    this.keyFields = options.keyFields.map((e, i) => normalizeKeyFieldSpec(e, i, composite));
 
     // Optional structuralKey declaration. Required when keyFields is composite
     // (more than one component) — the join shape is the only way to form a
     // sort key out of multiple component fields.
     if (options.structuralKey !== undefined) {
-      if (typeof options.structuralKey !== 'object' || typeof options.structuralKey.field !== 'string') {
-        throw new Error("options.structuralKey must be {field: string, separator?: string}");
+      if (typeof options.structuralKey !== 'object' || typeof options.structuralKey.name !== 'string') {
+        throw new Error("options.structuralKey must be {name: string, separator?: string}");
       }
       const sep = options.structuralKey.separator;
       if (sep !== undefined && typeof sep !== 'string') {
         throw new Error('options.structuralKey.separator must be a string');
       }
-      this.structuralKey = {field: options.structuralKey.field, separator: sep === undefined ? '|' : sep};
+      this.structuralKey = {name: options.structuralKey.name, separator: sep === undefined ? '|' : sep};
     } else if (composite) {
       throw new Error('options.structuralKey is required when options.keyFields is composite (length > 1)');
     }
@@ -102,10 +102,10 @@ export class Adapter {
     // Optional typeDiscriminator — overrides depth-based detection when the
     // named field is present on the item.
     if (options.typeDiscriminator !== undefined) {
-      if (typeof options.typeDiscriminator !== 'object' || typeof options.typeDiscriminator.field !== 'string') {
-        throw new Error('options.typeDiscriminator must be {field: string}');
+      if (typeof options.typeDiscriminator !== 'object' || typeof options.typeDiscriminator.name !== 'string') {
+        throw new Error('options.typeDiscriminator must be {name: string}');
       }
-      this.typeDiscriminator = {field: options.typeDiscriminator.field};
+      this.typeDiscriminator = {name: options.typeDiscriminator.name};
     }
 
     this.client = options.client;
@@ -121,7 +121,7 @@ export class Adapter {
 
   /**
    * Return the type label for an item, using (in priority order):
-   *   1. `typeDiscriminator.field` value when present on the item.
+   *   1. `typeDiscriminator.name` value when present on the item.
    *   2. `typeLabels[depth - 1]` where depth = count of contiguous-from-start
    *      defined `keyFields` on the item, when `typeLabels` is declared.
    *   3. Raw depth number when no `typeLabels` is declared.
@@ -133,14 +133,15 @@ export class Adapter {
     if (!item) return undefined;
 
     if (this.typeDiscriminator) {
-      const v = item[this.typeDiscriminator.field];
+      const v = item[this.typeDiscriminator.name];
       if (v !== undefined && v !== null) return '' + v;
     }
 
     // Count contiguous-from-start defined keyFields on the item.
     let depth = 0;
     for (const field of this.keyFields) {
-      if (item[field] === undefined || item[field] === null) break;
+      const v = item[field.name];
+      if (v === undefined || v === null) break;
       depth++;
     }
 
@@ -149,17 +150,92 @@ export class Adapter {
     return depth;
   }
 
+  // --- canned mapFn builders (Q23 follow-up) ---
+
+  /**
+   * Build a mapFn that swaps a leading keyFields prefix. Given
+   * `srcPrefix = {state: 'TX'}` and `dstPrefix = {state: 'FL'}`, the returned
+   * function rewrites each item's `state` field from `'TX'` to `'FL'`, leaving
+   * all other keyFields and non-key data intact. Throws at construction when
+   * the prefixes aren't contiguous-from-start or don't have matching keys,
+   * and throws at apply time when an item doesn't actually match `srcPrefix`
+   * (sign of a mis-scoped query upstream).
+   */
+  swapPrefix(srcPrefix, dstPrefix) {
+    if (!srcPrefix || typeof srcPrefix !== 'object' || !dstPrefix || typeof dstPrefix !== 'object') {
+      throw new Error('swapPrefix: both srcPrefix and dstPrefix must be objects');
+    }
+    const srcKeys = Object.keys(srcPrefix);
+    const dstKeys = Object.keys(dstPrefix);
+    if (srcKeys.length === 0) {
+      throw new Error('swapPrefix: srcPrefix must name at least one keyField');
+    }
+    if (srcKeys.length !== dstKeys.length) {
+      throw new Error('swapPrefix: srcPrefix and dstPrefix must name the same keyFields');
+    }
+    // Validate contiguous-from-start against keyFields, and same set of keys.
+    for (let i = 0; i < srcKeys.length; i++) {
+      const name = this.keyFields[i].name;
+      if (srcKeys[i] !== name || dstKeys[i] !== name) {
+        throw new Error(
+          `swapPrefix: both prefixes must be contiguous-from-start — expected '${name}' at position ${i}, got src='${srcKeys[i]}', dst='${dstKeys[i]}'`
+        );
+      }
+    }
+    // Snapshot arrays so runtime apply doesn't re-read Object.keys order.
+    const fields = srcKeys.slice();
+    const src = {};
+    const dst = {};
+    for (const f of fields) {
+      src[f] = srcPrefix[f];
+      dst[f] = dstPrefix[f];
+    }
+    return item => {
+      if (!item) return item;
+      for (const f of fields) {
+        if (item[f] !== src[f]) {
+          throw new Error(
+            `swapPrefix: item does not match srcPrefix — expected '${f}' === ${JSON.stringify(src[f])}, got ${JSON.stringify(item[f])}`
+          );
+        }
+      }
+      return {...item, ...dst};
+    };
+  }
+
+  /**
+   * Build a mapFn that merges a static overlay object into each item.
+   * `{...item, ...obj}` — `obj`'s values win. If `obj` touches a keyField,
+   * the destination structural key shifts accordingly. Validates that the
+   * overlay doesn't set any keyField to `undefined` / `null` (which would
+   * break destination-key formation).
+   */
+  overlayFields(obj) {
+    if (!obj || typeof obj !== 'object') {
+      throw new Error('overlayFields: overlay must be an object');
+    }
+    for (const field of this.keyFields) {
+      const name = field.name;
+      if (name in obj && (obj[name] === undefined || obj[name] === null)) {
+        throw new Error(`overlayFields: cannot set keyField '${name}' to ${obj[name]} — would break destination key`);
+      }
+    }
+    // Snapshot the overlay so later mutations of the caller's object don't affect behaviour.
+    const overlay = {...obj};
+    return item => (item ? {...item, ...overlay} : item);
+  }
+
   // --- key builders (A1' / Q12) ---
 
   /**
-   * Format a single keyFields value per its declared spec: numbers get
+   * Format a single keyFields value per its declared field: numbers get
    * zero-padded to `width` (required in composite keyFields), strings pass
    * through, binary values are coerced via String().
    */
-  _formatKeyComponent(spec, value) {
-    if (spec.type === 'number') {
-      if (spec.width !== undefined) {
-        return String(value).padStart(spec.width, '0');
+  _formatKeyComponent(field, value) {
+    if (field.type === 'number') {
+      if (field.width !== undefined) {
+        return String(value).padStart(field.width, '0');
       }
       return String(value);
     }
@@ -205,45 +281,45 @@ export class Adapter {
     // Walk keyFields, collect contiguous-from-start defined values.
     const components = [];
     let gapSeen = false;
-    for (const spec of this.keyFieldSpecs) {
-      const v = values[spec.field];
+    for (const field of this.keyFields) {
+      const v = values[field.name];
       if (v === undefined || v === null) {
         gapSeen = true;
         continue;
       }
       if (gapSeen) {
         throw new Error(
-          `buildKey: values are non-contiguous — '${spec.field}' present but a preceding keyField is missing`
+          `buildKey: values are non-contiguous — '${field.name}' present but a preceding keyField is missing`
         );
       }
-      components.push(this._formatKeyComponent(spec, v));
+      components.push(this._formatKeyComponent(field, v));
     }
     if (components.length === 0) {
       throw new Error('buildKey: at least the partition keyField must be present in values');
     }
 
     // Single-field keyFields: direct equality on the lone key.
-    if (this.keyFieldSpecs.length === 1 || !this.structuralKey) {
+    if (this.keyFields.length === 1 || !this.structuralKey) {
       if (kind === 'children' || kind === 'partial') {
         throw new Error(`buildKey: kind '${kind}' requires a structuralKey declaration (composite keyFields)`);
       }
-      return buildKeyCondition({field: this.keyFields[0], value: components[0], kind: 'exact'}, params);
+      return buildKeyCondition({name: this.keyFields[0].name, value: components[0], kind: 'exact'}, params);
     }
 
-    // Composite keyFields → join into structuralKey.field.
+    // Composite keyFields → join into structuralKey.name.
     const sep = this.structuralKey.separator;
     const base = components.join(sep);
     if (kind === 'exact') {
-      return buildKeyCondition({field: this.structuralKey.field, value: base, kind: 'exact'}, params);
+      return buildKeyCondition({name: this.structuralKey.name, value: base, kind: 'exact'}, params);
     }
     if (kind === 'children') {
-      return buildKeyCondition({field: this.structuralKey.field, value: base + sep, kind: 'prefix'}, params);
+      return buildKeyCondition({name: this.structuralKey.name, value: base + sep, kind: 'prefix'}, params);
     }
     // kind === 'partial'
     if (typeof partial !== 'string' || partial.length === 0) {
       throw new Error("buildKey: kind 'partial' requires options.partial to be a non-empty string");
     }
-    return buildKeyCondition({field: this.structuralKey.field, value: base + sep + partial, kind: 'prefix'}, params);
+    return buildKeyCondition({name: this.structuralKey.name, value: base + sep + partial, kind: 'prefix'}, params);
   }
 
   // --- internal helpers ---
@@ -255,7 +331,7 @@ export class Adapter {
   }
 
   _restrictKey(rawKey) {
-    return restrictKey(rawKey, this.keyFields);
+    return restrictKey(rawKey, this.keyFields.map(f => f.name));
   }
 
   _toKey(key, index) {
@@ -282,7 +358,7 @@ export class Adapter {
   _checkExistence(params, invert) {
     const names = params.ExpressionAttributeNames || {};
     const alias = '#k' + Object.keys(names).length;
-    names[alias] = this.keyFields[0];
+    names[alias] = this.keyFields[0].name;
     const condition = `attribute_${invert ? 'not_' : ''}exists(${alias})`;
     params.ExpressionAttributeNames = names;
     params.ConditionExpression = params.ConditionExpression ? `${condition} AND (${params.ConditionExpression})` : condition;
@@ -344,7 +420,7 @@ export class Adapter {
       await this._validate(patch, true);
       payload = {...this.hooks.prepare(patch, true)};
     }
-    for (const f of this.keyFields) delete payload[f];
+    for (const field of this.keyFields) delete payload[field.name];
 
     let p = this._cloneParams(options?.params);
     p.Key = this._toKey(key, p.IndexName);
@@ -397,7 +473,7 @@ export class Adapter {
   async getByKey(key, fields, options) {
     const params = options?.params;
     const isIndirect = this._isIndirect(params, options);
-    const activeFields = isIndirect ? this.keyFields : fields;
+    const activeFields = isIndirect ? this.keyFields.map(f => f.name) : fields;
     const batch = await this.makeGet(key, activeFields, params);
 
     let data = await this.client.send(new GetCommand(batch.params));
@@ -417,7 +493,7 @@ export class Adapter {
   async getByKeys(keys, fields, options) {
     const params = options?.params;
     const isIndirect = this._isIndirect(params, options);
-    const activeFields = isIndirect ? this.keyFields : fields;
+    const activeFields = isIndirect ? this.keyFields.map(f => f.name) : fields;
 
     let activeParams = this._cloneParams(params);
     if (activeFields) activeParams = addProjection(activeParams, activeFields, this.projectionFieldMap, true);
@@ -464,7 +540,12 @@ export class Adapter {
     let activeParams = this._cloneParams(params);
     if (isIndirect) {
       delete activeParams.ProjectionExpression;
-      activeParams = addProjection(activeParams, this.keyFields, null, true);
+      activeParams = addProjection(
+        activeParams,
+        this.keyFields.map(f => f.name),
+        null,
+        true
+      );
     }
     activeParams = cleanParams(activeParams);
 
@@ -522,7 +603,12 @@ export class Adapter {
 
   async deleteAllByParams(params, _options) {
     let p = this._cloneParams(params);
-    p = addProjection(p, this.keyFields.join(','), null, true);
+    p = addProjection(
+      p,
+      this.keyFields.map(f => f.name).join(','),
+      null,
+      true
+    );
     p = cleanParams(p);
     const processed = await deleteList(this.client, p, item => this._restrictKey(item));
     return {processed};
@@ -583,7 +669,12 @@ export class Adapter {
 
   async moveAllByParams(params, mapFn, _options) {
     let p = this._cloneParams(params);
-    p = addProjection(p, this.keyFields.join(','), null, true);
+    p = addProjection(
+      p,
+      this.keyFields.map(f => f.name).join(','),
+      null,
+      true
+    );
     p = cleanParams(p);
     const itemMapper = item => {
       const revived = this.hooks.revive(item);

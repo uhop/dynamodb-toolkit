@@ -36,15 +36,17 @@ Biggest release of the workstream. Makes hierarchical adapters declarative inste
 
 - [ ] **`src/adapter/adapter.js`** — accept new construction options:
   - `technicalPrefix?: string` (opt-in; default unset)
-  - `keyFields: Array<string | {field, type?: 'string' | 'number' | 'binary', width?: number}>` — string shorthand = type `'string'`; `width` required on `{type: 'number'}` in composite keys
-  - `structuralKey?: {field: string, separator?: string}` — required when `keyFields.length > 1`; separator defaults to `'|'`
+  - `keyFields: Array<string | {name, type?: 'string' | 'number' | 'binary', width?: number}>` — string shorthand = `{name, type: 'string'}`; `width` required on `{type: 'number'}` in composite keys
+  - `structuralKey?: {name: string, separator?: string}` — required when `keyFields.length > 1`; separator defaults to `'|'`
   - `indices?: Record<string, {type: 'gsi' | 'lsi', pk?, sk, projection?: 'all' | 'keys-only' | string[], sparse?: boolean | {onlyWhen: (item) => boolean}, indirect?: boolean}>`
   - `typeLabels?: string[]` — paired 1:1 with `keyFields` (length validated at construction)
-  - `typeDiscriminator?: {field: string}` — wins over depth-based detection when the field is present on the item
+  - `typeDiscriminator?: {name: string}` — wins over depth-based detection when the field is present on the item
   - `filterable?: Record<string, Array<'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'in' | 'btw' | 'beg' | 'ct' | 'ex' | 'nx'>>` — allowlist for `f-` filter grammar
   - Legacy `indirectIndices` coexists; auto-synthesises `{type: 'gsi', indirect: true, projection: 'keys-only'}` entries into `indices`.
 
 - [ ] **`src/adapter/adapter.d.ts`** — full typings for the above. `Adapter<TItem, TKey>` generics unchanged at the signature level.
+
+- [ ] **`adapter.keyFields` becomes the canonical typed array** — `Required<KeyFieldSpec>[]` (each entry `{name, type, width?}`). Callers reading just the name use `keyFields[i].name`; string-names array via `keyFields.map(f => f.name)`. Breaking for external code that reads `adapter.keyFields` as a string array — adapter projects touched in 0.3.0 (see §Framework adapters coordination).
 
 - [ ] **Validation at construction:**
   - `typeLabels.length === keyFields.length` (when both declared).
@@ -63,7 +65,7 @@ Biggest release of the workstream. Makes hierarchical adapters declarative inste
 
 - [ ] **`src/expressions/key-condition.js`** + `.d.ts` — new primitive:
   ```js
-  buildKeyCondition({field, value, kind, pkField?, pkValue?}, params = {}) => params
+  buildKeyCondition({name, value, kind, pkName?, pkValue?}, params = {}) => params
   ```
   Adapter-agnostic; merges into `params` with counter-based placeholders (`#kc0` / `:kcv0`), AND-combined with existing `KeyConditionExpression`.
 - [ ] **`src/adapter/adapter.js`** — `adapter.buildKey(values, {kind?: 'exact' | 'children' | 'partial', partial?: string, indexName?: string}, params = {}) => params`. Validates `values` contiguous-from-start against declared `keyFields`; joins using declared `structuralKey.separator`; delegates to the primitive.
@@ -71,7 +73,7 @@ Biggest release of the workstream. Makes hierarchical adapters declarative inste
 ### `adapter.typeOf(item)` (§"Type detection via `adapter.typeOf(item)`")
 
 - [ ] **`src/adapter/adapter.js`** — method returning:
-  1. `typeDiscriminator.field` value when present on the item.
+  1. `typeDiscriminator.name` value when present on the item.
   2. `typeLabels[depth - 1]` where `depth` is contiguous-from-start defined `keyFields` count.
   3. Raw depth number when `typeLabels` is not declared.
 
@@ -102,9 +104,9 @@ Biggest release of the workstream. Makes hierarchical adapters declarative inste
 ### Projection ergonomics (§"Projection ergonomics")
 
 - [ ] **Refuse `consistent: true` on GSI Query** — emit `ConsistentReadOnGSIRejected` with message citing the AWS doc. Detect at request-build time.
-- [ ] **Sort → index inference** — `?sort=<field>` / `?sort=-<field>` finds an index where `sk.field === <field>`. LSI preferred over GSI when both match.
+- [ ] **Sort → index inference** — `?sort=<field>` / `?sort=-<field>` finds an index where `sk.name === <field>`. LSI preferred over GSI when both match.
 - [ ] **No matching index → refuse** with `NoIndexForSortField`. No in-memory sort (per the no-client-side-list-manipulation principle).
-- [ ] **Keys-only list shortcut** — `?fields=*keys` expands to `ProjectionExpression` from declared `keyFields + structuralKey.field`. Programmatic alias: `{keysOnly: true}`.
+- [ ] **Keys-only list shortcut** — `?fields=*keys` expands to `ProjectionExpression` from declared `keyFields` names (plus `structuralKey.name` when declared). Programmatic alias: `{keysOnly: true}`.
 
 ### Naming cleanup (§"Naming cleanup — drop 'List' from bulk-individual-read helpers")
 
@@ -414,6 +416,7 @@ The four framework adapters (`dynamodb-toolkit-koa`, `-express`, `-fetch`, `-lam
 - **Filter grammar absorption**: `?prefix=foo` → `?f-<sort-key-field>-beg=foo`. Old `?prefix=` form removed; test fixtures migrate.
 - **New toolkit error classes**: parent's `mapErrorStatus` maps `NoIndexForSortField`, `ConsistentReadOnGSIRejected`, `BadFilterField`, `BadFilterOp`, `AmbiguousDestination`, `KeyFieldChanged`, `CreatedAtFieldNotDeclared`, `CascadeNotDeclared` to HTTP statuses. Adapter tests verify the wire response matches.
 - **`?fields=*keys` wildcard**: no code change; add one smoke test per adapter confirming routing.
+- **`adapter.keyFields` is now `KeyFieldSpec[]` (typed, `{name, type, width?}`).** Every adapter's default `keyFromPath` reads `adp.keyFields[0]` as a string — must switch to `adp.keyFields[0].name`. Test mock adapters supplying `keyFields: ['name']` migrate to typed descriptors `keyFields: [{name: 'name', type: 'string'}]`.
 
 **Parent 3.3.0:**
 
@@ -429,6 +432,7 @@ The four framework adapters (`dynamodb-toolkit-koa`, `-express`, `-fetch`, `-lam
 - [ ] Test fixtures migrated: D2 null placeholders, `f-` filter grammar, new error-class HTTP status assertions.
 - [ ] Smoke test for `?fields=*keys`.
 - [ ] Smoke test for mass-op envelope shape.
+- [ ] **One-line switch** in each adapter's default `keyFromPath`: `adp.keyFields[0]` → `adp.keyFields[0].name`. Plus mock-adapter + test-smoke + test-typed fixture updates for the typed descriptor shape.
 - [ ] **Tier-B handler-core extraction** (route dispatcher switch + handler cores from the audit-extraction proposal, ~800 LoC × 4) — lands in the same cycle **if** the neutral `{status, body, headers}` result shape has converged by then. Otherwise defers to 0.4.0.
 - [ ] Wiki updates per adapter for any new routes / response shapes.
 - [ ] `AGENTS.md` / `llms.txt` / `llms-full.txt` pointers refreshed.

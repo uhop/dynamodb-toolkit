@@ -51,7 +51,7 @@ const requestUrl = req => {
 export const createHandler = (adapter, options = {}) => {
   const policy = mergePolicy(options.policy);
   const sortableIndices = options.sortableIndices || {};
-  const keyFromPath = options.keyFromPath || ((rawKey, adp) => ({[adp.keyFields[0]]: rawKey}));
+  const keyFromPath = options.keyFromPath || ((rawKey, adp) => ({[adp.keyFields[0].name]: rawKey}));
   const exampleFromContext = options.exampleFromContext || (() => ({}));
   const maxBodyBytes = options.maxBodyBytes ?? 1024 * 1024;
 

@@ -40,18 +40,18 @@ test('Adapter: defaults applied', t => {
 
 // --- typed keyFields + structuralKey declaration ---
 
-test('Adapter: keyFieldSpecs normalizes bare-string and descriptor forms', t => {
+test('Adapter: keyFields normalizes bare-string and descriptor forms', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
     table: 'T',
-    keyFields: ['state', {field: 'rentalId', type: 'number', width: 5}, 'carVin'],
-    structuralKey: {field: '-sk'}
+    keyFields: ['state', {name: 'rentalId', type: 'number', width: 5}, 'carVin'],
+    structuralKey: {name: '-sk'}
   });
-  t.deepEqual(adapter.keyFields, ['state', 'rentalId', 'carVin'], 'bare names preserved');
-  t.deepEqual(adapter.keyFieldSpecs[0], {field: 'state', type: 'string'});
-  t.deepEqual(adapter.keyFieldSpecs[1], {field: 'rentalId', type: 'number', width: 5});
-  t.deepEqual(adapter.keyFieldSpecs[2], {field: 'carVin', type: 'string'});
+  t.equal(adapter.keyFields.length, 3);
+  t.deepEqual(adapter.keyFields[0], {name: 'state', type: 'string'});
+  t.deepEqual(adapter.keyFields[1], {name: 'rentalId', type: 'number', width: 5});
+  t.deepEqual(adapter.keyFields[2], {name: 'carVin', type: 'string'});
 });
 
 test('Adapter: composite keyFields without structuralKey throws', t => {
@@ -71,7 +71,7 @@ test('Adapter: structuralKey defaults separator to "|"', t => {
     client,
     table: 'T',
     keyFields: ['state', 'carVin'],
-    structuralKey: {field: '-sk'}
+    structuralKey: {name: '-sk'}
   });
   t.equal(adapter.structuralKey.separator, '|');
 });
@@ -82,7 +82,7 @@ test('Adapter: structuralKey accepts custom separator', t => {
     client,
     table: 'T',
     keyFields: ['state', 'carVin'],
-    structuralKey: {field: '-sk', separator: '::'}
+    structuralKey: {name: '-sk', separator: '::'}
   });
   t.equal(adapter.structuralKey.separator, '::');
 });
@@ -94,8 +94,8 @@ test('Adapter: number keyFields in composite requires width', t => {
       new Adapter({
         client,
         table: 'T',
-        keyFields: ['state', {field: 'id', type: 'number'}],
-        structuralKey: {field: '-sk'}
+        keyFields: ['state', {name: 'id', type: 'number'}],
+        structuralKey: {name: '-sk'}
       }),
     'number without width in composite'
   );
@@ -103,16 +103,16 @@ test('Adapter: number keyFields in composite requires width', t => {
 
 test('Adapter: number keyFields in single-field keyFields does not require width', t => {
   const client = makeMockClient(async () => ({}));
-  const adapter = new Adapter({client, table: 'T', keyFields: [{field: 'id', type: 'number'}]});
-  t.equal(adapter.keyFieldSpecs[0].type, 'number');
-  t.equal(adapter.keyFieldSpecs[0].width, undefined, 'width optional for single-field');
+  const adapter = new Adapter({client, table: 'T', keyFields: [{name: 'id', type: 'number'}]});
+  t.equal(adapter.keyFields[0].type, 'number');
+  t.equal(adapter.keyFields[0].width, undefined, 'width optional for single-field');
 });
 
 test('Adapter: rejects invalid keyField entry shapes', t => {
   const client = makeMockClient(async () => ({}));
   t.throws(() => new Adapter({client, table: 'T', keyFields: [42]}), 'number entry');
   t.throws(() => new Adapter({client, table: 'T', keyFields: [{type: 'string'}]}), 'missing field');
-  t.throws(() => new Adapter({client, table: 'T', keyFields: [{field: 'x', type: 'date'}]}), 'unknown type');
+  t.throws(() => new Adapter({client, table: 'T', keyFields: [{name: 'x', type: 'date'}]}), 'unknown type');
 });
 
 // --- typeLabels + typeDiscriminator ---
@@ -125,7 +125,7 @@ test('Adapter: typeLabels length must match keyFields', t => {
         client,
         table: 'T',
         keyFields: ['state', 'rentalName', 'carVin'],
-        structuralKey: {field: '-sk'},
+        structuralKey: {name: '-sk'},
         typeLabels: ['state', 'rental']
       }),
     'typeLabels shorter than keyFields'
@@ -138,7 +138,7 @@ test('Adapter: typeLabels stored', t => {
     client,
     table: 'T',
     keyFields: ['state', 'rentalName', 'carVin'],
-    structuralKey: {field: '-sk'},
+    structuralKey: {name: '-sk'},
     typeLabels: ['state', 'rental', 'car']
   });
   t.deepEqual(adapter.typeLabels, ['state', 'rental', 'car']);
@@ -152,7 +152,7 @@ test('adapter.typeOf: depth-based label from typeLabels', t => {
     client,
     table: 'T',
     keyFields: ['state', 'rentalName', 'carVin'],
-    structuralKey: {field: '-sk'},
+    structuralKey: {name: '-sk'},
     typeLabels: ['state', 'rental', 'car']
   });
   t.equal(adapter.typeOf({state: 'TX'}), 'state');
@@ -166,7 +166,7 @@ test('adapter.typeOf: depth-based stops at first missing field (contiguous-from-
     client,
     table: 'T',
     keyFields: ['state', 'rentalName', 'carVin'],
-    structuralKey: {field: '-sk'},
+    structuralKey: {name: '-sk'},
     typeLabels: ['state', 'rental', 'car']
   });
   // carVin present but rentalName missing → depth stops at state.
@@ -179,7 +179,7 @@ test('adapter.typeOf: returns raw depth number when typeLabels not declared', t 
     client,
     table: 'T',
     keyFields: ['state', 'rentalName', 'carVin'],
-    structuralKey: {field: '-sk'}
+    structuralKey: {name: '-sk'}
   });
   t.equal(adapter.typeOf({state: 'TX'}), 1);
   t.equal(adapter.typeOf({state: 'TX', rentalName: 'Dallas'}), 2);
@@ -191,9 +191,9 @@ test('adapter.typeOf: typeDiscriminator wins over depth when field is present', 
     client,
     table: 'T',
     keyFields: ['state', 'rentalName', 'carVin'],
-    structuralKey: {field: '-sk'},
+    structuralKey: {name: '-sk'},
     typeLabels: ['state', 'rental', 'car'],
-    typeDiscriminator: {field: 'kind'}
+    typeDiscriminator: {name: 'kind'}
   });
   // Depth would say 'car' but kind field overrides.
   t.equal(adapter.typeOf({state: 'TX', rentalName: 'Dallas', carVin: 'V', kind: 'truck'}), 'truck');
@@ -205,7 +205,7 @@ test('adapter.typeOf: returns undefined for empty item', t => {
     client,
     table: 'T',
     keyFields: ['state', 'carVin'],
-    structuralKey: {field: '-sk'}
+    structuralKey: {name: '-sk'}
   });
   t.equal(adapter.typeOf({}), undefined);
   t.equal(adapter.typeOf(null), undefined);
@@ -765,7 +765,7 @@ test('adapter.buildKey: composite kind=exact joins with separator', t => {
     client,
     table: 'T',
     keyFields: ['state', 'rentalName'],
-    structuralKey: {field: '-sk'}
+    structuralKey: {name: '-sk'}
   });
   const p = adapter.buildKey({state: 'TX', rentalName: 'Dallas'});
   t.equal(p.KeyConditionExpression, '#kc0 = :kcv0');
@@ -779,7 +779,7 @@ test('adapter.buildKey: kind=children appends trailing separator + begins_with',
     client,
     table: 'T',
     keyFields: ['state', 'rentalName', 'carVin'],
-    structuralKey: {field: '-sk'}
+    structuralKey: {name: '-sk'}
   });
   const p = adapter.buildKey({state: 'TX', rentalName: 'Dallas'}, {kind: 'children'});
   t.equal(p.KeyConditionExpression, 'begins_with(#kc0, :kcv0)');
@@ -792,7 +792,7 @@ test('adapter.buildKey: partial appends separator + prefix', t => {
     client,
     table: 'T',
     keyFields: ['state', 'rentalName'],
-    structuralKey: {field: '-sk'}
+    structuralKey: {name: '-sk'}
   });
   const p = adapter.buildKey({state: 'TX'}, {partial: 'Dal'});
   t.equal(p.KeyConditionExpression, 'begins_with(#kc0, :kcv0)');
@@ -805,7 +805,7 @@ test('adapter.buildKey: kind=partial requires non-empty partial string', t => {
     client,
     table: 'T',
     keyFields: ['state', 'rentalName'],
-    structuralKey: {field: '-sk'}
+    structuralKey: {name: '-sk'}
   });
   t.throws(() => adapter.buildKey({state: 'TX'}, {kind: 'partial'}), 'partial missing');
   t.throws(() => adapter.buildKey({state: 'TX'}, {kind: 'partial', partial: ''}), 'partial empty');
@@ -817,7 +817,7 @@ test('adapter.buildKey: non-contiguous values throw', t => {
     client,
     table: 'T',
     keyFields: ['state', 'rentalName', 'carVin'],
-    structuralKey: {field: '-sk'}
+    structuralKey: {name: '-sk'}
   });
   t.throws(() => adapter.buildKey({state: 'TX', carVin: 'V123'}), 'rentalName missing between state and carVin');
 });
@@ -828,7 +828,7 @@ test('adapter.buildKey: missing partition key throws', t => {
     client,
     table: 'T',
     keyFields: ['state', 'rentalName'],
-    structuralKey: {field: '-sk'}
+    structuralKey: {name: '-sk'}
   });
   t.throws(() => adapter.buildKey({rentalName: 'Dallas'}), 'state missing');
   t.throws(() => adapter.buildKey({}), 'empty values');
@@ -839,8 +839,8 @@ test('adapter.buildKey: number keyFields zero-padded per width', t => {
   const adapter = new Adapter({
     client,
     table: 'T',
-    keyFields: ['state', {field: 'rentalId', type: 'number', width: 5}, 'carVin'],
-    structuralKey: {field: '-sk'}
+    keyFields: ['state', {name: 'rentalId', type: 'number', width: 5}, 'carVin'],
+    structuralKey: {name: '-sk'}
   });
   const p = adapter.buildKey({state: 'TX', rentalId: 42, carVin: 'V1'});
   t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX|00042|V1');
@@ -852,7 +852,7 @@ test('adapter.buildKey: custom separator applied', t => {
     client,
     table: 'T',
     keyFields: ['state', 'carVin'],
-    structuralKey: {field: '-sk', separator: '::'}
+    structuralKey: {name: '-sk', separator: '::'}
   });
   const p = adapter.buildKey({state: 'TX', carVin: 'V1'});
   t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX::V1');
@@ -866,4 +866,122 @@ test('adapter.buildKey: indexName option throws until declarative GSI surface la
 test('adapter.buildKey: single-field keyFields + kind=children throws', t => {
   const {adapter} = makeAdapter(async () => ({}));
   t.throws(() => adapter.buildKey({name: 'x'}, {kind: 'children'}), 'needs structuralKey');
+});
+
+// --- canned mapFn builders ---
+
+test('adapter.swapPrefix: rewrites leading keyFields prefix', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName', 'carVin'],
+    structuralKey: {name: '-sk'}
+  });
+  const fn = adapter.swapPrefix({state: 'TX'}, {state: 'FL'});
+  const out = fn({state: 'TX', rentalName: 'Dallas', carVin: 'V1', other: 'x'});
+  t.deepEqual(out, {state: 'FL', rentalName: 'Dallas', carVin: 'V1', other: 'x'});
+});
+
+test('adapter.swapPrefix: multi-level prefix', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName', 'carVin'],
+    structuralKey: {name: '-sk'}
+  });
+  const fn = adapter.swapPrefix({state: 'TX', rentalName: 'Dallas'}, {state: 'FL', rentalName: 'Miami'});
+  const out = fn({state: 'TX', rentalName: 'Dallas', carVin: 'V1'});
+  t.deepEqual(out, {state: 'FL', rentalName: 'Miami', carVin: 'V1'});
+});
+
+test('adapter.swapPrefix: throws when item does not match srcPrefix', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'carVin'],
+    structuralKey: {name: '-sk'}
+  });
+  const fn = adapter.swapPrefix({state: 'TX'}, {state: 'FL'});
+  t.throws(() => fn({state: 'CA', carVin: 'V1'}), 'mismatched srcPrefix');
+});
+
+test('adapter.swapPrefix: prefixes must be contiguous-from-start', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName', 'carVin'],
+    structuralKey: {name: '-sk'}
+  });
+  t.throws(() => adapter.swapPrefix({rentalName: 'Dallas'}, {rentalName: 'Miami'}), 'skipping state (not from start)');
+});
+
+test('adapter.swapPrefix: src and dst must name the same keys', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName'],
+    structuralKey: {name: '-sk'}
+  });
+  t.throws(() => adapter.swapPrefix({state: 'TX'}, {state: 'FL', rentalName: 'Dallas'}), 'mismatched prefix lengths');
+});
+
+test('adapter.swapPrefix: non-object inputs throw', t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  t.throws(() => adapter.swapPrefix(null, {name: 'x'}), 'null src');
+  t.throws(() => adapter.swapPrefix({name: 'x'}, null), 'null dst');
+  t.throws(() => adapter.swapPrefix({}, {}), 'empty prefixes');
+});
+
+test('adapter.overlayFields: merges overlay into item', t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  const fn = adapter.overlayFields({archived: true, reason: 'cleanup'});
+  const out = fn({name: 'Hoth', climate: 'frozen'});
+  t.deepEqual(out, {name: 'Hoth', climate: 'frozen', archived: true, reason: 'cleanup'});
+});
+
+test('adapter.overlayFields: overlay wins over item values', t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  const fn = adapter.overlayFields({climate: 'arctic'});
+  const out = fn({name: 'Hoth', climate: 'frozen'});
+  t.equal(out.climate, 'arctic');
+});
+
+test('adapter.overlayFields: touching a keyField shifts it', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName'],
+    structuralKey: {name: '-sk'}
+  });
+  const fn = adapter.overlayFields({state: 'FL'});
+  const out = fn({state: 'TX', rentalName: 'Dallas'});
+  t.equal(out.state, 'FL');
+  t.equal(out.rentalName, 'Dallas');
+});
+
+test('adapter.overlayFields: rejects overlay that nulls a keyField', t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  t.throws(() => adapter.overlayFields({name: undefined}), 'undefined keyField');
+  t.throws(() => adapter.overlayFields({name: null}), 'null keyField');
+});
+
+test('adapter.overlayFields: snapshots overlay (later caller mutation does not leak)', t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  const overlay = {tag: 'a'};
+  const fn = adapter.overlayFields(overlay);
+  overlay.tag = 'b';
+  const out = fn({name: 'x'});
+  t.equal(out.tag, 'a', 'frozen snapshot');
+});
+
+test('adapter.overlayFields: non-object input throws', t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  t.throws(() => adapter.overlayFields(null), 'null');
+  t.throws(() => adapter.overlayFields('a'), 'string');
 });

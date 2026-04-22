@@ -6,10 +6,10 @@
 
 // Input shape:
 //   {
-//     field: string,       // sort-key field name (or structural-key field name)
-//     value: string,       // already-joined value (e.g. "TX|Dallas|" for children, "TX|Dallas" for exact)
+//     name: string,       // sort-key / structural-key field name
+//     value: string,      // already-joined value (e.g. "TX|Dallas|" for children, "TX|Dallas" for exact)
 //     kind: 'exact' | 'prefix',
-//     pkField?: string,    // optional partition-key field (adds `#pk = :pk` to the clause)
+//     pkName?: string,    // optional partition-key field name (adds `#pk = :pk` to the clause)
 //     pkValue?: unknown
 //   }
 //
@@ -17,7 +17,7 @@
 // `:kcv<n>`), AND-combined with any existing KeyConditionExpression.
 
 export const buildKeyCondition = (input, params = {}) => {
-  const {field, value, kind, pkField, pkValue} = input;
+  const {name, value, kind, pkName, pkValue} = input;
 
   const names = params.ExpressionAttributeNames || {};
   const values = params.ExpressionAttributeValues || {};
@@ -37,17 +37,17 @@ export const buildKeyCondition = (input, params = {}) => {
 
   const clauses = [];
 
-  if (pkField !== undefined && pkValue !== undefined) {
-    clauses.push(allocName(pkField) + ' = ' + allocValue(pkValue));
+  if (pkName !== undefined && pkValue !== undefined) {
+    clauses.push(allocName(pkName) + ' = ' + allocValue(pkValue));
   }
 
-  const fieldAlias = allocName(field);
+  const nameAlias = allocName(name);
   const valueAlias = allocValue(value);
   if (kind === 'prefix') {
-    clauses.push('begins_with(' + fieldAlias + ', ' + valueAlias + ')');
+    clauses.push('begins_with(' + nameAlias + ', ' + valueAlias + ')');
   } else {
     // Default: 'exact' — equality match on the sort/structural key.
-    clauses.push(fieldAlias + ' = ' + valueAlias);
+    clauses.push(nameAlias + ' = ' + valueAlias);
   }
 
   const expr = clauses.join(' AND ');

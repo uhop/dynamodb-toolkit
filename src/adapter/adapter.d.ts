@@ -13,7 +13,7 @@ import type {AdapterHooks} from './hooks.js';
  */
 export interface KeyFieldSpec {
   /** Field name on the item. */
-  field: string;
+  name: string;
   /** DynamoDB scalar type for this key. Defaults to `'string'`. */
   type?: 'string' | 'number' | 'binary';
   /** Zero-pad width — required on `{type: 'number'}` components in a composite `keyFields`. */
@@ -27,7 +27,7 @@ export interface KeyFieldSpec {
  */
 export interface StructuralKey {
   /** Field name on the item where the joined value lives. */
-  field: string;
+  name: string;
   /** Join separator. Defaults to `'|'`. Any string accepted (multi-char, unprintable). */
   separator?: string;
 }
@@ -59,7 +59,7 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
    * Optional type-discriminator field. When present on an item, its value
    * overrides depth-based detection in {@link Adapter.typeOf}.
    */
-  typeDiscriminator?: {field: string};
+  typeDiscriminator?: {name: string};
   /** Alias map for projections — rewrites the first segment of each requested field. */
   projectionFieldMap?: Record<string, string>;
   /** Fields that get a `searchablePrefix + field` lowercase mirror for substring filtering. */
@@ -224,16 +224,21 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   client: DynamoDBDocumentClient;
   /** Base table name. */
   table: string;
-  /** Partition key first, optional sort key second — field names only. */
-  keyFields: (keyof TItem & string)[];
-  /** Normalized typed descriptors for each `keyFields` component. */
-  keyFieldSpecs: Required<KeyFieldSpec>[];
+  /**
+   * Canonical typed descriptors — partition key first, optional sort key
+   * second. Always normalized to `{field, type}` (plus `width` when present
+   * on `{type: 'number'}` composites). Bare-string inputs to the
+   * constructor are normalized into this shape. Read a single field name
+   * with `keyFields[i].name`; get a string-names array with
+   * `keyFields.map(f => f.name)` when that's needed.
+   */
+  keyFields: Required<KeyFieldSpec>[];
   /** Structural-key declaration (only set when `keyFields.length > 1` or explicitly declared). */
   structuralKey?: Required<StructuralKey>;
   /** Type labels paired 1:1 with `keyFields`, when declared. */
   typeLabels?: string[];
   /** Type-discriminator field config, when declared. */
-  typeDiscriminator?: {field: string};
+  typeDiscriminator?: {name: string};
   /** Alias map for projections. */
   projectionFieldMap: Record<string, string>;
   /** Searchable-field map for substring filtering. */
@@ -247,7 +252,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
 
   /**
    * Return the type label for an item. Priority:
-   *   1. `typeDiscriminator.field` value when present on the item (coerced to string).
+   *   1. `typeDiscriminator.name` value when present on the item (coerced to string).
    *   2. `typeLabels[depth - 1]` where `depth` = count of contiguous-from-start
    *      defined `keyFields` on the item, when `typeLabels` is declared.
    *   3. Raw `depth` number when no `typeLabels` is declared.
@@ -293,6 +298,44 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
     options?: {kind?: 'exact' | 'children' | 'partial'; partial?: string; indexName?: string},
     params?: Record<string, unknown>
   ): Record<string, unknown>;
+
+  /**
+   * Build a mapFn that swaps a leading `keyFields` prefix. Given
+   * `srcPrefix = {state: 'TX'}` and `dstPrefix = {state: 'FL'}`, the returned
+   * function rewrites each item's `state` field from `'TX'` to `'FL'`, leaving
+   * all other `keyFields` and non-key data intact.
+   *
+   * Prefixes must be **contiguous-from-start** (both start at the partition
+   * keyField) and name the **same** keyFields. Throws at construction when
+   * those invariants are violated. Throws at apply time when an item's
+   * value doesn't actually match `srcPrefix` — usually a sign that the
+   * upstream query wasn't scoped to the src subtree.
+   *
+   * Typical use: subtree clone / move between prefixes.
+   * `adapter.cloneAllByParams(params, adapter.swapPrefix({state: 'TX'}, {state: 'FL'}))`.
+   *
+   * @param srcPrefix Source keyField prefix.
+   * @param dstPrefix Destination keyField prefix (same keys as src).
+   * @returns A mapFn that rewrites the leading prefix on each item.
+   */
+  swapPrefix(srcPrefix: Partial<TItem>, dstPrefix: Partial<TItem>): (item: TItem) => TItem;
+
+  /**
+   * Build a mapFn that merges a static overlay object into each item
+   * (`{...item, ...overlay}`). `overlay`'s values win. If `overlay` touches
+   * a keyField, the destination structural key shifts accordingly.
+   *
+   * Validates that `overlay` doesn't set any keyField to `undefined` or
+   * `null` — that would break destination-key formation. Non-keyField
+   * entries in `overlay` are unrestricted.
+   *
+   * Typical use: bulk-tag records during clone
+   * (`adapter.overlayFields({archived: true})`).
+   *
+   * @param overlay Static object merged into each item.
+   * @returns A mapFn that applies the overlay.
+   */
+  overlayFields(overlay: Partial<TItem> & Record<string, unknown>): (item: TItem) => TItem;
 
   /**
    * @param options Adapter constructor options. `client`, `table`, and

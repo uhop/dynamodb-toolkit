@@ -279,7 +279,7 @@ questions — they are settled positions to build against.
   per query parameter, whether it compiles to a KeyCondition or a Filter. The REST
   surface hides the choice.
 - **`begins_with()` is the primary hierarchical query primitive.** The structural index
-  field (declared via `structuralKey: {field, separator}`; default separator `|`) is
+  field (declared via `structuralKey: {name, separator}`; default separator `|`) is
   what makes this possible. The adapter computes the joined value automatically in
   `prepare()`; the user's hook still runs afterwards.
 
@@ -477,10 +477,10 @@ new Adapter({
   // version field, etc.) must start with this prefix — validated at construction.
   technicalPrefix: '-',
 
-  // keyFields: array of {field, type?, width?} descriptors, string shorthand = type 'string'.
+  // keyFields: array of {name, type?, width?} descriptors, string shorthand = type 'string'.
   keyFields: [
     'state',
-    {field: 'rentalId', type: 'number', width: 5}, // zero-padded when joined
+    {name: 'rentalId', type: 'number', width: 5}, // zero-padded when joined
     'carVin'
   ],
 
@@ -489,7 +489,7 @@ new Adapter({
   // `separator`; number components zero-padded per their `width`. User's prepare()
   // hook still runs afterwards and can override if an edge case needs it.
   structuralKey: {
-    field: '-sk', // user-chosen; validated to start with technicalPrefix
+    name: '-sk', // user-chosen; validated to start with technicalPrefix
     separator: '|' // default; any string accepted (multi-char, unprintable)
   },
 
@@ -497,8 +497,8 @@ new Adapter({
   indices: {
     'by-status-date': {
       type: 'gsi',
-      pk: 'status', // shorthand = { field: 'status', type: 'string' }
-      sk: {field: 'createdAt', type: 'number'},
+      pk: 'status', // shorthand = { name: 'status', type: 'string' }
+      sk: {name: 'createdAt', type: 'number'},
       projection: 'all', // 'keys-only' | 'all' | ['field1', 'field2'] (INCLUDE)
       sparse: true, // true = omit index fields when their value is undefined
       //  { onlyWhen: (item) => boolean } for per-type sparse
@@ -516,7 +516,7 @@ new Adapter({
   // typeLabels[i] is the label for a record with keyFields[0..i] present.
   typeLabels: ['state', 'rental', 'car'],
   // Overrides depth-based detection when the field is present on the item.
-  typeDiscriminator: {field: 'kind'},
+  typeDiscriminator: {name: 'kind'},
 
   // Existing options — still supported.
   searchable: {name: 1},
@@ -590,7 +590,7 @@ new Adapter({
   declare the GSI over the resulting physical field.
 - **Type detection via `adapter.typeOf(item)`** (Q13 resolution). Three signals,
   ordered:
-  1. **`typeDiscriminator.field` wins when present on the item.** Any string value
+  1. **`typeDiscriminator.name` wins when present on the item.** Any string value
      is accepted; the adapter does not constrain the value space. Lets the adapter
      author distinguish records that share a structural depth but have different
      semantics (e.g., car vs. truck, both at depth 3).
@@ -662,7 +662,7 @@ adapter.buildKey(values, {kind?, partial?, indexName?}, params = {})
   with a user-maintained-structural-key GSI call the primitive directly.
 
 Examples for `keyFields: ['state', 'rentalName', 'carVin']`,
-`structuralKey: {field: '-sk', separator: '|'}`:
+`structuralKey: {name: '-sk', separator: '|'}`:
 
 | Call                                                                        | `KeyConditionExpression`              | `:sk` value       |
 | --------------------------------------------------------------------------- | ------------------------------------- | ----------------- |
@@ -955,7 +955,7 @@ documentation problem, not a code problem.
   `multiValueQueryStringParameters`) — two parsing paths × four adapters is real
   maintenance cost for no capability gain the delimiter form does not already give.
 
-- **Allowlist is non-optional.** The adapter declares `{filterable: {field: [ops]}}`
+- **Allowlist is non-optional.** The adapter declares `{filterable: {<fieldName>: [ops]}}`
   (lives on the Adapter — see Q6 resolution). Parser rejects anything outside with 400. Type coercion rides along from the adapter schema. Authorisation remains a
   separate concern (a `prepareListInput` hook), not the same as allowlist.
 - **Auto-promotion to `KeyConditionExpression`.** The compiler merges pairs on the
@@ -1108,7 +1108,7 @@ above.
     directly (deferred declarative surface for those, per Q16g). Full shape +
     rationale in §"Read-side key-condition helpers (A1' / Q12 resolution)".
 13. **Type-detector helper shape** — _resolved._ `adapter.typeOf(item)` method on
-    the Adapter. Detection signals (ordered): (1) `typeDiscriminator.field` value
+    the Adapter. Detection signals (ordered): (1) `typeDiscriminator.name` value
     wins when present on the item; (2) structural-key depth mapped through
     `typeLabels` when declared; (3) raw depth number when `typeLabels` is not
     declared. `typeLabels` is an array paired 1:1 with `keyFields`. Discriminator
@@ -1135,7 +1135,7 @@ above.
     raw DynamoDB `S`/`N`/`B`. `keyFields` grows to accept
     `string | { field, type?, width? }` descriptors; `width` is required on
     `{type: 'number'}` components in composite keys. Separate
-    `structuralKey: {field, separator}` declaration replaces the implicit "`|`-join
+    `structuralKey: {name, separator}` declaration replaces the implicit "`|`-join
     to `sk`" default. New opt-in `technicalPrefix` option generalises the
     prefix-marks-adapter-managed convention (v2's `-t` style); enables automatic
     revive stripping and prepare-time validation. Legacy `indirectIndices` coexists
@@ -1157,7 +1157,7 @@ above.
 
 18. **Sort-parameter → GSI inference** — _resolved (corrected 2026-04-21 second
     session)._ Automatic from the index declaration: `?sort=<field>` (or
-    `?sort=-<field>` for descending) finds the index whose `sk.field === <field>`.
+    `?sort=-<field>` for descending) finds the index whose `sk.name === <field>`.
     LSI preferred over GSI when both match (per Q35). **No matching index →
     refuse with `NoIndexForSortField`** (per the no-client-side-list-manipulation
     principle — the toolkit does not in-memory-sort). Explicit override via

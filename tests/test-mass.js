@@ -1,5 +1,17 @@
 import test from 'tape-six';
-import {paginateList, iterateList, iterateItems, readByKeys, writeList, deleteList, deleteByKeys, copyList, moveList, getTotal} from 'dynamodb-toolkit/mass';
+import {
+  paginateList,
+  iterateList,
+  iterateItems,
+  readByKeys,
+  writeList,
+  deleteList,
+  deleteByKeys,
+  copyList,
+  moveList,
+  getTotal,
+  mergeMapFn
+} from 'dynamodb-toolkit/mass';
 import {makeMockClient} from './helpers/mock-client.js';
 
 // Helper: make a simple scan-like mock that returns all items in one page
@@ -233,4 +245,49 @@ test('paginateList: negative offset returns empty data with total', async t => {
   const result = await paginateList(client, {TableName: 'T'}, {offset: -1, limit: 10});
   t.equal(result.data.length, 0);
   t.equal(result.total, 42);
+});
+
+// mergeMapFn
+
+test('mergeMapFn: composes left-to-right', t => {
+  const f = mergeMapFn(
+    x => ({...x, a: 1}),
+    x => ({...x, b: 2})
+  );
+  t.deepEqual(f({}), {a: 1, b: 2});
+});
+
+test('mergeMapFn: single fn returns it directly', t => {
+  const fn = x => ({...x, a: 1});
+  t.equal(mergeMapFn(fn), fn);
+});
+
+test('mergeMapFn: empty args returns identity', t => {
+  const f = mergeMapFn();
+  const item = {a: 1};
+  t.equal(f(item), item, 'same reference');
+});
+
+test('mergeMapFn: filters out falsy entries', t => {
+  const f = mergeMapFn(
+    null,
+    x => ({...x, a: 1}),
+    undefined,
+    false,
+    x => ({...x, b: 2})
+  );
+  t.deepEqual(f({}), {a: 1, b: 2});
+});
+
+test('mergeMapFn: short-circuits on falsy return', t => {
+  let called = false;
+  const f = mergeMapFn(
+    () => null,
+    x => {
+      called = true;
+      return x;
+    }
+  );
+  t.equal(f({a: 1}), null);
+  t.notOk(called, 'downstream fn skipped after falsy');
 });

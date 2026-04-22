@@ -295,24 +295,24 @@ test('cloneParams: null/undefined input returns fresh empty clone', t => {
 // buildKeyCondition
 
 test('buildKeyCondition: exact match on sort key', t => {
-  const p = buildKeyCondition({field: '-sk', value: 'TX|Dallas', kind: 'exact'});
+  const p = buildKeyCondition({name: '-sk', value: 'TX|Dallas', kind: 'exact'});
   t.equal(p.KeyConditionExpression, '#kc0 = :kcv0');
   t.equal(p.ExpressionAttributeNames['#kc0'], '-sk');
   t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX|Dallas');
 });
 
 test('buildKeyCondition: prefix (begins_with) on structural key', t => {
-  const p = buildKeyCondition({field: '-sk', value: 'TX|Dallas|', kind: 'prefix'});
+  const p = buildKeyCondition({name: '-sk', value: 'TX|Dallas|', kind: 'prefix'});
   t.equal(p.KeyConditionExpression, 'begins_with(#kc0, :kcv0)');
   t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX|Dallas|');
 });
 
-test('buildKeyCondition: includes partition-key clause when pkField + pkValue set', t => {
+test('buildKeyCondition: includes partition-key clause when pkName + pkValue set', t => {
   const p = buildKeyCondition({
-    field: '-sk',
+    name: '-sk',
     value: 'TX|Dallas|',
     kind: 'prefix',
-    pkField: 'state',
+    pkName: 'state',
     pkValue: 'TX'
   });
   t.equal(p.KeyConditionExpression, '#kc0 = :kcv0 AND begins_with(#kc1, :kcv1)');
@@ -328,7 +328,7 @@ test('buildKeyCondition: AND-merges with existing KeyConditionExpression', t => 
     ExpressionAttributeNames: {'#pre': 'other'},
     ExpressionAttributeValues: {':preV': 'x'}
   };
-  const p = buildKeyCondition({field: '-sk', value: 'TX', kind: 'exact'}, existing);
+  const p = buildKeyCondition({name: '-sk', value: 'TX', kind: 'exact'}, existing);
   t.matchString(p.KeyConditionExpression, /^\(#pre = :preV\) AND \(#kc\d+ = :kcv\d+\)$/);
   t.ok(p.ExpressionAttributeNames['#pre'], 'existing name preserved');
 });
@@ -338,7 +338,7 @@ test('buildKeyCondition: placeholder counter continues from existing params', t 
     ExpressionAttributeNames: {'#cd0': 'existing-a', '#cd1': 'existing-b'},
     ExpressionAttributeValues: {':cdv0': 'a', ':cdv1': 'b'}
   };
-  const p = buildKeyCondition({field: 'sk', value: 'v', kind: 'exact'}, existing);
+  const p = buildKeyCondition({name: 'sk', value: 'v', kind: 'exact'}, existing);
   // New placeholders should not collide with existing ones — the counter
   // picks up from the length of the name/value maps.
   const newName = Object.keys(p.ExpressionAttributeNames).find(k => k.startsWith('#kc'));
