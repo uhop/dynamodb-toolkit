@@ -34,15 +34,6 @@ export class BadFilterOp extends ToolkitError {
 }
 
 /**
- * Mass clone/move called without a mapFn or equivalent destination-key
- * derivation — would be a silent write-to-self.
- */
-export class AmbiguousDestination extends ToolkitError {
-  operation: string;
-  constructor(operation: string);
-}
-
-/**
  * `edit()` detected that the `mapFn` diff touches a keyField. Set
  * `{allowKeyChange: true}` to opt into auto-promotion to a clone+delete.
  */

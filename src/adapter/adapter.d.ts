@@ -712,7 +712,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @param options Strategy / extra DynamoDB input.
    * @returns `{processed}` — total copies written.
    */
-  cloneByKeys(keys: (TKey | Raw<TKey>)[], mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
+  cloneByKeys(keys: (TKey | Raw<TKey>)[], mapFn: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
   /**
    * Clone every item matching `params`, optionally transformed by `mapFn`.
    * Resumable via `options.maxItems` + `options.resumeToken`. `mapFn`
@@ -725,7 +725,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @returns `MassOpResult` — `processed` counts copies written;
    *   `cursor` present when stopped by `maxItems`.
    */
-  cloneListByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<MassOpResult>;
+  cloneListByParams(params: Record<string, unknown>, mapFn: (item: TItem) => TItem, options?: MassOptions): Promise<MassOpResult>;
   /**
    * Move each item identified by a key (paired put + delete chunks).
    *
@@ -734,7 +734,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @param options Strategy / extra DynamoDB input.
    * @returns `{processed}` — sum of put + delete actions (≈ 2× the moved-item count on success).
    */
-  moveByKeys(keys: (TKey | Raw<TKey>)[], mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
+  moveByKeys(keys: (TKey | Raw<TKey>)[], mapFn: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
   /**
    * Move every item matching `params` (paired put + delete chunks).
    * Resumable via `options.maxItems` + `options.resumeToken`. `mapFn`
@@ -747,7 +747,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @returns `MassOpResult` — `processed` is the sum of put + delete actions
    *   (≈ 2× the moved-item count on success); `cursor` present when stopped by `maxItems`.
    */
-  moveListByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<MassOpResult>;
+  moveListByParams(params: Record<string, unknown>, mapFn: (item: TItem) => TItem, options?: MassOptions): Promise<MassOpResult>;
 
   /** @deprecated Use {@link Adapter.putItems}. Removed in a future minor. */
   putAll(items: (TItem | Raw<TItem>)[], options?: MassOptions): Promise<{processed: number}>;

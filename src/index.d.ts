@@ -31,7 +31,6 @@ export {
   NoIndexForSortField,
   BadFilterField,
   BadFilterOp,
-  AmbiguousDestination,
   KeyFieldChanged,
   CreatedAtFieldNotDeclared,
   CascadeNotDeclared

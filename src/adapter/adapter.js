@@ -1,6 +1,6 @@
 // Adapter — composition root tying expressions, batch, mass, paths, and hooks together.
 
-import {GetCommand} from '@aws-sdk/lib-dynamodb';
+import {GetCommand, PutCommand} from '@aws-sdk/lib-dynamodb';
 
 import {Raw} from '../raw.js';
 import {addProjection} from '../expressions/projection.js';
@@ -25,6 +25,12 @@ import {dispatchWrite} from './transaction-upgrade.js';
 import {ConsistentReadOnGSIRejected, NoIndexForSortField, BadFilterField, BadFilterOp, KeyFieldChanged} from '../errors.js';
 
 const MOVE_CHUNK = 12;
+
+// AWS SDK CCF ("ConditionalCheckFailedException") is the signal for
+// ifNotExists / ifExists. Detected by .name because the DocumentClient
+// exposes the error class identity differently across versions /
+// bundlers, but `.name` is stable.
+const isConditionFailure = err => err && (err.name === 'ConditionalCheckFailedException' || err.__type === 'ConditionalCheckFailedException');
 
 // Deep-equality for DynamoDB attribute values: scalars, arrays, plain
 // objects, Sets. Used by `edit()` to suppress SET clauses for unchanged
@@ -979,8 +985,6 @@ export class Adapter {
   }
 
   async edit(key, mapFn, options) {
-    if (typeof mapFn !== 'function') throw new TypeError('adapter.edit: mapFn is required');
-
     // Fetch the raw DB item so we can diff against the actual stored shape
     // (technical fields included). `readFields` limits the GetItem
     // projection — callers who know only a subset of fields matter for the
@@ -1192,16 +1196,26 @@ export class Adapter {
     });
   }
 
-  async cloneByKeys(keys, mapFn, _options) {
+  async cloneByKeys(keys, mapFn, options) {
     const dynamoKeys = keys.map(k => this._toKey(k));
     const items = await readByKeys(this.client, this.table, dynamoKeys);
     const cloned = items.filter(Boolean).map(item => {
       const revived = this.hooks.revive(item);
-      const mapped = mapFn ? mapFn(revived) : revived;
-      return this._prepareItem(mapped);
+      const mapped = mapFn(revived);
+      return mapped ? this._prepareItem(mapped) : null;
     });
-    if (!cloned.length) return {processed: 0};
-    const processed = await writeItems(this.client, this.table, cloned);
+    const valid = cloned.filter(Boolean);
+    if (!valid.length) return {processed: 0};
+
+    // Conditions → per-item PutItem + ConditionExpression. BatchWriteItem
+    // doesn't support conditions, so the caller trades batching for
+    // "don't overwrite" / "only update existing" semantics.
+    if (options?.ifNotExists || options?.ifExists) {
+      const result = await this._putWithCondition(valid, options);
+      return {processed: result.processed, skipped: result.skipped, failed: result.failed, conflicts: []};
+    }
+
+    const processed = await writeItems(this.client, this.table, valid);
     return {processed};
   }
 
@@ -1209,20 +1223,65 @@ export class Adapter {
     let p = this._cloneParams(params);
     p = cleanParams(p);
 
+    const useConditionPath = options?.ifNotExists || options?.ifExists;
+
     return runPaged(this.client, p, options, async items => {
       const prepared = items
         .map(item => {
           const revived = this.hooks.revive(item);
-          const mapped = mapFn ? mapFn(revived) : revived;
+          const mapped = mapFn(revived);
           return mapped ? this._prepareItem(mapped) : null;
         })
         .filter(Boolean);
       if (!prepared.length) return {processed: 0};
+
+      if (useConditionPath) {
+        return this._putWithCondition(prepared, options);
+      }
+
       /** @type {{action: 'put', params: any}[]} */
       const batch = prepared.map(item => ({action: 'put', params: {TableName: this.table, Item: item}}));
       const processed = await applyBatch(this.client, batch);
       return {processed};
     });
+  }
+
+  // Per-item PutItem with ConditionExpression. Used by clone when
+  // ifNotExists / ifExists is set. ConditionalCheckFailed is bucketed
+  // into `skipped` (expected outcome of the caller's semantic — "only
+  // if absent" or "only if present"); other SDK errors are bucketed
+  // into `failed` with `reason: 'ConditionalCheckFailed'` remapped to
+  // the underlying AWS reason. Throws on errors unrelated to a single
+  // item (network, auth) so callers don't silently continue.
+  async _putWithCondition(items, options) {
+    const invert = Boolean(options?.ifNotExists); // _checkExistence(p, true) → attribute_not_exists
+    let processed = 0;
+    let skipped = 0;
+    /** @type {import('../mass/index.js').MassOpFailure[]} */
+    const failed = [];
+    for (const item of items) {
+      const p = {TableName: this.table, Item: item};
+      const withCondition = this._checkExistence(p, invert);
+      try {
+        await this.client.send(new PutCommand(withCondition));
+        processed++;
+      } catch (err) {
+        if (isConditionFailure(err)) {
+          skipped++;
+          continue;
+        }
+        // Non-CCF errors that are clearly per-item (ValidationException,
+        // ProvisionedThroughputExceeded) get bucketed; other errors
+        // (network, auth) re-throw so the caller sees them.
+        const reason = err?.name;
+        if (reason === 'ValidationException' || reason === 'ProvisionedThroughputExceededException') {
+          failed.push({key: this._restrictKey(item), reason, details: err?.message, sdkError: err});
+          continue;
+        }
+        throw err;
+      }
+    }
+    return {processed, skipped, failed};
   }
 
   async moveByKeys(keys, mapFn, _options) {
@@ -1239,7 +1298,7 @@ export class Adapter {
       const pairs = [];
       for (const item of slice) {
         const revived = this.hooks.revive(item);
-        const mapped = mapFn ? mapFn(revived) : revived;
+        const mapped = mapFn(revived);
         if (!mapped) continue;
         pairs.push({put: this._prepareItem(mapped), key: this._restrictKey(item)});
       }
@@ -1266,7 +1325,7 @@ export class Adapter {
         const pairs = [];
         for (const item of slice) {
           const revived = this.hooks.revive(item);
-          const mapped = mapFn ? mapFn(revived) : revived;
+          const mapped = mapFn(revived);
           if (!mapped) continue;
           pairs.push({put: this._prepareItem(mapped), key: this._restrictKey(item)});
         }

@@ -142,9 +142,9 @@ Biggest release of the workstream. Makes hierarchical adapters declarative inste
 - [x] **`src/errors.js`** (or co-located) + `.d.ts` — introduce named error classes for constraints the toolkit detects:
   - `NoIndexForSortField`
   - `ConsistentReadOnGSIRejected`
-  - `AmbiguousDestination` (thrown when clone/move has no `mapFn`)
   - `BadFilterField` / `BadFilterOp` (thrown by `filterable` allowlist rejections at the parser layer)
   - `KeyFieldChanged`, `CreatedAtFieldNotDeclared`, `CascadeNotDeclared` (pre-staged for 3.3.0–3.5.0)
+  - ~~`AmbiguousDestination`~~ — dropped. Originally intended as a guard against "silent write-to-self when `mapFn` missing." Once `mapFn` became mandatory in the typed signatures, the guard was either duplicating TS typing (at runtime) or catching a natural `TypeError` that JS would throw anyway. Per the GIGO principle — toolkit assumes callers honor the contract and doesn't runtime-type-check argument shapes.
   - Existing `BadBody` / `BadContentLength` stay in the handler layer.
 
 ### Exit criteria

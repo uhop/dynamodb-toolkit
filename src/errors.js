@@ -70,18 +70,6 @@ export class BadFilterOp extends ToolkitError {
 }
 
 /**
- * Mass clone/move called without a `mapFn` or equivalent destination-key
- * derivation. Without one, the destination would equal the source — a
- * silent write-to-self. Refuse at call time.
- */
-export class AmbiguousDestination extends ToolkitError {
-  constructor(operation) {
-    super(`${operation}: destination keys cannot be derived — supply a mapFn or use a cascade primitive (e.g., swapPrefix / overlayFields).`);
-    this.operation = operation;
-  }
-}
-
-/**
  * `edit()` detected that the `mapFn` diff touches a keyField. Edit is for
  * in-place non-key updates; key changes require move. Set
  * `{allowKeyChange: true}` to opt into auto-promotion.

@@ -409,17 +409,6 @@ test('edit: allowKeyChange auto-promotes to move', async t => {
   t.ok(txn, 'emits TransactWriteCommand for the promoted move');
 });
 
-test('edit: requires mapFn', async t => {
-  const {adapter} = makeAdapter(async () => ({}));
-  let err;
-  try {
-    await adapter.edit({name: 'X'});
-  } catch (e) {
-    err = e;
-  }
-  t.ok(err instanceof TypeError, 'TypeError when mapFn missing');
-});
-
 test('edit: readFields limits GetItem ProjectionExpression', async t => {
   const sent = [];
   const {adapter} = makeAdapter(async cmd => {
@@ -787,6 +776,91 @@ test('makeGet/makePost/makePut/makePatch/makeDelete return descriptors', async t
 
 // --- getList / getListByParams ---
 
+// --- Condition dispatch (ifNotExists / ifExists) on clone mass ops ---
+
+test('cloneByKeys: {ifNotExists} switches to per-item PutCommand with condition', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'BatchGetCommand') {
+      return {Responses: {[TABLE]: [{name: 'A'}]}, UnprocessedKeys: {}};
+    }
+    return {};
+  });
+  const r = await adapter.cloneByKeys([{name: 'A'}], x => ({...x, name: 'A-copy'}), {ifNotExists: true});
+  const puts = sent.filter(c => c.constructor.name === 'PutCommand');
+  t.equal(puts.length, 1, 'per-item PutCommand used');
+  t.matchString(puts[0].input.ConditionExpression, /attribute_not_exists/);
+  t.equal(r.processed, 1);
+  t.equal(r.skipped, 0);
+});
+
+test('cloneByKeys: {ifNotExists} buckets CCF into skipped', async t => {
+  const {adapter} = makeAdapter(async cmd => {
+    if (cmd.constructor.name === 'BatchGetCommand') {
+      return {Responses: {[TABLE]: [{name: 'A'}]}, UnprocessedKeys: {}};
+    }
+    if (cmd.constructor.name === 'PutCommand') {
+      const err = new Error('cond fail');
+      err.name = 'ConditionalCheckFailedException';
+      throw err;
+    }
+    return {};
+  });
+  const r = await adapter.cloneByKeys([{name: 'A'}], x => x, {ifNotExists: true});
+  t.equal(r.processed, 0);
+  t.equal(r.skipped, 1, 'CCF → skipped bucket');
+  t.equal(r.failed.length, 0);
+});
+
+test('cloneByKeys: {ifExists} uses attribute_exists condition', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'BatchGetCommand') {
+      return {Responses: {[TABLE]: [{name: 'A'}]}, UnprocessedKeys: {}};
+    }
+    return {};
+  });
+  await adapter.cloneByKeys([{name: 'A'}], x => x, {ifExists: true});
+  const puts = sent.filter(c => c.constructor.name === 'PutCommand');
+  t.matchString(puts[0].input.ConditionExpression, /attribute_exists/);
+  t.ok(!/attribute_not_exists/.test(puts[0].input.ConditionExpression));
+});
+
+test('cloneListByParams: {ifNotExists} uses per-item PutCommand', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') return {Items: [{name: 'A'}]};
+    return {};
+  });
+  const r = await adapter.cloneListByParams({TableName: TABLE}, x => ({...x, name: 'A-copy'}), {ifNotExists: true});
+  const puts = sent.filter(c => c.constructor.name === 'PutCommand');
+  t.equal(puts.length, 1);
+  t.matchString(puts[0].input.ConditionExpression, /attribute_not_exists/);
+  t.equal(r.processed, 1);
+});
+
+test('cloneByKeys: ValidationException → failed bucket, not thrown', async t => {
+  const {adapter} = makeAdapter(async cmd => {
+    if (cmd.constructor.name === 'BatchGetCommand') {
+      return {Responses: {[TABLE]: [{name: 'A'}]}, UnprocessedKeys: {}};
+    }
+    if (cmd.constructor.name === 'PutCommand') {
+      const err = new Error('bad');
+      err.name = 'ValidationException';
+      throw err;
+    }
+    return {};
+  });
+  const r = await adapter.cloneByKeys([{name: 'A'}], x => x, {ifNotExists: true});
+  t.equal(r.processed, 0);
+  t.equal(r.failed.length, 1);
+  t.equal(r.failed[0].reason, 'ValidationException');
+});
+
 // --- resumable list mass ops (MassOpResult envelope) ---
 
 test('deleteListByParams: returns MassOpResult envelope', async t => {
@@ -886,9 +960,9 @@ test('Adapter: deprecated aliases forward to the new names (putAll / getAll / ge
     t.equal(r3.processed, 1);
     const r4 = await adapter.deleteAllByParams({TableName: 'TestTable'});
     t.equal(r4.processed, 0);
-    const r5 = await adapter.cloneAllByParams({TableName: 'TestTable'});
+    const r5 = await adapter.cloneAllByParams({TableName: 'TestTable'}, x => x);
     t.equal(r5.processed, 0);
-    const r6 = await adapter.moveAllByParams({TableName: 'TestTable'});
+    const r6 = await adapter.moveAllByParams({TableName: 'TestTable'}, x => x);
     t.equal(r6.processed, 0);
   } finally {
     console.warn = origWarn;
