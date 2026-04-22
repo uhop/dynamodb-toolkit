@@ -149,6 +149,31 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
   searchablePrefix?: string;
   /** GSIs that project keys only — reads do a second-hop BatchGet against the base table. */
   indirectIndices?: Record<string, 1 | true>;
+  /**
+   * Optional optimistic-concurrency version field. Stores a numeric
+   * counter that the toolkit auto-increments on every write and auto-
+   * conditions on for write-path CCF.
+   *
+   * - `post` initialises the field to `1` and writes with
+   *   `attribute_not_exists(<pk>)`.
+   * - `put(item)` reads the field from the caller's item (round-tripped
+   *   from a prior read), conditions on
+   *   `attribute_not_exists(<pk>) OR <versionField> = :observed`, and
+   *   writes `observed + 1`. `{force: true}` bypasses the condition
+   *   but still bumps the version.
+   * - `patch(key, patch, {expectedVersion})` conditions when
+   *   `expectedVersion` is supplied, always ADDs `+1` via
+   *   UpdateExpression.
+   * - `delete(key, {expectedVersion})` conditions when supplied; no
+   *   increment (item is gone).
+   * - `edit(key, mapFn)` / `editListByParams` auto-use the observed
+   *   version from the read, condition on it, and increment.
+   *
+   * Must start with `technicalPrefix` (required to declare together).
+   * Preserved across `revive` so callers round-trip the version through
+   * read-modify-write cycles without any explicit handling.
+   */
+  versionField?: string;
   /** Per-instance hook overrides; merges over {@link defaultHooks}. */
   hooks?: AdapterHooks<TItem>;
 }
@@ -210,6 +235,15 @@ export interface PatchOptions {
    * check on its `Item` field.
    */
   returnFailedItem?: boolean;
+  /**
+   * Expected value of `versionField` for optimistic concurrency. When
+   * supplied, the patch conditions on
+   * `attribute_not_exists(<pk>) OR <versionField> = :expectedVersion`.
+   * When omitted, no OC check is added (but the version still
+   * increments if `versionField` is declared). Only meaningful when
+   * `versionField` is set on the adapter.
+   */
+  expectedVersion?: number;
 }
 
 /** Options for `edit`. */
@@ -249,6 +283,13 @@ export interface DeleteOptions {
    * check on its `Item` field.
    */
   returnFailedItem?: boolean;
+  /**
+   * Expected value of `versionField` for optimistic concurrency. When
+   * supplied, the delete conditions on `<versionField> = :expectedVersion`.
+   * No increment on delete (the item is gone). Only meaningful when
+   * `versionField` is set on the adapter.
+   */
+  expectedVersion?: number;
 }
 
 /** Options for `clone`. */

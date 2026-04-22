@@ -861,6 +861,227 @@ test('cloneByKeys: ValidationException → failed bucket, not thrown', async t =
   t.equal(r.failed[0].reason, 'ValidationException');
 });
 
+// --- versionField (optimistic concurrency) ---
+
+const makeVersionedAdapter = clientHandler =>
+  makeAdapter(clientHandler, {
+    technicalPrefix: '_',
+    versionField: '_version'
+  });
+
+test('Adapter: versionField requires technicalPrefix', t => {
+  t.throws(
+    () =>
+      new Adapter({
+        client: makeMockClient(async () => ({})),
+        table: TABLE,
+        keyFields: ['name'],
+        versionField: '_v'
+      }),
+    'throws without technicalPrefix'
+  );
+});
+
+test('Adapter: versionField must start with technicalPrefix', t => {
+  t.throws(
+    () =>
+      new Adapter({
+        client: makeMockClient(async () => ({})),
+        table: TABLE,
+        keyFields: ['name'],
+        technicalPrefix: '_',
+        versionField: 'myversion'
+      }),
+    'throws when prefix mismatch'
+  );
+});
+
+test('post: sets versionField to 1 on first write', async t => {
+  const sent = [];
+  const {adapter} = makeVersionedAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.post({name: 'X'});
+  t.equal(sent[0].input.Item._version, 1, 'initial version written');
+  t.matchString(sent[0].input.ConditionExpression, /attribute_not_exists/);
+});
+
+test('put: conditions on observed version, writes observed + 1', async t => {
+  const sent = [];
+  const {adapter} = makeVersionedAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.put({name: 'X', _version: 3, hp: 10});
+  t.equal(sent[0].input.Item._version, 4, 'version bumped');
+  t.matchString(sent[0].input.ConditionExpression, /attribute_not_exists.*OR.*=/);
+  const values = sent[0].input.ExpressionAttributeValues || {};
+  t.ok(Object.values(values).includes(3), 'observed version in condition values');
+});
+
+test('put: missing version → first-write path (attribute_not_exists only)', async t => {
+  const sent = [];
+  const {adapter} = makeVersionedAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.put({name: 'X', hp: 10});
+  t.equal(sent[0].input.Item._version, 1);
+  t.matchString(sent[0].input.ConditionExpression, /attribute_not_exists/);
+  t.ok(!/OR/.test(sent[0].input.ConditionExpression), 'no OR branch when observed is undefined');
+});
+
+test('put: force=true skips condition but still bumps version', async t => {
+  const sent = [];
+  const {adapter} = makeVersionedAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.put({name: 'X', _version: 5}, {force: true});
+  t.equal(sent[0].input.Item._version, 6);
+  t.equal(sent[0].input.ConditionExpression, undefined);
+});
+
+test('put: CCF on version mismatch surfaces as ConditionalCheckFailedException', async t => {
+  const {adapter} = makeVersionedAdapter(async () => {
+    const err = new Error('stale');
+    err.name = 'ConditionalCheckFailedException';
+    throw err;
+  });
+  let err;
+  try {
+    await adapter.put({name: 'X', _version: 1});
+  } catch (e) {
+    err = e;
+  }
+  t.equal(err?.name, 'ConditionalCheckFailedException');
+});
+
+test('patch: with expectedVersion conditions + ADD increments version', async t => {
+  const sent = [];
+  const {adapter} = makeVersionedAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.patch({name: 'X'}, {hp: 20}, {expectedVersion: 2});
+  const up = sent[0];
+  t.matchString(up.input.UpdateExpression, /SET /);
+  t.matchString(up.input.UpdateExpression, /ADD /);
+  t.matchString(up.input.ConditionExpression, /attribute_not_exists.*OR.*=/);
+  const values = up.input.ExpressionAttributeValues || {};
+  t.ok(Object.values(values).includes(2), 'expectedVersion in condition values');
+  t.ok(Object.values(values).includes(1), 'ADD clause uses +1');
+});
+
+test('patch: without expectedVersion still increments version, no OC condition on version', async t => {
+  const sent = [];
+  const {adapter} = makeVersionedAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.patch({name: 'X'}, {hp: 20});
+  t.matchString(sent[0].input.UpdateExpression, /ADD /);
+  t.matchString(sent[0].input.ConditionExpression, /attribute_not_exists/);
+  t.ok(!/OR/.test(sent[0].input.ConditionExpression), 'no OR branch without expectedVersion');
+});
+
+test('delete: with expectedVersion adds version condition; no increment', async t => {
+  const sent = [];
+  const {adapter} = makeVersionedAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.delete({name: 'X'}, {expectedVersion: 4});
+  t.equal(sent[0].constructor.name, 'DeleteCommand');
+  t.matchString(sent[0].input.ConditionExpression, /=/);
+  const values = sent[0].input.ExpressionAttributeValues || {};
+  t.ok(Object.values(values).includes(4));
+});
+
+test('delete: without expectedVersion is unconditional (idempotent)', async t => {
+  const sent = [];
+  const {adapter} = makeVersionedAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.delete({name: 'X'});
+  t.equal(sent[0].input.ConditionExpression, undefined);
+});
+
+test('revive: preserves versionField (caller can round-trip it)', async t => {
+  const {adapter} = makeVersionedAdapter(async () => ({
+    Item: {name: 'X', _version: 7, hp: 10}
+  }));
+  const item = await adapter.getByKey({name: 'X'});
+  t.equal(item._version, 7, 'versionField preserved through revive');
+});
+
+test('prepare: accepts incoming versionField from caller', async t => {
+  const sent = [];
+  const {adapter} = makeVersionedAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  // User passes _version through from a prior read — must not trip the
+  // "technicalPrefix collision" guard.
+  await adapter.put({name: 'X', _version: 2, hp: 10});
+  t.equal(sent[0].input.Item._version, 3);
+});
+
+test('edit: auto-reads observed version, conditions on it, increments', async t => {
+  const sent = [];
+  const {adapter} = makeVersionedAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'GetCommand') return {Item: {name: 'X', _version: 5, hp: 10}};
+    return {};
+  });
+  const result = await adapter.edit({name: 'X'}, item => ({...item, hp: 999}));
+  const up = sent.find(c => c.constructor.name === 'UpdateCommand');
+  t.ok(up, 'UpdateCommand emitted');
+  t.matchString(up.input.UpdateExpression, /ADD /);
+  t.matchString(up.input.ConditionExpression, /attribute_not_exists.*OR.*=/);
+  const values = up.input.ExpressionAttributeValues || {};
+  t.ok(Object.values(values).includes(5), 'observed version = 5');
+  t.equal(result?._version, 6, 'returned item reflects incremented version');
+});
+
+test('edit: mapFn mutating versionField is silently overridden', async t => {
+  const sent = [];
+  const {adapter} = makeVersionedAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'GetCommand') return {Item: {name: 'X', _version: 5, hp: 10}};
+    return {};
+  });
+  // User tries to set version to 999 — toolkit should ignore and ADD +1.
+  await adapter.edit({name: 'X'}, item => ({...item, _version: 999, hp: 20}));
+  const up = sent.find(c => c.constructor.name === 'UpdateCommand');
+  const values = up.input.ExpressionAttributeValues || {};
+  t.notOk(Object.values(values).includes(999), 'user-mutated version rejected');
+  t.ok(Object.values(values).includes(5), 'observed=5 wins');
+});
+
+test('editListByParams: CCF on versionField → conflicts bucket', async t => {
+  let call = 0;
+  const {adapter} = makeVersionedAdapter(async cmd => {
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') return {Items: [{name: 'A', _version: 1, hp: 10}]};
+    if (n === 'UpdateCommand') {
+      call++;
+      const err = new Error('stale');
+      err.name = 'ConditionalCheckFailedException';
+      throw err;
+    }
+    return {};
+  });
+  const r = await adapter.editListByParams({TableName: TABLE}, item => ({...item, hp: 99}));
+  t.equal(r.processed, 0);
+  t.equal(r.skipped, 0, 'not skipped with versionField');
+  t.equal(r.conflicts.length, 1, 'CCF bucketed into conflicts');
+  t.equal(r.conflicts[0].reason, 'VersionConflict');
+  t.ok(call > 0);
+});
+
 // --- rename / cloneWithOverwrite subtree macros ---
 
 const makeHierarchicalAdapter = clientHandler =>

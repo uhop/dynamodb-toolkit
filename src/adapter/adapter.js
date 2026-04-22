@@ -256,6 +256,18 @@ export class Adapter {
       this.technicalPrefix = options.technicalPrefix;
     }
 
+    // Optional versionField — optimistic-concurrency attribute.
+    // Writes auto-condition on the stored version matching the item's
+    // incoming version, and auto-increment on success. Must start with
+    // technicalPrefix (validated below). Preserved across revive so
+    // callers can round-trip the version through read-modify-write.
+    if (options.versionField !== undefined) {
+      if (typeof options.versionField !== 'string' || options.versionField.length === 0) {
+        throw new Error('options.versionField must be a non-empty string');
+      }
+      this.versionField = options.versionField;
+    }
+
     this.client = options.client;
     this.table = options.table;
     this.projectionFieldMap = options.projectionFieldMap || {};
@@ -327,6 +339,15 @@ export class Adapter {
           `options.searchablePrefix '${this.searchablePrefix}' must start with options.technicalPrefix '${prefix}'`
         );
       }
+      if (this.versionField && !this.versionField.startsWith(prefix)) {
+        throw new Error(
+          `options.versionField '${this.versionField}' must start with options.technicalPrefix '${prefix}'`
+        );
+      }
+    } else if (this.versionField) {
+      // versionField is adapter-managed — without technicalPrefix we can't
+      // guarantee prepare rejects user collisions. Require the pair.
+      throw new Error('options.versionField requires options.technicalPrefix to be declared');
     }
 
     // Compute the DB primary-key attribute names. With `structuralKey`
@@ -385,9 +406,12 @@ export class Adapter {
     if (!this.technicalPrefix && !this.structuralKey && !hasSearchable) return item;
 
     // 1. Reject incoming user fields that start with technicalPrefix.
+    //    Exception: `versionField` is allowed — callers round-trip it
+    //    through reads for optimistic concurrency.
     if (this.technicalPrefix) {
+      const versionField = this.versionField;
       for (const key of Object.keys(item)) {
-        if (key.startsWith(this.technicalPrefix)) {
+        if (key.startsWith(this.technicalPrefix) && key !== versionField) {
           throw new Error(
             `prepare: incoming field '${key}' starts with technicalPrefix '${this.technicalPrefix}' — this is an adapter-managed namespace and must not appear in caller items`
           );
@@ -429,13 +453,19 @@ export class Adapter {
    * item before the user's `revive` hook sees it. Keeps adapter-managed
    * implementation details off the wire. When `technicalPrefix` is unset,
    * this is a pass-through.
+   *
+   * Exception: `versionField` is preserved — callers round-trip it
+   * through read-modify-write for optimistic concurrency. Writing it
+   * back is how the toolkit knows which version the caller saw; the
+   * auto-condition and auto-increment ride on its value.
    */
   _builtInRevive(rawItem) {
     if (!this.technicalPrefix || !rawItem || typeof rawItem !== 'object') return rawItem;
     const prefix = this.technicalPrefix;
+    const versionField = this.versionField;
     const out = {};
     for (const key of Object.keys(rawItem)) {
-      if (!key.startsWith(prefix)) out[key] = rawItem[key];
+      if (!key.startsWith(prefix) || key === versionField) out[key] = rawItem[key];
     }
     return out;
   }
@@ -709,6 +739,77 @@ export class Adapter {
     return this.hooks.revive(rawItem, fields);
   }
 
+  // Inject / bump the versionField on an outgoing item. First writes
+  // (observed === undefined) get version 1; subsequent writes get
+  // observed + 1. Returns the observed value so callers can use it in
+  // the ConditionExpression. No-op when `versionField` is unset.
+  _applyVersionToItem(item) {
+    if (!this.versionField || !item || typeof item !== 'object') return {item, observed: undefined};
+    const current = item[this.versionField];
+    const observed = current === undefined || current === null ? undefined : Number(current);
+    const next = observed === undefined ? 1 : observed + 1;
+    return {item: {...item, [this.versionField]: next}, observed};
+  }
+
+  // Merge the optimistic-concurrency condition
+  // `attribute_not_exists(<pk>) OR <versionField> = :v` into params.
+  // When `observed` is undefined (first write), we still emit the
+  // `attribute_not_exists` guard so a racing insert by another writer
+  // surfaces as a CCF. When `observed` is a number, the `OR` branch
+  // lets the write succeed on a still-present item with the matching
+  // version. Caller-supplied conditions AND-compose on top.
+  _addVersionCondition(params, observed) {
+    if (!this.versionField) return params;
+    const names = params.ExpressionAttributeNames || {};
+    const values = params.ExpressionAttributeValues || {};
+    const pkAlias = '#vfpk' + Object.keys(names).length;
+    names[pkAlias] = this.keyFields[0].name;
+
+    let condition;
+    if (observed === undefined) {
+      condition = `attribute_not_exists(${pkAlias})`;
+    } else {
+      const vfAlias = '#vf' + Object.keys(names).length;
+      names[vfAlias] = this.versionField;
+      const vAlias = ':vfv' + Object.keys(values).length;
+      values[vAlias] = observed;
+      params.ExpressionAttributeValues = values;
+      condition = `attribute_not_exists(${pkAlias}) OR ${vfAlias} = ${vAlias}`;
+    }
+    params.ExpressionAttributeNames = names;
+
+    params.ConditionExpression = params.ConditionExpression
+      ? `(${condition}) AND (${params.ConditionExpression})`
+      : condition;
+    return params;
+  }
+
+  // Append `ADD <versionField> :1` to an UpdateExpression. DynamoDB's
+  // ADD action initialises a missing numeric attribute to 0 before
+  // adding, so a first-time patch correctly produces version = 1.
+  _addVersionIncrement(params) {
+    if (!this.versionField) return params;
+    const names = params.ExpressionAttributeNames || {};
+    const values = params.ExpressionAttributeValues || {};
+    const vfAlias = '#vfinc' + Object.keys(names).length;
+    names[vfAlias] = this.versionField;
+    const oneAlias = ':vfone' + Object.keys(values).length;
+    values[oneAlias] = 1;
+    params.ExpressionAttributeNames = names;
+    params.ExpressionAttributeValues = values;
+    const clause = `${vfAlias} ${oneAlias}`;
+    const expr = params.UpdateExpression || '';
+    // Compose with any existing ADD clause; otherwise append ADD <clause>.
+    const addMatch = /(^|\s)ADD\s+([^]*?)(?=\s(SET|REMOVE|DELETE)\s|$)/i.exec(expr);
+    if (addMatch) {
+      const insertAt = addMatch.index + addMatch[0].length;
+      params.UpdateExpression = expr.slice(0, insertAt).replace(/\s*$/, '') + ', ' + clause + expr.slice(insertAt);
+    } else {
+      params.UpdateExpression = expr ? expr + ' ADD ' + clause : 'ADD ' + clause;
+    }
+    return params;
+  }
+
   _checkExistence(params, invert) {
     const names = params.ExpressionAttributeNames || {};
     const alias = '#k' + Object.keys(names).length;
@@ -925,7 +1026,12 @@ export class Adapter {
   /** @returns {Promise<{action: 'put', params: any}>} */
   async makePost(item, options) {
     await this._validate(item);
-    let p = {TableName: this.table, Item: this._prepareItem(item)};
+    // Post is first-write. If versionField is declared, bump sets it
+    // to 1 (observed is undefined, no condition on version needed —
+    // attribute_not_exists already covers the race where another
+    // writer got there first).
+    const {item: versioned} = this._applyVersionToItem(item);
+    let p = {TableName: this.table, Item: this._prepareItem(versioned)};
     p = this._checkExistence(p, true);
     if (options?.returnFailedItem) p.ReturnValuesOnConditionCheckFailure = 'ALL_OLD';
     p = this.hooks.updateInput(p, {name: 'post'});
@@ -937,8 +1043,20 @@ export class Adapter {
     const force = options?.force;
     await this._validate(item);
     let p = this._cloneParams(options?.params);
-    p.Item = this._prepareItem(item);
-    if (!force) p = this._checkExistence(p);
+    const {item: versioned, observed} = this._applyVersionToItem(item);
+    p.Item = this._prepareItem(versioned);
+
+    if (!force) {
+      if (this.versionField) {
+        // OC condition replaces `attribute_exists` — the OR branch
+        // handles the first-write case that plain attribute_exists
+        // would refuse.
+        p = this._addVersionCondition(p, observed);
+      } else {
+        p = this._checkExistence(p);
+      }
+    }
+
     if (options?.conditions) p = buildCondition(options.conditions, p);
     if (options?.returnFailedItem) p.ReturnValuesOnConditionCheckFailure = 'ALL_OLD';
     p = this.hooks.updateInput(p, {name: 'put', force});
@@ -955,12 +1073,26 @@ export class Adapter {
       payload = {...this.hooks.prepare(patch, true)};
     }
     for (const field of this.keyFields) delete payload[field.name];
+    // User is not allowed to set the version field directly — it's
+    // toolkit-managed. Strip silently; the ADD clause below handles
+    // the real increment.
+    if (this.versionField) delete payload[this.versionField];
 
     let p = this._cloneParams(options?.params);
     p.Key = this._toKey(key, p.IndexName);
-    p = this._checkExistence(p);
+    if (this.versionField) {
+      p = this._addVersionCondition(p, options?.expectedVersion);
+    } else {
+      p = this._checkExistence(p);
+    }
     if (options?.conditions) p = buildCondition(options.conditions, p);
     p = buildUpdate(payload, {delete: options?.delete, separator: options?.separator, arrayOps: options?.arrayOps}, p);
+    // Auto-increment the version via an ADD clause on the UpdateExpression.
+    // ADD is atomic on the server; also correctly initialises the attribute
+    // from absent → 1 (DynamoDB treats missing numeric counters as 0 for ADD).
+    if (this.versionField) {
+      p = this._addVersionIncrement(p);
+    }
     if (options?.returnFailedItem) p.ReturnValuesOnConditionCheckFailure = 'ALL_OLD';
     p = this.hooks.updateInput(p, {name: 'patch'});
     return {action: 'patch', params: cleanParams(p)};
@@ -970,6 +1102,21 @@ export class Adapter {
   async makeDelete(key, options) {
     let p = this._cloneParams(options?.params);
     p.Key = this._toKey(key, p.IndexName);
+    // Delete conditions on the version only when the caller supplied
+    // `expectedVersion`. Plain delete (no OC) remains unconditional —
+    // deletes are idempotent on absent items anyway. No increment.
+    if (this.versionField && options?.expectedVersion !== undefined) {
+      const names = p.ExpressionAttributeNames || {};
+      const values = p.ExpressionAttributeValues || {};
+      const vfAlias = '#vf' + Object.keys(names).length;
+      names[vfAlias] = this.versionField;
+      const vAlias = ':vfv' + Object.keys(values).length;
+      values[vAlias] = Number(options.expectedVersion);
+      p.ExpressionAttributeNames = names;
+      p.ExpressionAttributeValues = values;
+      const condition = `${vfAlias} = ${vAlias}`;
+      p.ConditionExpression = p.ConditionExpression ? `(${condition}) AND (${p.ConditionExpression})` : condition;
+    }
     if (options?.conditions) p = buildCondition(options.conditions, p);
     if (options?.returnFailedItem) p.ReturnValuesOnConditionCheckFailure = 'ALL_OLD';
     p = this.hooks.updateInput(p, {name: 'delete'});
@@ -1030,11 +1177,28 @@ export class Adapter {
   // Build + send the UpdateCommand from a diff descriptor. Caller
   // supplies the Dynamo-shaped Key (already run through `_toKey` or
   // `_restrictKey`), so this helper doesn't re-derive it.
-  async _dispatchEdit(dynamoKey, setOps, removeOps, options) {
+  async _dispatchEdit(dynamoKey, setOps, removeOps, observedVersion, options) {
     let p = this._cloneParams(options?.params);
     p.Key = dynamoKey;
-    p = this._checkExistence(p);
+
+    // The diff may include the versionField if the user's mapFn
+    // passed the raw item through a spread. Strip it — the toolkit
+    // owns the increment via the ADD clause below.
+    if (this.versionField) {
+      delete setOps[this.versionField];
+      const idx = removeOps.indexOf(this.versionField);
+      if (idx !== -1) removeOps.splice(idx, 1);
+    }
+
+    if (this.versionField) {
+      p = this._addVersionCondition(p, observedVersion);
+    } else {
+      p = this._checkExistence(p);
+    }
     p = buildUpdate(setOps, {delete: removeOps}, p);
+    if (this.versionField) {
+      p = this._addVersionIncrement(p);
+    }
     if (options?.returnFailedItem) p.ReturnValuesOnConditionCheckFailure = 'ALL_OLD';
     p = this.hooks.updateInput(p, {name: 'edit'});
     /** @type {{action: 'patch', params: any}} */
@@ -1066,7 +1230,14 @@ export class Adapter {
     }
 
     // status === 'update'
-    await this._dispatchEdit(this._toKey(key), diff.setOps, diff.removeOps, options);
+    const observedVersion = this.versionField ? rawItem[this.versionField] : undefined;
+    const observed = observedVersion === undefined || observedVersion === null ? undefined : Number(observedVersion);
+    await this._dispatchEdit(this._toKey(key), diff.setOps, diff.removeOps, observed, options);
+    // Reflect the incremented version in the returned revived item so
+    // the caller can immediately use it for a follow-up write.
+    if (this.versionField) {
+      diff.prepared[this.versionField] = (observed || 0) + 1;
+    }
     return this.hooks.revive(diff.prepared);
   }
 
@@ -1079,6 +1250,8 @@ export class Adapter {
       let skipped = 0;
       /** @type {import('../mass/index.js').MassOpFailure[]} */
       const failed = [];
+      /** @type {import('../mass/index.js').MassOpConflict[]} */
+      const conflicts = [];
 
       for (const rawItem of items) {
         const key = this._restrictKey(rawItem);
@@ -1108,13 +1281,22 @@ export class Adapter {
         }
 
         // status === 'update'
+        const observedV = this.versionField ? rawItem[this.versionField] : undefined;
+        const observed = observedV === undefined || observedV === null ? undefined : Number(observedV);
         try {
-          await this._dispatchEdit(key, diff.setOps, diff.removeOps, options);
+          await this._dispatchEdit(key, diff.setOps, diff.removeOps, observed, options);
           processed++;
         } catch (err) {
-          // Item deleted between scan and update → silent skip (not a
-          // bug; the scan is not a read-committed snapshot).
+          // CCF in the versioned path means: either the item was
+          // deleted (race) or the version changed (conflict). We can't
+          // distinguish without another read — bucket into `conflicts`
+          // when versionField is declared (the far more common cause),
+          // otherwise `skipped` as before.
           if (isConditionFailure(err)) {
+            if (this.versionField) {
+              conflicts.push({key, reason: 'VersionConflict', sdkError: err});
+              continue;
+            }
             skipped++;
             continue;
           }
@@ -1122,7 +1304,7 @@ export class Adapter {
         }
       }
 
-      return {processed, skipped, failed};
+      return {processed, skipped, failed, conflicts};
     });
   }
 
