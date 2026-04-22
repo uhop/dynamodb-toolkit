@@ -767,6 +767,48 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * `ConditionalCheckFailed` on the existence guard.
    */
   editListByParams(params: Record<string, unknown>, mapFn: (item: TItem) => TItem, options?: MassOptions & EditOptions): Promise<MassOpResult>;
+  /**
+   * Subtree rename macro: put every item from the `fromExample` scope
+   * to the `toExample` scope, then delete the source. Constructive
+   * before destructive — crash mid-phase leaves the source intact,
+   * resume completes the delete; crash mid-item's put is safely
+   * reattempted (CCF on already-written item → `skipped`).
+   *
+   * Non-transactional. The destination key is derived per-item via
+   * `swapPrefix(fromExample, toExample)`; pass `options.mapFn` to
+   * compose additional transforms on non-key fields.
+   *
+   * `options.kind` selects the source scope shape: defaults to
+   * `'children'` (subtree rename), set `'exact'` for a leaf. Resumable
+   * via `options.maxItems` + `options.resumeToken`. Put-collisions
+   * (destination already exists) bucket into `skipped`.
+   */
+  rename(
+    fromExample: Partial<TItem>,
+    toExample: Partial<TItem>,
+    options?: MassOptions & {mapFn?: (item: TItem) => TItem; kind?: 'exact' | 'children'}
+  ): Promise<MassOpResult>;
+  /**
+   * Subtree clone-with-overwrite macro: delete each item at the
+   * destination (idempotent — absent is fine), then put the new
+   * content. Destructive before constructive — caller asserts they
+   * want the destination cleared. Source stays intact (clone, not
+   * move).
+   *
+   * Non-transactional. Destination keys derived via
+   * `swapPrefix(fromExample, toExample)`; pass `options.mapFn` to
+   * compose additional transforms.
+   *
+   * Crash mid-phase on the delete is safe (dst was destined for
+   * destruction anyway); crash mid-phase on the put leaves dst empty
+   * but a resume writes it. `options.kind` selects scope shape;
+   * resumable via `options.maxItems` + `options.resumeToken`.
+   */
+  cloneWithOverwrite(
+    fromExample: Partial<TItem>,
+    toExample: Partial<TItem>,
+    options?: MassOptions & {mapFn?: (item: TItem) => TItem; kind?: 'exact' | 'children'}
+  ): Promise<MassOpResult>;
 
   /** @deprecated Use {@link Adapter.putItems}. Removed in a future minor. */
   putAll(items: (TItem | Raw<TItem>)[], options?: MassOptions): Promise<{processed: number}>;

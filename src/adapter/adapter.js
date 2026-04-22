@@ -1,6 +1,6 @@
 // Adapter — composition root tying expressions, batch, mass, paths, and hooks together.
 
-import {GetCommand, PutCommand} from '@aws-sdk/lib-dynamodb';
+import {GetCommand, PutCommand, DeleteCommand} from '@aws-sdk/lib-dynamodb';
 
 import {Raw} from '../raw.js';
 import {addProjection} from '../expressions/projection.js';
@@ -17,6 +17,7 @@ import {applyTransaction} from '../batch/apply-transaction.js';
 import {paginateList} from '../mass/paginate-list.js';
 import {readByKeys} from '../mass/read-by-keys.js';
 import {writeItems} from '../mass/write-items.js';
+import {mergeMapFn} from '../mass/map-fns.js';
 import {deleteByKeys} from '../mass/delete-list.js';
 import {runPaged} from '../mass/run-paged.js';
 
@@ -1118,6 +1119,137 @@ export class Adapter {
             continue;
           }
           failed.push({key, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
+        }
+      }
+
+      return {processed, skipped, failed};
+    });
+  }
+
+  // --- subtree macros: rename / cloneWithOverwrite ---
+  //
+  // Scope macros for hierarchical keys. Both query the `fromExample`
+  // subtree via `buildKey({kind: 'children'})` by default (override with
+  // `options.kind: 'exact'` for leaf operations), run each item through
+  // `swapPrefix(fromExample, toExample)` to derive the destination, and
+  // apply an idempotent two-phase write so resumes don't corrupt state.
+  //
+  // rename:             put-if-not-exists (dst) → delete (src)
+  //                     constructive before destructive; re-runs are
+  //                     safe because ifNotExists rejects the put on a
+  //                     completed item, and the delete is idempotent.
+  //
+  // cloneWithOverwrite: delete (dst) → put (dst)
+  //                     destructive before constructive; source stays.
+  //                     re-runs are safe because re-deleting an absent
+  //                     destination is a CCF we ignore, and the put
+  //                     just rewrites on retry.
+  //
+  // Non-transactional. If caller needs atomicity on a single item, use
+  // `move` (TransactWriteCommand).
+
+  async rename(fromExample, toExample, options) {
+    const queryParams = this.buildKey(fromExample, {kind: options?.kind || 'children'});
+    queryParams.TableName = this.table;
+
+    const keyShifter = this.swapPrefix(fromExample, toExample);
+    const mapFn = options?.mapFn ? mergeMapFn(keyShifter, options.mapFn) : keyShifter;
+
+    return runPaged(this.client, queryParams, options, async items => {
+      let processed = 0;
+      let skipped = 0;
+      /** @type {import('../mass/index.js').MassOpFailure[]} */
+      const failed = [];
+
+      for (const rawItem of items) {
+        const srcKey = this._restrictKey(rawItem);
+        const revived = this.hooks.revive(rawItem);
+        const mapped = mapFn(revived);
+        if (!mapped) {
+          skipped++;
+          continue;
+        }
+        const prepared = this._prepareItem(mapped);
+
+        // Phase 1: put to dst with ifNotExists. CCF means the
+        // destination already exists — refuse to overwrite, leave src
+        // intact. This protects against accidental collisions without
+        // the caller having to enumerate dst beforehand.
+        try {
+          const putParams = this._checkExistence({TableName: this.table, Item: prepared}, true);
+          await this.client.send(new PutCommand(putParams));
+        } catch (err) {
+          if (isConditionFailure(err)) {
+            skipped++;
+            continue;
+          }
+          failed.push({key: srcKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
+          continue;
+        }
+
+        // Phase 2: delete src unconditionally. Idempotent. If this
+        // fails and a retry runs, phase 1 on the now-completed item
+        // CCFs (since dst already exists — the retry bucket is
+        // skipped), and phase 2 retries. A delete failure here leaves
+        // a duplicate — bucket as failed so the caller knows to clean
+        // up.
+        try {
+          await this.client.send(new DeleteCommand({TableName: this.table, Key: srcKey}));
+          processed++;
+        } catch (err) {
+          failed.push({key: srcKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
+        }
+      }
+
+      return {processed, skipped, failed};
+    });
+  }
+
+  async cloneWithOverwrite(fromExample, toExample, options) {
+    const queryParams = this.buildKey(fromExample, {kind: options?.kind || 'children'});
+    queryParams.TableName = this.table;
+
+    const keyShifter = this.swapPrefix(fromExample, toExample);
+    const mapFn = options?.mapFn ? mergeMapFn(keyShifter, options.mapFn) : keyShifter;
+
+    return runPaged(this.client, queryParams, options, async items => {
+      let processed = 0;
+      let skipped = 0;
+      /** @type {import('../mass/index.js').MassOpFailure[]} */
+      const failed = [];
+
+      for (const rawItem of items) {
+        const srcKey = this._restrictKey(rawItem);
+        const revived = this.hooks.revive(rawItem);
+        const mapped = mapFn(revived);
+        if (!mapped) {
+          skipped++;
+          continue;
+        }
+        const prepared = this._prepareItem(mapped);
+        const dstKey = this._restrictKey(prepared);
+
+        // Phase 1: delete dst. Idempotent via CCF-ignore on absent
+        // destination. Unconditional delete (no ifExists) — the goal
+        // is "destination is empty after this phase," which an absent
+        // destination already satisfies.
+        try {
+          await this.client.send(new DeleteCommand({TableName: this.table, Key: dstKey}));
+        } catch (err) {
+          if (!isConditionFailure(err)) {
+            failed.push({key: srcKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
+            continue;
+          }
+        }
+
+        // Phase 2: put to dst unconditionally. The delete in phase 1
+        // cleared any pre-existing destination; this put writes the
+        // new content. Source stays intact (clone, not move).
+        try {
+          await this.client.send(new PutCommand({TableName: this.table, Item: prepared}));
+          processed++;
+        } catch (err) {
+          failed.push({key: srcKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
         }
       }
 

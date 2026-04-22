@@ -861,6 +861,140 @@ test('cloneByKeys: ValidationException → failed bucket, not thrown', async t =
   t.equal(r.failed[0].reason, 'ValidationException');
 });
 
+// --- rename / cloneWithOverwrite subtree macros ---
+
+const makeHierarchicalAdapter = clientHandler =>
+  makeAdapter(clientHandler, {
+    keyFields: [
+      {name: 'state', type: 'string'},
+      {name: 'rentalName', type: 'string'}
+    ],
+    structuralKey: {name: '_sk', separator: '|'},
+    technicalPrefix: '_'
+  });
+
+test('rename: put-then-delete per item; source scope becomes empty, destination has items', async t => {
+  const sent = [];
+  const {adapter} = makeHierarchicalAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') {
+      return {Items: [{state: 'TX', rentalName: 'Dallas', _sk: 'TX|Dallas', hp: 1}]};
+    }
+    return {};
+  });
+  const r = await adapter.rename({state: 'TX'}, {state: 'FL'});
+  t.equal(r.processed, 1);
+  const puts = sent.filter(c => c.constructor.name === 'PutCommand');
+  const deletes = sent.filter(c => c.constructor.name === 'DeleteCommand');
+  t.equal(puts.length, 1, 'one put');
+  t.equal(deletes.length, 1, 'one delete');
+  const putOrder = sent.indexOf(puts[0]);
+  const deleteOrder = sent.indexOf(deletes[0]);
+  t.ok(putOrder < deleteOrder, 'put (constructive) before delete (destructive)');
+  t.matchString(puts[0].input.ConditionExpression, /attribute_not_exists/);
+});
+
+test('rename: destination already exists → CCF on put → skipped, source untouched', async t => {
+  const sent = [];
+  const {adapter} = makeHierarchicalAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') {
+      return {Items: [{state: 'TX', rentalName: 'Dallas', _sk: 'TX|Dallas'}]};
+    }
+    if (n === 'PutCommand') {
+      const err = new Error('dst exists');
+      err.name = 'ConditionalCheckFailedException';
+      throw err;
+    }
+    return {};
+  });
+  const r = await adapter.rename({state: 'TX'}, {state: 'FL'});
+  t.equal(r.processed, 0);
+  t.equal(r.skipped, 1);
+  t.equal(sent.filter(c => c.constructor.name === 'DeleteCommand').length, 0, 'no delete when put refused');
+});
+
+test('rename: options.mapFn composes with swapPrefix', async t => {
+  const sent = [];
+  const {adapter} = makeHierarchicalAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') {
+      return {Items: [{state: 'TX', rentalName: 'Dallas', hp: 1}]};
+    }
+    return {};
+  });
+  await adapter.rename({state: 'TX'}, {state: 'FL'}, {mapFn: item => ({...item, migrated: true})});
+  const put = sent.find(c => c.constructor.name === 'PutCommand');
+  t.equal(put.input.Item.state, 'FL', 'state shifted');
+  t.equal(put.input.Item.migrated, true, 'mapFn applied');
+});
+
+test('cloneWithOverwrite: delete-then-put per item; source stays intact', async t => {
+  const sent = [];
+  const {adapter} = makeHierarchicalAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') {
+      return {Items: [{state: 'TX', rentalName: 'Dallas', hp: 1}]};
+    }
+    return {};
+  });
+  const r = await adapter.cloneWithOverwrite({state: 'TX'}, {state: 'FL'});
+  t.equal(r.processed, 1);
+  const deletes = sent.filter(c => c.constructor.name === 'DeleteCommand');
+  const puts = sent.filter(c => c.constructor.name === 'PutCommand');
+  t.equal(deletes.length, 1, 'one delete (for dst, not src)');
+  t.equal(puts.length, 1, 'one put (for dst)');
+  const delOrder = sent.indexOf(deletes[0]);
+  const putOrder = sent.indexOf(puts[0]);
+  t.ok(delOrder < putOrder, 'delete (destructive) before put (constructive)');
+  t.equal(puts[0].input.ConditionExpression, undefined);
+});
+
+test('cloneWithOverwrite: put failure after successful delete → failed bucket', async t => {
+  const {adapter} = makeHierarchicalAdapter(async cmd => {
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') {
+      return {Items: [{state: 'TX', rentalName: 'Dallas'}]};
+    }
+    if (n === 'PutCommand') {
+      const err = new Error('bad');
+      err.name = 'ValidationException';
+      throw err;
+    }
+    return {};
+  });
+  const r = await adapter.cloneWithOverwrite({state: 'TX'}, {state: 'FL'});
+  t.equal(r.processed, 0);
+  t.equal(r.failed.length, 1);
+  t.equal(r.failed[0].reason, 'ValidationException');
+});
+
+test('rename: resumable via maxItems + resumeToken', async t => {
+  const pages = [
+    {
+      Items: [
+        {state: 'TX', rentalName: 'Dallas'},
+        {state: 'TX', rentalName: 'Houston'}
+      ],
+      LastEvaluatedKey: {_sk: 'TX|Houston'}
+    },
+    {Items: [{state: 'TX', rentalName: 'Austin'}]}
+  ];
+  let call = 0;
+  const {adapter} = makeHierarchicalAdapter(async cmd => {
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') return pages[call++];
+    return {};
+  });
+  const r = await adapter.rename({state: 'TX'}, {state: 'FL'}, {maxItems: 2});
+  t.equal(r.processed, 2);
+  t.ok(r.cursor);
+});
+
 // --- editListByParams ---
 
 test('editListByParams: updates per item, buckets no-ops as skipped', async t => {
