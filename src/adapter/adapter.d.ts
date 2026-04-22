@@ -61,7 +61,7 @@ export interface IndexKeySpec {
  * include rows of a certain type"). Default `false`.
  *
  * `indirect: true` declares the index as "keys-only + second-hop BatchGet":
- * the toolkit's `getAllByParams` against this index reads keys, then
+ * the toolkit's `getListByParams` against this index reads keys, then
  * BatchGets full items from the base table. Compatible with any projection
  * but typically paired with `projection: 'keys-only'` to minimise GSI
  * storage cost.
@@ -243,7 +243,7 @@ export interface MassOptions {
   params?: Record<string, unknown>;
 }
 
-/** Options for list reads (`getAll` / `getAllByParams`). */
+/** Options for list reads (`getList` / `getListByParams`). */
 export interface ListOptions {
   /** Zero-based starting offset. Default `0`. */
   offset?: number;
@@ -389,7 +389,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * upstream query wasn't scoped to the src subtree.
    *
    * Typical use: subtree clone / move between prefixes.
-   * `adapter.cloneAllByParams(params, adapter.swapPrefix({state: 'TX'}, {state: 'FL'}))`.
+   * `adapter.cloneListByParams(params, adapter.swapPrefix({state: 'TX'}, {state: 'FL'}))`.
    *
    * @param srcPrefix Source keyField prefix.
    * @param dstPrefix Destination keyField prefix (same keys as src).
@@ -458,7 +458,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @returns One page: `data` has up to `limit` items (revived unless `reviveItems: false`),
    *   `offset`/`limit` echo the clamped window, `total` is present unless `needTotal: false`.
    */
-  getAll(options?: ListOptions, example?: Partial<TItem>, index?: string): Promise<PaginatedResult<TItem>>;
+  getList(options?: ListOptions, example?: Partial<TItem>, index?: string): Promise<PaginatedResult<TItem>>;
 
   /**
    * Paginated list from caller-built DynamoDB params. Skips the
@@ -466,9 +466,14 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    *
    * @param params Pre-built DynamoDB `Query` / `Scan` input.
    * @param options Paging / sorting / revive options.
-   * @returns Same envelope shape as {@link Adapter.getAll} — a single page of items plus
+   * @returns Same envelope shape as {@link Adapter.getList} — a single page of items plus
    *   `offset`/`limit`/optional `total`.
    */
+  getListByParams(params: Record<string, unknown>, options?: ListOptions): Promise<PaginatedResult<TItem>>;
+
+  /** @deprecated Use {@link Adapter.getList}. Removed in a future minor. */
+  getAll(options?: ListOptions, example?: Partial<TItem>, index?: string): Promise<PaginatedResult<TItem>>;
+  /** @deprecated Use {@link Adapter.getListByParams}. Removed in a future minor. */
   getAllByParams(params: Record<string, unknown>, options?: ListOptions): Promise<PaginatedResult<TItem>>;
 
   // --- Writes — single ---
@@ -548,7 +553,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @returns `{processed}` — total writes DynamoDB accepted across every underlying
    *   batch call (or every per-item Command in sequential mode).
    */
-  putAll(items: (TItem | Raw<TItem>)[], options?: MassOptions): Promise<{processed: number}>;
+  putItems(items: (TItem | Raw<TItem>)[], options?: MassOptions): Promise<{processed: number}>;
   /**
    * Bulk delete by known keys.
    *
@@ -564,7 +569,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @param options Strategy / extra DynamoDB input.
    * @returns `{processed}` — total delete actions DynamoDB accepted.
    */
-  deleteAllByParams(params: Record<string, unknown>, options?: MassOptions): Promise<{processed: number}>;
+  deleteListByParams(params: Record<string, unknown>, options?: MassOptions): Promise<{processed: number}>;
   /**
    * Clone each item identified by a key, optionally transformed by `mapFn`.
    *
@@ -582,7 +587,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @param options Strategy / extra DynamoDB input.
    * @returns `{processed}` — total copies written.
    */
-  cloneAllByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
+  cloneListByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
   /**
    * Move each item identified by a key (paired put + delete chunks).
    *
@@ -600,6 +605,15 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @param options Strategy / extra DynamoDB input.
    * @returns `{processed}` — sum of put + delete actions (≈ 2× the moved-item count on success).
    */
+  moveListByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
+
+  /** @deprecated Use {@link Adapter.putItems}. Removed in a future minor. */
+  putAll(items: (TItem | Raw<TItem>)[], options?: MassOptions): Promise<{processed: number}>;
+  /** @deprecated Use {@link Adapter.deleteListByParams}. Removed in a future minor. */
+  deleteAllByParams(params: Record<string, unknown>, options?: MassOptions): Promise<{processed: number}>;
+  /** @deprecated Use {@link Adapter.cloneListByParams}. Removed in a future minor. */
+  cloneAllByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
+  /** @deprecated Use {@link Adapter.moveListByParams}. Removed in a future minor. */
   moveAllByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
 
   // --- Batch builders ---

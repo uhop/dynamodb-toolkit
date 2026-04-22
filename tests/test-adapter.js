@@ -548,35 +548,35 @@ test('getByKey: ignoreIndirection skips second-hop', async t => {
 
 // --- mass operations ---
 
-test('putAll: native uses BatchWrite', async t => {
+test('putItems: native uses BatchWrite', async t => {
   const sent = [];
   const {adapter} = makeAdapter(async cmd => {
     sent.push(cmd);
     return {UnprocessedItems: {}};
   });
-  const r = await adapter.putAll([{name: 'A'}, {name: 'B'}, {name: 'C'}]);
+  const r = await adapter.putItems([{name: 'A'}, {name: 'B'}, {name: 'C'}]);
   t.equal(r.processed, 3);
   t.equal(sent[0].constructor.name, 'BatchWriteCommand');
 });
 
-test('putAll: sequential uses individual Puts', async t => {
+test('putItems: sequential uses individual Puts', async t => {
   const sent = [];
   const {adapter} = makeAdapter(async cmd => {
     sent.push(cmd);
     return {};
   });
-  const r = await adapter.putAll([{name: 'A'}, {name: 'B'}], {strategy: 'sequential'});
+  const r = await adapter.putItems([{name: 'A'}, {name: 'B'}], {strategy: 'sequential'});
   t.equal(r.processed, 2);
   t.equal(sent.filter(c => c.constructor.name === 'PutCommand').length, 2);
 });
 
-test('putAll: sequential propagates options.params', async t => {
+test('putItems: sequential propagates options.params', async t => {
   const sent = [];
   const {adapter} = makeAdapter(async cmd => {
     sent.push(cmd);
     return {};
   });
-  await adapter.putAll([{name: 'A'}], {strategy: 'sequential', params: {ReturnConsumedCapacity: 'TOTAL'}});
+  await adapter.putItems([{name: 'A'}], {strategy: 'sequential', params: {ReturnConsumedCapacity: 'TOTAL'}});
   t.equal(sent[0].input.ReturnConsumedCapacity, 'TOTAL', 'params.ReturnConsumedCapacity flows through');
 });
 
@@ -681,9 +681,47 @@ test('makeGet/makePost/makePut/makePatch/makeDelete return descriptors', async t
   t.equal(delD.action, 'delete');
 });
 
-// --- getAll / getAllByParams ---
+// --- getList / getListByParams ---
 
-test('getAllByParams: paginates and revives', async t => {
+test('Adapter: deprecated aliases forward to the new names (putAll / getAll / getAllByParams / deleteAllByParams / cloneAllByParams / moveAllByParams)', async t => {
+  // The aliases emit console.warn once per process on first call; we don't
+  // test the warning itself (module-level state makes ordering flaky) —
+  // we test that the aliases route to the renamed methods.
+  const origWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const {adapter} = makeAdapter(async cmd => {
+      const name = cmd.constructor.name;
+      if (name === 'BatchWriteCommand') return {UnprocessedItems: {}};
+      if (name === 'QueryCommand' && cmd.input?.Select === 'COUNT') return {Count: 0};
+      if (name === 'QueryCommand' || name === 'ScanCommand') return {Items: [], Count: 0};
+      return {};
+    });
+    t.ok(typeof adapter.getAll === 'function');
+    t.ok(typeof adapter.getAllByParams === 'function');
+    t.ok(typeof adapter.putAll === 'function');
+    t.ok(typeof adapter.deleteAllByParams === 'function');
+    t.ok(typeof adapter.cloneAllByParams === 'function');
+    t.ok(typeof adapter.moveAllByParams === 'function');
+    // Each one should succeed without throwing (routes to new name internally).
+    const r1 = await adapter.getAll();
+    t.equal(r1.data.length, 0);
+    const r2 = await adapter.getAllByParams({TableName: 'TestTable'});
+    t.equal(r2.data.length, 0);
+    const r3 = await adapter.putAll([{name: 'x'}]);
+    t.equal(r3.processed, 1);
+    const r4 = await adapter.deleteAllByParams({TableName: 'TestTable'});
+    t.equal(r4.processed, 0);
+    const r5 = await adapter.cloneAllByParams({TableName: 'TestTable'});
+    t.equal(r5.processed, 0);
+    const r6 = await adapter.moveAllByParams({TableName: 'TestTable'});
+    t.equal(r6.processed, 0);
+  } finally {
+    console.warn = origWarn;
+  }
+});
+
+test('getListByParams: paginates and revives', async t => {
   const items = [
     {name: 'A', _x: 1},
     {name: 'B', _x: 2}
@@ -702,14 +740,14 @@ test('getAllByParams: paginates and revives', async t => {
       }
     }
   );
-  const r = await adapter.getAllByParams({}, {offset: 0, limit: 10});
+  const r = await adapter.getListByParams({}, {offset: 0, limit: 10});
   t.equal(r.data.length, 2);
   t.notOk(r.data[0]._x, 'revive stripped');
 });
 
-test('getAllByParams: needTotal:false omits total', async t => {
+test('getListByParams: needTotal:false omits total', async t => {
   const {adapter} = makeAdapter(async () => ({Items: [{name: 'A'}], Count: 1}));
-  const r = await adapter.getAllByParams({}, {offset: 0, limit: 10, needTotal: false});
+  const r = await adapter.getListByParams({}, {offset: 0, limit: 10, needTotal: false});
   t.equal(r.total, undefined);
 });
 
@@ -1423,6 +1461,6 @@ test('Adapter: indices — _isIndirect reads from indices', async t => {
       thin: {type: 'gsi', pk: 'status', projection: 'keys-only', indirect: true}
     }
   });
-  const result = await adapter.getAllByParams({IndexName: 'thin'});
+  const result = await adapter.getListByParams({IndexName: 'thin'});
   t.equal(result.data[0]?.climate, 'frozen', 'second-hop BatchGet happened (indirect=true)');
 });

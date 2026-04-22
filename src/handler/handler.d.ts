@@ -65,11 +65,11 @@ export interface HandlerOptions {
 /**
  * Build a `(req, res) =>` handler that wires the standard route pack to the
  * given Adapter. Routes:
- * - `GET/POST/DELETE /` — getAll / post / deleteAllByParams
+ * - `GET/POST/DELETE /` — getList / post / deleteListByParams
  * - `GET /-by-names`, `DELETE /-by-names` — getByKeys (length-preserving,
  *   `null` at missing positions) / deleteByKeys (idempotent)
- * - `PUT /-load` — bulk putAll
- * - `PUT /-clone`, `PUT /-move` — cloneAllByParams / moveAllByParams (body is overlay)
+ * - `PUT /-load` — bulk putItems
+ * - `PUT /-clone`, `PUT /-move` — cloneListByParams / moveListByParams (body is overlay)
  * - `PUT /-clone-by-names`, `PUT /-move-by-names` — cloneByKeys / moveByKeys
  * - `GET/PUT/PATCH/DELETE /:key` — getByKey / put / patch / delete
  * - `PUT /:key/-clone`, `PUT /:key/-move` — single-item clone / move

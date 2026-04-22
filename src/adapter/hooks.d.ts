@@ -13,8 +13,8 @@ export interface AdapterHooks<TItem extends Record<string, unknown>> {
    * mirror columns, add author-convention technical fields, strip transient
    * fields, rename attributes.
    *
-   * Called by every non-`Raw` write: `post`, `put`, `patch`, `putAll`,
-   * `cloneByKeys`, `cloneAllByParams`, `moveByKeys`, `moveAllByParams`.
+   * Called by every non-`Raw` write: `post`, `put`, `patch`, `putItems`,
+   * `cloneByKeys`, `cloneListByParams`, `moveByKeys`, `moveListByParams`.
    *
    * - `item` — the caller-supplied item (or the pre-existing item after a
    *   `clone` / `move` read). Safe to mutate; also safe to return a fresh
@@ -42,15 +42,15 @@ export interface AdapterHooks<TItem extends Record<string, unknown>> {
    */
   prepareKey?: (key: Partial<TItem>, index?: string) => Partial<TItem>;
   /**
-   * Produce extra DynamoDB input for `getAll`. Typical use: supply
+   * Produce extra DynamoDB input for `getList`. Typical use: supply
    * `IndexName` + `KeyConditionExpression` so a `Scan` becomes a `Query`.
    *
-   * Called once per `getAll` — right at the start of list-params
+   * Called once per `getList` — right at the start of list-params
    * construction. The default implementation returns `{}` (plain scan).
    *
-   * - `example` — the `example` argument `getAll` was called with (often a
+   * - `example` — the `example` argument `getList` was called with (often a
    *   partial item that the hook maps to index-key values).
-   * - `index` — the `index` argument `getAll` was called with (a GSI name,
+   * - `index` — the `index` argument `getList` was called with (a GSI name,
    *   or `undefined`).
    *
    * Return a plain object — its fields are shallow-merged into the
@@ -86,7 +86,7 @@ export interface AdapterHooks<TItem extends Record<string, unknown>> {
    *
    * - `rawItem` — the item as DynamoDB returned it.
    * - `fields` — the projection spec the caller requested (passed through
-   *   from `getByKey` / `getAllByParams` / etc.). The default
+   *   from `getByKey` / `getListByParams` / etc.). The default
    *   implementation applies `subsetObject(rawItem, fields)` when this is
    *   set.
    *
@@ -98,7 +98,7 @@ export interface AdapterHooks<TItem extends Record<string, unknown>> {
    * Async validator. Throw (or reject) to abort the write before it hits
    * DynamoDB.
    *
-   * Called on every non-`Raw` write: `post`, `put`, `patch`, `putAll`
+   * Called on every non-`Raw` write: `post`, `put`, `patch`, `putItems`
    * (per-item), and the `make*` builders.
    *
    * - `item` — the item to validate.

@@ -91,7 +91,7 @@ export const createHandler = (adapter, options = {}) => {
     const {index, descending} = resolveSort(query);
     if (descending) opts.descending = true;
     const example = exampleFromContext(query, null);
-    const result = await adapter.getAll(opts, example, index);
+    const result = await adapter.getList(opts, example, index);
 
     const baseUrl = requestUrl(req);
     const urlBuilder = ({offset, limit}) => {
@@ -116,10 +116,10 @@ export const createHandler = (adapter, options = {}) => {
     const opts = buildListOptions(query);
     const {index} = resolveSort(query);
     const example = exampleFromContext(query, null);
-    // For deleteAll we need the params built like getAll, but route through deleteAllByParams
-    // by re-using the Adapter's internal list-params machinery via getAll-style options
+    // For mass delete we need the params built like getList, but route through
+    // deleteListByParams by re-using the Adapter's internal list-params machinery.
     const params = await adapter._buildListParams(opts, false, example, index);
-    const r = await adapter.deleteAllByParams(params);
+    const r = await adapter.deleteListByParams(params);
     sendJson(req, res, 200, {processed: r.processed});
   };
 
@@ -173,7 +173,7 @@ export const createHandler = (adapter, options = {}) => {
     if (!Array.isArray(body)) {
       return sendError(req, res, Object.assign(new Error('Body must be an array of items'), {status: 400, code: 'BadLoadBody'}));
     }
-    const r = await adapter.putAll(body);
+    const r = await adapter.putItems(body);
     sendJson(req, res, 200, {processed: r.processed});
   };
 
@@ -186,7 +186,7 @@ export const createHandler = (adapter, options = {}) => {
     // exampleFromContext so consumers can derive scope from both query + body.
     const example = exampleFromContext(query, body);
     const params = await adapter._buildListParams(opts, false, example, index);
-    const r = await adapter.cloneAllByParams(params, item => ({...item, ...overlay}));
+    const r = await adapter.cloneListByParams(params, item => ({...item, ...overlay}));
     sendJson(req, res, 200, {processed: r.processed});
   };
 
@@ -197,7 +197,7 @@ export const createHandler = (adapter, options = {}) => {
     const {index} = resolveSort(query);
     const example = exampleFromContext(query, body);
     const params = await adapter._buildListParams(opts, false, example, index);
-    const r = await adapter.moveAllByParams(params, item => ({...item, ...overlay}));
+    const r = await adapter.moveListByParams(params, item => ({...item, ...overlay}));
     sendJson(req, res, 200, {processed: r.processed});
   };
 

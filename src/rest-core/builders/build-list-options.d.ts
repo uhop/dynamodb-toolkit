@@ -10,7 +10,7 @@ export interface ListOptionsBase {
 }
 
 /**
- * Build `ListOptions` for `adapter.getAll` / `adapter._buildListParams` from
+ * Build `ListOptions` for `adapter.getList` / `adapter._buildListParams` from
  * a string-only query map and a REST policy. Composes `parseFields`,
  * `parseFilter`, `parsePaging`, `parseFlag` under the policy's `defaultLimit`
  * / `maxLimit` / `maxOffset` / `needTotal` caps.

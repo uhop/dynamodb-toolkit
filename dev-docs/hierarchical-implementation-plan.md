@@ -111,6 +111,14 @@ Biggest release of the workstream. Makes hierarchical adapters declarative inste
 ### Naming cleanup (§"Naming cleanup — drop 'List' from bulk-individual-read helpers")
 
 - [ ] **Rename `writeList` → `writeItems`** — bulk-individual write, not a list op. Same behaviour; drops "List" per the classification rule.
+- [ ] **Unify Adapter-surface bulk/list naming** — verb + qualifier pattern. Renames:
+  - `putAll(items)` → `putItems(items)` (bulk-individual; `Items` suffix signals items-input).
+  - `getAll(options, example, index)` → `getList(options, example, index)` (list convenience).
+  - `getAllByParams(params, options)` → `getListByParams(params, options)` (list direct).
+  - `deleteAllByParams` → `deleteListByParams`.
+  - `cloneAllByParams` → `cloneListByParams`.
+  - `moveAllByParams` → `moveListByParams`.
+  - Deprecated aliases preserved on `Adapter.prototype` with one-time `console.warn`, removed in 3.3.0 or 4.0.0.
 - [ ] **Consolidate `readListByKeys` + `readOrderedListByKeys` → `readByKeys`** — always ordered, length-preserving, `undefined` at missing positions.
   - New file: `src/mass/read-by-keys.js` + `.d.ts` (content = current `read-ordered-list-by-keys.js`).
   - Delete: `src/mass/read-list-by-keys.js`, `src/mass/read-ordered-list-by-keys.js` (old content).

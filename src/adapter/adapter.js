@@ -738,12 +738,12 @@ export class Adapter {
     return items.map(item => (item ? this._reviveOne(item, fields, options) : undefined));
   }
 
-  async getAll(options, example, index) {
+  async getList(options, example, index) {
     const params = await this._buildListParams(options, true, example, index);
-    return this.getAllByParams(params, options);
+    return this.getListByParams(params, options);
   }
 
-  async getAllByParams(params, options) {
+  async getListByParams(params, options) {
     const isIndirect = this._isIndirect(params, options);
     let activeParams = this._cloneParams(params);
     if (isIndirect) {
@@ -780,7 +780,7 @@ export class Adapter {
 
   // --- mass writes ---
 
-  async putAll(items, options) {
+  async putItems(items, options) {
     const strategy = options?.strategy || 'native';
     if (strategy === 'sequential') {
       let processed = 0;
@@ -809,7 +809,7 @@ export class Adapter {
     return {processed};
   }
 
-  async deleteAllByParams(params, _options) {
+  async deleteListByParams(params, _options) {
     let p = this._cloneParams(params);
     p = addProjection(
       p,
@@ -835,7 +835,7 @@ export class Adapter {
     return {processed};
   }
 
-  async cloneAllByParams(params, mapFn, _options) {
+  async cloneListByParams(params, mapFn, _options) {
     let p = this._cloneParams(params);
     p = cleanParams(p);
     const fn = item => {
@@ -875,7 +875,7 @@ export class Adapter {
     return {processed};
   }
 
-  async moveAllByParams(params, mapFn, _options) {
+  async moveListByParams(params, mapFn, _options) {
     let p = this._cloneParams(params);
     p = addProjection(
       p,
@@ -946,3 +946,37 @@ export class Adapter {
     return p;
   }
 }
+
+// Deprecated aliases — removed in a future minor (3.3.0 or 4.0.0). The 3.2.0
+// naming cleanup unified the verb+qualifier pattern across the Adapter
+// surface (individual / bulk-individual / list).
+const warnedAliases = Object.create(null);
+const warnOnce = (oldName, newName) => {
+  if (warnedAliases[oldName]) return;
+  warnedAliases[oldName] = true;
+  console.warn(`dynamodb-toolkit: Adapter.${oldName} is deprecated, use Adapter.${newName}.`);
+};
+Adapter.prototype.putAll = function (items, options) {
+  warnOnce('putAll', 'putItems');
+  return this.putItems(items, options);
+};
+Adapter.prototype.getAll = function (options, example, index) {
+  warnOnce('getAll', 'getList');
+  return this.getList(options, example, index);
+};
+Adapter.prototype.getAllByParams = function (params, options) {
+  warnOnce('getAllByParams', 'getListByParams');
+  return this.getListByParams(params, options);
+};
+Adapter.prototype.deleteAllByParams = function (params, options) {
+  warnOnce('deleteAllByParams', 'deleteListByParams');
+  return this.deleteListByParams(params, options);
+};
+Adapter.prototype.cloneAllByParams = function (params, mapFn, options) {
+  warnOnce('cloneAllByParams', 'cloneListByParams');
+  return this.cloneListByParams(params, mapFn, options);
+};
+Adapter.prototype.moveAllByParams = function (params, mapFn, options) {
+  warnOnce('moveAllByParams', 'moveListByParams');
+  return this.moveListByParams(params, mapFn, options);
+};
