@@ -6,14 +6,60 @@ import type {ConditionClause} from '../expressions/condition.js';
 import type {PaginatedResult} from '../mass/paginate-list.js';
 import type {AdapterHooks} from './hooks.js';
 
+/**
+ * Typed descriptor for a `keyFields` component. `width` is required for
+ * `{type: 'number'}` in a composite `keyFields` (to preserve lexicographic
+ * sort on the joined structural key).
+ */
+export interface KeyFieldSpec {
+  /** Field name on the item. */
+  field: string;
+  /** DynamoDB scalar type for this key. Defaults to `'string'`. */
+  type?: 'string' | 'number' | 'binary';
+  /** Zero-pad width — required on `{type: 'number'}` components in a composite `keyFields`. */
+  width?: number;
+}
+
+/**
+ * Declaration of the structural (composite) key field. Required when
+ * `keyFields.length > 1`. The named field is where the joined component
+ * values are stored; the `separator` string is used to join them.
+ */
+export interface StructuralKey {
+  /** Field name on the item where the joined value lives. */
+  field: string;
+  /** Join separator. Defaults to `'|'`. Any string accepted (multi-char, unprintable). */
+  separator?: string;
+}
+
 /** Constructor options for {@link Adapter}. */
 export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = Partial<TItem>> {
   /** The DynamoDB DocumentClient. Build via `DynamoDBDocumentClient.from(...)`. */
   client: DynamoDBDocumentClient;
   /** Base table name. */
   table: string;
-  /** Partition key first, optional sort key second. */
-  keyFields: (keyof TItem & string)[];
+  /**
+   * Partition key first, optional sort key second. Accepts either bare field
+   * names (typed as `'string'`) or full {@link KeyFieldSpec} descriptors.
+   * `{type: 'number'}` requires `width` in a composite (length > 1) keyFields.
+   */
+  keyFields: ((keyof TItem & string) | KeyFieldSpec)[];
+  /**
+   * Declaration of the structural (composite) key field. Required when
+   * `keyFields.length > 1`.
+   */
+  structuralKey?: StructuralKey;
+  /**
+   * Optional type labels, paired 1:1 with `keyFields`. `typeLabels[i]` is the
+   * label returned by {@link Adapter.typeOf} for a record with
+   * `keyFields[0..i]` defined.
+   */
+  typeLabels?: string[];
+  /**
+   * Optional type-discriminator field. When present on an item, its value
+   * overrides depth-based detection in {@link Adapter.typeOf}.
+   */
+  typeDiscriminator?: {field: string};
   /** Alias map for projections — rewrites the first segment of each requested field. */
   projectionFieldMap?: Record<string, string>;
   /** Fields that get a `searchablePrefix + field` lowercase mirror for substring filtering. */
@@ -178,8 +224,16 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   client: DynamoDBDocumentClient;
   /** Base table name. */
   table: string;
-  /** Partition key first, optional sort key second. */
+  /** Partition key first, optional sort key second — field names only. */
   keyFields: (keyof TItem & string)[];
+  /** Normalized typed descriptors for each `keyFields` component. */
+  keyFieldSpecs: Required<KeyFieldSpec>[];
+  /** Structural-key declaration (only set when `keyFields.length > 1` or explicitly declared). */
+  structuralKey?: Required<StructuralKey>;
+  /** Type labels paired 1:1 with `keyFields`, when declared. */
+  typeLabels?: string[];
+  /** Type-discriminator field config, when declared. */
+  typeDiscriminator?: {field: string};
   /** Alias map for projections. */
   projectionFieldMap: Record<string, string>;
   /** Searchable-field map for substring filtering. */
@@ -190,6 +244,55 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   indirectIndices: Record<string, 1 | true>;
   /** Resolved hooks bag (defaults merged with user overrides). */
   hooks: Required<AdapterHooks<TItem>>;
+
+  /**
+   * Return the type label for an item. Priority:
+   *   1. `typeDiscriminator.field` value when present on the item (coerced to string).
+   *   2. `typeLabels[depth - 1]` where `depth` = count of contiguous-from-start
+   *      defined `keyFields` on the item, when `typeLabels` is declared.
+   *   3. Raw `depth` number when no `typeLabels` is declared.
+   *
+   * Returns `undefined` when the item has no recognised type-signalling
+   * fields at all (empty item, no discriminator, no keyFields present).
+   *
+   * @param item The item to classify.
+   */
+  typeOf(item: Partial<TItem> | undefined | null): string | number | undefined;
+
+  /**
+   * Build a `KeyConditionExpression` for a Query against this Adapter's main
+   * table. Ergonomic surface over {@link buildKeyCondition} — the Adapter
+   * uses its declared `keyFields` / `structuralKey` to validate `values` and
+   * join them into the right prefix.
+   *
+   * `values` is keyed by `keyFields` names and must be
+   * **contiguous-from-start** (no gaps — if `rentalName` is missing, `carVin`
+   * must also be missing). At least the partition keyField is required.
+   *
+   * `options.kind` controls the match shape:
+   * - `'exact'` (default) — equality match: `structuralKey = "TX|Dallas"`.
+   * - `'children'` — `begins_with(structuralKey, "TX|Dallas|")`, trailing
+   *   separator included so the parent record isn't matched.
+   * - `'partial'` — `begins_with(structuralKey, "TX|Dallas|Bui")`; requires
+   *   `options.partial` as the suffix after the separator.
+   *
+   * Inference: `'exact'` when no `partial`; `'partial'` when `partial`
+   * is present; `'children'` must be explicit.
+   *
+   * Composite `keyFields` require a `structuralKey` declaration.
+   * Single-field `keyFields` only support `kind: 'exact'`.
+   *
+   * @param values Object keyed by `keyFields` names; contiguous-from-start.
+   * @param options `{kind?, partial?, indexName?}`.
+   * @param params Optional existing params to merge into.
+   * @returns The same `params` with `KeyConditionExpression` set and
+   *   `ExpressionAttributeNames` / `ExpressionAttributeValues` extended.
+   */
+  buildKey(
+    values: Partial<TItem>,
+    options?: {kind?: 'exact' | 'children' | 'partial'; partial?: string; indexName?: string},
+    params?: Record<string, unknown>
+  ): Record<string, unknown>;
 
   /**
    * @param options Adapter constructor options. `client`, `table`, and

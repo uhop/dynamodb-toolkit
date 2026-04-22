@@ -6,6 +6,7 @@ import {Raw} from '../raw.js';
 import {addProjection} from '../expressions/projection.js';
 import {buildUpdate} from '../expressions/update.js';
 import {buildCondition} from '../expressions/condition.js';
+import {buildKeyCondition} from '../expressions/key-condition.js';
 import {buildFilter} from '../expressions/filter.js';
 import {cleanParams} from '../expressions/clean-params.js';
 import {cloneParams} from '../expressions/clone-params.js';
@@ -25,6 +26,34 @@ import {dispatchWrite} from './transaction-upgrade.js';
 
 const MOVE_CHUNK = 12;
 
+// Normalize a keyFields entry — accepts a bare string or a full descriptor.
+// Bare string `'state'` → `{field: 'state', type: 'string'}`.
+const normalizeKeyFieldSpec = (entry, index, composite) => {
+  if (typeof entry === 'string') return {field: entry, type: 'string'};
+  if (!entry || typeof entry !== 'object' || typeof entry.field !== 'string') {
+    throw new Error(`options.keyFields[${index}] must be a string or {field, type?, width?}`);
+  }
+  const type = entry.type || 'string';
+  if (type !== 'string' && type !== 'number' && type !== 'binary') {
+    throw new Error(`options.keyFields[${index}].type must be 'string' | 'number' | 'binary'`);
+  }
+  const spec = {field: entry.field, type};
+  if (entry.width !== undefined) {
+    if (!Number.isInteger(entry.width) || entry.width < 1) {
+      throw new Error(`options.keyFields[${index}].width must be a positive integer`);
+    }
+    spec.width = entry.width;
+  }
+  // width is required for {type: 'number'} in composite keys — zero-padding
+  // preserves lexicographic sort on the joined string key.
+  if (composite && type === 'number' && spec.width === undefined) {
+    throw new Error(
+      `options.keyFields[${index}] ({field: '${spec.field}', type: 'number'}) requires 'width' in a composite keyFields`
+    );
+  }
+  return spec;
+};
+
 export class Adapter {
   constructor(options) {
     if (!options) throw new Error('AdapterOptions are required');
@@ -34,14 +63,187 @@ export class Adapter {
       throw new Error('options.keyFields must be a non-empty array');
     }
 
+    // Normalize typed keyFields descriptors. `keyFieldSpecs` carries the full
+    // info (type, width); `keyFields` stays as bare names for back-compat.
+    const composite = options.keyFields.length > 1;
+    this.keyFieldSpecs = options.keyFields.map((e, i) => normalizeKeyFieldSpec(e, i, composite));
+    this.keyFields = this.keyFieldSpecs.map(s => s.field);
+
+    // Optional structuralKey declaration. Required when keyFields is composite
+    // (more than one component) — the join shape is the only way to form a
+    // sort key out of multiple component fields.
+    if (options.structuralKey !== undefined) {
+      if (typeof options.structuralKey !== 'object' || typeof options.structuralKey.field !== 'string') {
+        throw new Error("options.structuralKey must be {field: string, separator?: string}");
+      }
+      const sep = options.structuralKey.separator;
+      if (sep !== undefined && typeof sep !== 'string') {
+        throw new Error('options.structuralKey.separator must be a string');
+      }
+      this.structuralKey = {field: options.structuralKey.field, separator: sep === undefined ? '|' : sep};
+    } else if (composite) {
+      throw new Error('options.structuralKey is required when options.keyFields is composite (length > 1)');
+    }
+
+    // Optional typeLabels — paired 1:1 with keyFields. Lets `adapter.typeOf`
+    // return a named label instead of a raw depth number.
+    if (options.typeLabels !== undefined) {
+      if (!Array.isArray(options.typeLabels) || options.typeLabels.some(l => typeof l !== 'string')) {
+        throw new Error('options.typeLabels must be an array of strings');
+      }
+      if (options.typeLabels.length !== this.keyFields.length) {
+        throw new Error(
+          `options.typeLabels length (${options.typeLabels.length}) must match keyFields length (${this.keyFields.length})`
+        );
+      }
+      this.typeLabels = options.typeLabels.slice();
+    }
+
+    // Optional typeDiscriminator — overrides depth-based detection when the
+    // named field is present on the item.
+    if (options.typeDiscriminator !== undefined) {
+      if (typeof options.typeDiscriminator !== 'object' || typeof options.typeDiscriminator.field !== 'string') {
+        throw new Error('options.typeDiscriminator must be {field: string}');
+      }
+      this.typeDiscriminator = {field: options.typeDiscriminator.field};
+    }
+
     this.client = options.client;
     this.table = options.table;
-    this.keyFields = options.keyFields;
     this.projectionFieldMap = options.projectionFieldMap || {};
     this.searchable = options.searchable || {};
     this.searchablePrefix = options.searchablePrefix || '-search-';
     this.indirectIndices = options.indirectIndices || {};
     this.hooks = {...defaultHooks, ...(options.hooks || {})};
+  }
+
+  // --- type detection ---
+
+  /**
+   * Return the type label for an item, using (in priority order):
+   *   1. `typeDiscriminator.field` value when present on the item.
+   *   2. `typeLabels[depth - 1]` where depth = count of contiguous-from-start
+   *      defined `keyFields` on the item, when `typeLabels` is declared.
+   *   3. Raw depth number when no `typeLabels` is declared.
+   *
+   * Returns `undefined` when the item has no recognised type-signalling
+   * fields at all (empty item, no discriminator, no keyFields present).
+   */
+  typeOf(item) {
+    if (!item) return undefined;
+
+    if (this.typeDiscriminator) {
+      const v = item[this.typeDiscriminator.field];
+      if (v !== undefined && v !== null) return '' + v;
+    }
+
+    // Count contiguous-from-start defined keyFields on the item.
+    let depth = 0;
+    for (const field of this.keyFields) {
+      if (item[field] === undefined || item[field] === null) break;
+      depth++;
+    }
+
+    if (depth === 0) return undefined;
+    if (this.typeLabels) return this.typeLabels[depth - 1];
+    return depth;
+  }
+
+  // --- key builders (A1' / Q12) ---
+
+  /**
+   * Format a single keyFields value per its declared spec: numbers get
+   * zero-padded to `width` (required in composite keyFields), strings pass
+   * through, binary values are coerced via String().
+   */
+  _formatKeyComponent(spec, value) {
+    if (spec.type === 'number') {
+      if (spec.width !== undefined) {
+        return String(value).padStart(spec.width, '0');
+      }
+      return String(value);
+    }
+    return String(value);
+  }
+
+  /**
+   * Build a KeyConditionExpression for a Query against this Adapter's main
+   * table. Validates `values` contiguous-from-start against `keyFields`;
+   * joins with the declared `structuralKey.separator`; calls the
+   * `buildKeyCondition` primitive with the computed prefix.
+   *
+   * @param values Object keyed by `keyFields` names (contiguous-from-start).
+   * @param options `{kind?, partial?, indexName?}` — `kind` defaults to
+   *   `'exact'` when no `partial`, `'partial'` when `partial` is present.
+   *   `'children'` must be explicit. `indexName` currently reserved for
+   *   future declarative-GSI support (throws if set on this release).
+   * @param params Optional existing params to merge into.
+   * @returns The same `params` with `KeyConditionExpression` set.
+   */
+  buildKey(values, options = {}, params = {}) {
+    if (!values || typeof values !== 'object') {
+      throw new Error('buildKey(values): values must be an object keyed by keyFields names');
+    }
+    if (options.indexName !== undefined) {
+      // Declarative-GSI surface for buildKey lands with the `indices` config
+      // in a follow-up chunk. For now, users targeting GSIs with their own
+      // structural keys invoke the buildKeyCondition primitive directly.
+      throw new Error('buildKey({indexName}) is not yet supported — use buildKeyCondition primitive for GSI targets');
+    }
+
+    const {kind: kindOpt, partial} = options;
+    const kind =
+      kindOpt === undefined
+        ? partial !== undefined
+          ? 'partial'
+          : 'exact'
+        : kindOpt;
+    if (kind !== 'exact' && kind !== 'children' && kind !== 'partial') {
+      throw new Error(`buildKey: unknown kind '${kind}' — expected 'exact' | 'children' | 'partial'`);
+    }
+
+    // Walk keyFields, collect contiguous-from-start defined values.
+    const components = [];
+    let gapSeen = false;
+    for (const spec of this.keyFieldSpecs) {
+      const v = values[spec.field];
+      if (v === undefined || v === null) {
+        gapSeen = true;
+        continue;
+      }
+      if (gapSeen) {
+        throw new Error(
+          `buildKey: values are non-contiguous — '${spec.field}' present but a preceding keyField is missing`
+        );
+      }
+      components.push(this._formatKeyComponent(spec, v));
+    }
+    if (components.length === 0) {
+      throw new Error('buildKey: at least the partition keyField must be present in values');
+    }
+
+    // Single-field keyFields: direct equality on the lone key.
+    if (this.keyFieldSpecs.length === 1 || !this.structuralKey) {
+      if (kind === 'children' || kind === 'partial') {
+        throw new Error(`buildKey: kind '${kind}' requires a structuralKey declaration (composite keyFields)`);
+      }
+      return buildKeyCondition({field: this.keyFields[0], value: components[0], kind: 'exact'}, params);
+    }
+
+    // Composite keyFields → join into structuralKey.field.
+    const sep = this.structuralKey.separator;
+    const base = components.join(sep);
+    if (kind === 'exact') {
+      return buildKeyCondition({field: this.structuralKey.field, value: base, kind: 'exact'}, params);
+    }
+    if (kind === 'children') {
+      return buildKeyCondition({field: this.structuralKey.field, value: base + sep, kind: 'prefix'}, params);
+    }
+    // kind === 'partial'
+    if (typeof partial !== 'string' || partial.length === 0) {
+      throw new Error("buildKey: kind 'partial' requires options.partial to be a non-empty string");
+    }
+    return buildKeyCondition({field: this.structuralKey.field, value: base + sep + partial, kind: 'prefix'}, params);
   }
 
   // --- internal helpers ---

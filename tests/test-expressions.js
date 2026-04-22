@@ -1,5 +1,14 @@
 import test from 'tape-six';
-import {buildUpdate, addProjection, buildFilter, buildFilterByExample, buildCondition, cleanParams, cloneParams} from 'dynamodb-toolkit/expressions';
+import {
+  buildUpdate,
+  addProjection,
+  buildFilter,
+  buildFilterByExample,
+  buildCondition,
+  buildKeyCondition,
+  cleanParams,
+  cloneParams
+} from 'dynamodb-toolkit/expressions';
 
 // buildUpdate — basic SET
 
@@ -281,4 +290,59 @@ test('cloneParams: null/undefined input returns fresh empty clone', t => {
   t.deepEqual(a, {ExpressionAttributeNames: {}, ExpressionAttributeValues: {}});
   const b = cloneParams(undefined);
   t.deepEqual(b, {ExpressionAttributeNames: {}, ExpressionAttributeValues: {}});
+});
+
+// buildKeyCondition
+
+test('buildKeyCondition: exact match on sort key', t => {
+  const p = buildKeyCondition({field: '-sk', value: 'TX|Dallas', kind: 'exact'});
+  t.equal(p.KeyConditionExpression, '#kc0 = :kcv0');
+  t.equal(p.ExpressionAttributeNames['#kc0'], '-sk');
+  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX|Dallas');
+});
+
+test('buildKeyCondition: prefix (begins_with) on structural key', t => {
+  const p = buildKeyCondition({field: '-sk', value: 'TX|Dallas|', kind: 'prefix'});
+  t.equal(p.KeyConditionExpression, 'begins_with(#kc0, :kcv0)');
+  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX|Dallas|');
+});
+
+test('buildKeyCondition: includes partition-key clause when pkField + pkValue set', t => {
+  const p = buildKeyCondition({
+    field: '-sk',
+    value: 'TX|Dallas|',
+    kind: 'prefix',
+    pkField: 'state',
+    pkValue: 'TX'
+  });
+  t.equal(p.KeyConditionExpression, '#kc0 = :kcv0 AND begins_with(#kc1, :kcv1)');
+  t.equal(p.ExpressionAttributeNames['#kc0'], 'state');
+  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX');
+  t.equal(p.ExpressionAttributeNames['#kc1'], '-sk');
+  t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX|Dallas|');
+});
+
+test('buildKeyCondition: AND-merges with existing KeyConditionExpression', t => {
+  const existing = {
+    KeyConditionExpression: '#pre = :preV',
+    ExpressionAttributeNames: {'#pre': 'other'},
+    ExpressionAttributeValues: {':preV': 'x'}
+  };
+  const p = buildKeyCondition({field: '-sk', value: 'TX', kind: 'exact'}, existing);
+  t.matchString(p.KeyConditionExpression, /^\(#pre = :preV\) AND \(#kc\d+ = :kcv\d+\)$/);
+  t.ok(p.ExpressionAttributeNames['#pre'], 'existing name preserved');
+});
+
+test('buildKeyCondition: placeholder counter continues from existing params', t => {
+  const existing = {
+    ExpressionAttributeNames: {'#cd0': 'existing-a', '#cd1': 'existing-b'},
+    ExpressionAttributeValues: {':cdv0': 'a', ':cdv1': 'b'}
+  };
+  const p = buildKeyCondition({field: 'sk', value: 'v', kind: 'exact'}, existing);
+  // New placeholders should not collide with existing ones — the counter
+  // picks up from the length of the name/value maps.
+  const newName = Object.keys(p.ExpressionAttributeNames).find(k => k.startsWith('#kc'));
+  const newValue = Object.keys(p.ExpressionAttributeValues).find(k => k.startsWith(':kcv'));
+  t.ok(newName, 'allocated a #kc name');
+  t.ok(newValue, 'allocated a :kcv value');
 });
