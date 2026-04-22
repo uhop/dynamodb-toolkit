@@ -139,16 +139,27 @@ export class Adapter {
 
     // Optional structuralKey declaration. Required when keyFields is composite
     // (more than one component) — the join shape is the only way to form a
-    // sort key out of multiple component fields.
+    // sort key out of multiple component fields. Accepts string shorthand
+    // `'-sk'` or full descriptor `{name, separator?}` (separator defaults
+    // to `'|'`).
     if (options.structuralKey !== undefined) {
-      if (typeof options.structuralKey !== 'object' || typeof options.structuralKey.name !== 'string') {
-        throw new Error("options.structuralKey must be {name: string, separator?: string}");
+      let name, sep;
+      if (typeof options.structuralKey === 'string') {
+        if (options.structuralKey.length === 0) {
+          throw new Error('options.structuralKey (string shorthand) must be non-empty');
+        }
+        name = options.structuralKey;
+        sep = undefined;
+      } else if (options.structuralKey && typeof options.structuralKey === 'object' && typeof options.structuralKey.name === 'string') {
+        name = options.structuralKey.name;
+        sep = options.structuralKey.separator;
+        if (sep !== undefined && typeof sep !== 'string') {
+          throw new Error('options.structuralKey.separator must be a string');
+        }
+      } else {
+        throw new Error("options.structuralKey must be a string (shorthand for name) or {name: string, separator?: string}");
       }
-      const sep = options.structuralKey.separator;
-      if (sep !== undefined && typeof sep !== 'string') {
-        throw new Error('options.structuralKey.separator must be a string');
-      }
-      this.structuralKey = {name: options.structuralKey.name, separator: sep === undefined ? '|' : sep};
+      this.structuralKey = {name, separator: sep === undefined ? '|' : sep};
     } else if (composite) {
       throw new Error('options.structuralKey is required when options.keyFields is composite (length > 1)');
     }
@@ -168,12 +179,25 @@ export class Adapter {
     }
 
     // Optional typeDiscriminator — overrides depth-based detection when the
-    // named field is present on the item.
+    // named field is present on the item. Accepts string shorthand
+    // `'kind'` or full descriptor `{name}`.
     if (options.typeDiscriminator !== undefined) {
-      if (typeof options.typeDiscriminator !== 'object' || typeof options.typeDiscriminator.name !== 'string') {
-        throw new Error('options.typeDiscriminator must be {name: string}');
+      let discName;
+      if (typeof options.typeDiscriminator === 'string') {
+        if (options.typeDiscriminator.length === 0) {
+          throw new Error('options.typeDiscriminator (string shorthand) must be non-empty');
+        }
+        discName = options.typeDiscriminator;
+      } else if (
+        options.typeDiscriminator &&
+        typeof options.typeDiscriminator === 'object' &&
+        typeof options.typeDiscriminator.name === 'string'
+      ) {
+        discName = options.typeDiscriminator.name;
+      } else {
+        throw new Error('options.typeDiscriminator must be a string (shorthand for name) or {name: string}');
       }
-      this.typeDiscriminator = {name: options.typeDiscriminator.name};
+      this.typeDiscriminator = {name: discName};
     }
 
     // Optional technicalPrefix — when declared, marks fields that are
@@ -239,19 +263,37 @@ export class Adapter {
       }
     }
 
-    // Hook composition: when technicalPrefix is declared, wrap the user's
-    // prepare / revive hooks with built-in steps that run before the user
-    // hook (on prepare: validate incoming fields, write adapter-managed
-    // fields; on revive: strip adapter-managed fields). Without
-    // technicalPrefix, the built-in steps are no-ops and hooks are
-    // byte-for-byte identical to v3.1.2.
+    // Compute the DB primary-key attribute names. With `structuralKey`
+    // declared, the base table's sort key IS the structural-key field
+    // (partition key = keyFields[0]). Without it, the partition key is the
+    // only primary-key attribute — the whole keyFields is that one name.
+    // Used by `_restrictKey` when extracting DB keys from items, and by
+    // mass-op projections that need the primary-key attributes for deletes
+    // and moves.
+    this.primaryKeyAttrs = this.structuralKey
+      ? [this.keyFields[0].name, this.structuralKey.name]
+      : this.keyFields.map(f => f.name);
+
+    // Hook composition: wrap the user's prepare / revive / prepareKey hooks
+    // with built-in steps that run before the user hook. The inner built-in
+    // step checks its own conditions — if `technicalPrefix`, `structuralKey`,
+    // and `searchable` are all unset, the built-in steps are pure identity
+    // and behaviour matches v3.1.2. Wrapping unconditionally avoids a
+    // branching-on-features code path; the per-call overhead is one function
+    // call per hook invocation.
     const userHooks = {...defaultHooks, ...(options.hooks || {})};
-    if (this.technicalPrefix) {
-      const userPrepare = userHooks.prepare;
-      const userRevive = userHooks.revive;
-      userHooks.prepare = (item, isPatch) => userPrepare(this._builtInPrepare(item, isPatch), isPatch);
-      userHooks.revive = (rawItem, fields) => userRevive(this._builtInRevive(rawItem), fields);
-    }
+    const userPrepare = userHooks.prepare;
+    const userRevive = userHooks.revive;
+    const userPrepareKey = userHooks.prepareKey;
+    // Invoke user hooks with `this` bound to the Adapter, so they can read
+    // `this.searchable` / `this.keyFields` / `this.structuralKey` etc.
+    // directly. Matches the intent of v3.1.2 user code that referenced
+    // `this.searchable` (which happened to work by accident — v3.1.2 bound
+    // `this` to `this.hooks` and the user's short-circuit `?.` swallowed the
+    // undefined; now it's genuinely the Adapter instance).
+    userHooks.prepare = (item, isPatch) => userPrepare.call(this, this._builtInPrepare(item, isPatch), isPatch);
+    userHooks.revive = (rawItem, fields) => userRevive.call(this, this._builtInRevive(rawItem), fields);
+    userHooks.prepareKey = (key, index) => userPrepareKey.call(this, this._builtInPrepareKey(key, index), index);
     this.hooks = userHooks;
   }
 
@@ -271,13 +313,19 @@ export class Adapter {
    */
   _builtInPrepare(item, isPatch) {
     if (!item || typeof item !== 'object') return item;
+    // Fast path: nothing declared, nothing to do — byte-for-byte identical
+    // behaviour to v3.1.2.
+    const hasSearchable = Object.keys(this.searchable).length > 0;
+    if (!this.technicalPrefix && !this.structuralKey && !hasSearchable) return item;
 
     // 1. Reject incoming user fields that start with technicalPrefix.
-    for (const key of Object.keys(item)) {
-      if (key.startsWith(this.technicalPrefix)) {
-        throw new Error(
-          `prepare: incoming field '${key}' starts with technicalPrefix '${this.technicalPrefix}' — this is an adapter-managed namespace and must not appear in caller items`
-        );
+    if (this.technicalPrefix) {
+      for (const key of Object.keys(item)) {
+        if (key.startsWith(this.technicalPrefix)) {
+          throw new Error(
+            `prepare: incoming field '${key}' starts with technicalPrefix '${this.technicalPrefix}' — this is an adapter-managed namespace and must not appear in caller items`
+          );
+        }
       }
     }
 
@@ -313,16 +361,48 @@ export class Adapter {
   /**
    * Strip every field whose name starts with `technicalPrefix` from the raw
    * item before the user's `revive` hook sees it. Keeps adapter-managed
-   * implementation details off the wire.
+   * implementation details off the wire. When `technicalPrefix` is unset,
+   * this is a pass-through.
    */
   _builtInRevive(rawItem) {
-    if (!rawItem || typeof rawItem !== 'object') return rawItem;
+    if (!this.technicalPrefix || !rawItem || typeof rawItem !== 'object') return rawItem;
     const prefix = this.technicalPrefix;
     const out = {};
     for (const key of Object.keys(rawItem)) {
       if (!key.startsWith(prefix)) out[key] = rawItem[key];
     }
     return out;
+  }
+
+  /**
+   * Compose the structural-key field on a read-key shape so DynamoDB
+   * GetItem / DeleteItem / UpdateItem receive `{pk, sk}` where sk is the
+   * structural key. Runs before the user's `prepareKey` hook.
+   *
+   * When the key is targeted at a secondary index (`index` set), this is
+   * a pass-through — the GSI/LSI has its own key schema (declared in
+   * `this.indices[index]`) that the user's `prepareKey` hook is
+   * responsible for producing until declarative GSI-key composition
+   * lands in a follow-up.
+   *
+   * When `structuralKey` isn't declared (single-field `keyFields`), this
+   * is a pass-through — the sole keyField IS the sort/partition key.
+   */
+  _builtInPrepareKey(key, index) {
+    if (!key || typeof key !== 'object') return key;
+    if (index) return key;
+    if (!this.structuralKey) return key;
+    const components = [];
+    for (const field of this.keyFields) {
+      const v = key[field.name];
+      if (v === undefined || v === null) break;
+      components.push(this._formatKeyComponent(field, v));
+    }
+    if (components.length === 0) return key;
+    return {
+      ...key,
+      [this.structuralKey.name]: components.join(this.structuralKey.separator)
+    };
   }
 
   // --- type detection ---
@@ -539,7 +619,7 @@ export class Adapter {
   }
 
   _restrictKey(rawKey) {
-    return restrictKey(rawKey, this.keyFields.map(f => f.name));
+    return restrictKey(rawKey, this.primaryKeyAttrs);
   }
 
   _toKey(key, index) {
@@ -681,7 +761,7 @@ export class Adapter {
   async getByKey(key, fields, options) {
     const params = options?.params;
     const isIndirect = this._isIndirect(params, options);
-    const activeFields = isIndirect ? this.keyFields.map(f => f.name) : fields;
+    const activeFields = isIndirect ? this.primaryKeyAttrs : fields;
     const batch = await this.makeGet(key, activeFields, params);
 
     let data = await this.client.send(new GetCommand(batch.params));
@@ -701,7 +781,7 @@ export class Adapter {
   async getByKeys(keys, fields, options) {
     const params = options?.params;
     const isIndirect = this._isIndirect(params, options);
-    const activeFields = isIndirect ? this.keyFields.map(f => f.name) : fields;
+    const activeFields = isIndirect ? this.primaryKeyAttrs : fields;
 
     let activeParams = this._cloneParams(params);
     if (activeFields) activeParams = addProjection(activeParams, activeFields, this.projectionFieldMap, true);
@@ -748,12 +828,7 @@ export class Adapter {
     let activeParams = this._cloneParams(params);
     if (isIndirect) {
       delete activeParams.ProjectionExpression;
-      activeParams = addProjection(
-        activeParams,
-        this.keyFields.map(f => f.name),
-        null,
-        true
-      );
+      activeParams = addProjection(activeParams, this.primaryKeyAttrs, null, true);
     }
     activeParams = cleanParams(activeParams);
 
@@ -811,12 +886,7 @@ export class Adapter {
 
   async deleteListByParams(params, _options) {
     let p = this._cloneParams(params);
-    p = addProjection(
-      p,
-      this.keyFields.map(f => f.name).join(','),
-      null,
-      true
-    );
+    p = addProjection(p, this.primaryKeyAttrs.join(','), null, true);
     p = cleanParams(p);
     const processed = await deleteList(this.client, p, item => this._restrictKey(item));
     return {processed};
@@ -877,12 +947,7 @@ export class Adapter {
 
   async moveListByParams(params, mapFn, _options) {
     let p = this._cloneParams(params);
-    p = addProjection(
-      p,
-      this.keyFields.map(f => f.name).join(','),
-      null,
-      true
-    );
+    p = addProjection(p, this.primaryKeyAttrs.join(','), null, true);
     p = cleanParams(p);
     const itemMapper = item => {
       const revived = this.hooks.revive(item);

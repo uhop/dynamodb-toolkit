@@ -109,9 +109,10 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
   keyFields: ((keyof TItem & string) | KeyFieldSpec)[];
   /**
    * Declaration of the structural (composite) key field. Required when
-   * `keyFields.length > 1`.
+   * `keyFields.length > 1`. Accepts a string (shorthand for `{name}`) or a
+   * full {@link StructuralKey} descriptor.
    */
-  structuralKey?: StructuralKey;
+  structuralKey?: string | StructuralKey;
   /**
    * Declared secondary indices (GSIs and LSIs) — single map discriminated by
    * each entry's `type`. See {@link IndexSpec}. Legacy `indirectIndices` is
@@ -127,9 +128,10 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
   typeLabels?: string[];
   /**
    * Optional type-discriminator field. When present on an item, its value
-   * overrides depth-based detection in {@link Adapter.typeOf}.
+   * overrides depth-based detection in {@link Adapter.typeOf}. Accepts a
+   * string (shorthand for `{name}`) or a `{name}` descriptor.
    */
-  typeDiscriminator?: {name: string};
+  typeDiscriminator?: string | {name: string};
   /** Alias map for projections — rewrites the first segment of each requested field. */
   projectionFieldMap?: Record<string, string>;
   /** Fields that get a `searchablePrefix + field` lowercase mirror for substring filtering. */
@@ -296,6 +298,14 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   table: string;
   /** Opt-in adapter-managed-field prefix, when declared. */
   technicalPrefix?: string;
+  /**
+   * DB primary-key attribute names — computed at construction. With
+   * `structuralKey` declared, equals `[keyFields[0].name, structuralKey.name]`
+   * (partition + sort). Without, equals the single-element list of the lone
+   * keyField's name. Used internally by `_restrictKey` and mass-op
+   * projections that need to extract primary keys from scanned items.
+   */
+  primaryKeyAttrs: string[];
   /**
    * Canonical typed descriptors — partition key first, optional sort key
    * second. Always normalized to `{field, type}` (plus `width` when present

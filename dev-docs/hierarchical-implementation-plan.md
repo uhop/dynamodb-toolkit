@@ -37,10 +37,10 @@ Biggest release of the workstream. Makes hierarchical adapters declarative inste
 - [ ] **`src/adapter/adapter.js`** — accept new construction options:
   - `technicalPrefix?: string` (opt-in; default unset)
   - `keyFields: Array<string | {name, type?: 'string' | 'number' | 'binary', width?: number}>` — string shorthand = `{name, type: 'string'}`; `width` required on `{type: 'number'}` in composite keys
-  - `structuralKey?: {name: string, separator?: string}` — required when `keyFields.length > 1`; separator defaults to `'|'`
+  - `structuralKey?: string | {name: string, separator?: string}` — required when `keyFields.length > 1`; string shorthand expands to `{name, separator: '|'}`; separator defaults to `'|'`
   - `indices?: Record<string, {type: 'gsi' | 'lsi', pk?, sk, projection?: 'all' | 'keys-only' | string[], sparse?: boolean | {onlyWhen: (item) => boolean}, indirect?: boolean}>`
   - `typeLabels?: string[]` — paired 1:1 with `keyFields` (length validated at construction)
-  - `typeDiscriminator?: {name: string}` — wins over depth-based detection when the field is present on the item
+  - `typeDiscriminator?: string | {name: string}` — wins over depth-based detection when the field is present on the item; string shorthand expands to `{name}`
   - `filterable?: Record<string, Array<'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'in' | 'btw' | 'beg' | 'ct' | 'ex' | 'nx'>>` — allowlist for `f-` filter grammar
   - Legacy `indirectIndices` coexists; auto-synthesises `{type: 'gsi', indirect: true, projection: 'keys-only'}` entries into `indices`.
 

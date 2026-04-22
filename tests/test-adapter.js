@@ -1464,3 +1464,179 @@ test('Adapter: indices — _isIndirect reads from indices', async t => {
   const result = await adapter.getListByParams({IndexName: 'thin'});
   t.equal(result.data[0]?.climate, 'frozen', 'second-hop BatchGet happened (indirect=true)');
 });
+
+// --- primaryKeyAttrs + built-in prepareKey + composite-keyFields DB-key shape ---
+
+test('Adapter: primaryKeyAttrs — single-field keyFields uses just that name', t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  t.deepEqual(adapter.primaryKeyAttrs, ['name']);
+});
+
+test('Adapter: primaryKeyAttrs — composite keyFields uses [pk, structuralKey.name]', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName', 'carVin'],
+    structuralKey: {name: '-sk'}
+  });
+  t.deepEqual(adapter.primaryKeyAttrs, ['state', '-sk']);
+});
+
+test('built-in prepareKey: pass-through when structuralKey not declared', t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  const key = adapter.hooks.prepareKey({name: 'Hoth'});
+  t.deepEqual(key, {name: 'Hoth'});
+});
+
+test('built-in prepareKey: composes structural key from keyFields values', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName', 'carVin'],
+    structuralKey: {name: '-sk'}
+  });
+  const key = adapter.hooks.prepareKey({state: 'TX', rentalName: 'Dallas', carVin: 'V1'});
+  t.equal(key['-sk'], 'TX|Dallas|V1');
+  t.equal(key.state, 'TX', 'keyFields components preserved');
+});
+
+test('built-in prepareKey: contiguous-from-start stops at first missing field', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName', 'carVin'],
+    structuralKey: {name: '-sk'}
+  });
+  // Just state → depth 1 → -sk = 'TX'
+  const key = adapter.hooks.prepareKey({state: 'TX'});
+  t.equal(key['-sk'], 'TX');
+});
+
+test('built-in prepareKey: number keyFields zero-padded', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', {name: 'rentalId', type: 'number', width: 5}, 'carVin'],
+    structuralKey: {name: '-sk'}
+  });
+  const key = adapter.hooks.prepareKey({state: 'TX', rentalId: 42, carVin: 'V1'});
+  t.equal(key['-sk'], 'TX|00042|V1');
+});
+
+test('built-in prepareKey: GSI-targeted read is pass-through', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName'],
+    structuralKey: {name: '-sk'},
+    indices: {'by-name': {type: 'gsi', pk: 'rentalName'}}
+  });
+  const key = adapter.hooks.prepareKey({rentalName: 'Dallas'}, 'by-name');
+  t.equal(key['-sk'], undefined, 'no structural-key composition on index reads');
+  t.equal(key.rentalName, 'Dallas');
+});
+
+test('_restrictKey: composite keyFields returns {pk, sk} — not keyFields-shaped', async t => {
+  let getCmd;
+  const client = makeMockClient(async cmd => {
+    getCmd = cmd;
+    return {Item: {state: 'TX', '-sk': 'TX|Dallas|V1', climate: 'dry'}};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName', 'carVin'],
+    structuralKey: {name: '-sk'}
+  });
+  await adapter.getByKey({state: 'TX', rentalName: 'Dallas', carVin: 'V1'});
+  // DynamoDB Key should have just primary-key attrs — not rentalName/carVin.
+  t.deepEqual(Object.keys(getCmd.input.Key).sort(), ['-sk', 'state']);
+  t.equal(getCmd.input.Key.state, 'TX');
+  t.equal(getCmd.input.Key['-sk'], 'TX|Dallas|V1');
+});
+
+test('composite keyFields: full round-trip through the hooks wrapping', async t => {
+  // prepare writes -sk; revive strips it (because technicalPrefix '-').
+  // The caller sees just their keyFields.
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    const name = cmd.constructor.name;
+    if (name === 'GetCommand') {
+      return {Item: {state: 'TX', '-sk': 'TX|Dallas|V1', carVin: 'V1', rentalName: 'Dallas', climate: 'dry'}};
+    }
+    return {};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName', 'carVin'],
+    structuralKey: {name: '-sk'},
+    technicalPrefix: '-'
+  });
+  // Write: -sk is auto-computed, item sent to Put includes it.
+  await adapter.put({state: 'TX', rentalName: 'Dallas', carVin: 'V1', climate: 'dry'}, {force: true});
+  const putCmd = sent.find(c => c.constructor.name === 'PutCommand');
+  t.equal(putCmd.input.Item['-sk'], 'TX|Dallas|V1', 'structural key written');
+  // Read: hooks.revive strips -sk; caller sees their keyFields only.
+  const item = await adapter.getByKey({state: 'TX', rentalName: 'Dallas', carVin: 'V1'});
+  t.equal(item['-sk'], undefined, 'technical field stripped on revive');
+  t.equal(item.climate, 'dry');
+  t.equal(item.state, 'TX');
+});
+
+// --- string shorthands for structuralKey / typeDiscriminator ---
+
+test('Adapter: structuralKey string shorthand expands to {name, separator: "|"}', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'carVin'],
+    structuralKey: '-sk'
+  });
+  t.deepEqual(adapter.structuralKey, {name: '-sk', separator: '|'});
+});
+
+test('Adapter: structuralKey empty-string shorthand throws', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['state', 'carVin'], structuralKey: ''}), 'empty');
+});
+
+test('Adapter: structuralKey invalid shape throws', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['state', 'carVin'], structuralKey: 42}), 'number');
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['state', 'carVin'], structuralKey: {}}), 'missing name');
+});
+
+test('Adapter: typeDiscriminator string shorthand expands to {name}', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'carVin'],
+    structuralKey: '-sk',
+    typeDiscriminator: 'kind'
+  });
+  t.deepEqual(adapter.typeDiscriminator, {name: 'kind'});
+});
+
+test('Adapter: typeDiscriminator empty-string shorthand throws', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(
+    () =>
+      new Adapter({
+        client,
+        table: 'T',
+        keyFields: ['state', 'carVin'],
+        structuralKey: '-sk',
+        typeDiscriminator: ''
+      }),
+    'empty string'
+  );
+});
