@@ -10,7 +10,9 @@ import {
   copyList,
   moveList,
   getTotal,
-  mergeMapFn
+  mergeMapFn,
+  encodeCursor,
+  decodeCursor
 } from 'dynamodb-toolkit/mass';
 import {makeMockClient} from './helpers/mock-client.js';
 
@@ -290,4 +292,54 @@ test('mergeMapFn: short-circuits on falsy return', t => {
   );
   t.equal(f({a: 1}), null);
   t.notOk(called, 'downstream fn skipped after falsy');
+});
+
+// cursor
+
+test('encodeCursor / decodeCursor: round-trip preserves payload', t => {
+  const payload = {
+    LastEvaluatedKey: {pk: 'p', sk: 's'},
+    op: 'copy',
+    phase: 'put',
+    meta: {processed: 42}
+  };
+  const cursor = encodeCursor(payload);
+  t.equal(typeof cursor, 'string', 'returns string');
+  t.ok(cursor.length > 0, 'non-empty');
+  t.notOk(/[+/=]/.test(cursor), 'base64url (no +/= characters)');
+  const decoded = decodeCursor(cursor);
+  t.deepEqual(decoded, payload, 'round-trip preserves shape');
+});
+
+test('encodeCursor: rejects non-object payload', t => {
+  t.throws(() => encodeCursor(null), 'null rejected');
+  t.throws(() => encodeCursor('foo'), 'string rejected');
+  t.throws(() => encodeCursor(undefined), 'undefined rejected');
+});
+
+test('decodeCursor: rejects empty / non-string input', t => {
+  t.throws(() => decodeCursor(''), 'empty string rejected');
+  t.throws(() => decodeCursor(null), 'null rejected');
+  t.throws(() => decodeCursor(123), 'number rejected');
+});
+
+test('encodeCursor: handles unicode in LastEvaluatedKey values', t => {
+  const payload = {LastEvaluatedKey: {pk: '日本語', sk: '🎯'}};
+  const cursor = encodeCursor(payload);
+  t.deepEqual(decodeCursor(cursor), payload);
+});
+
+test('encodeCursor: handles empty object', t => {
+  const cursor = encodeCursor({});
+  t.deepEqual(decodeCursor(cursor), {});
+});
+
+test('decodeCursor: throws on malformed input', t => {
+  let threw = false;
+  try {
+    decodeCursor('!!!not-base64!!!');
+  } catch {
+    threw = true;
+  }
+  t.ok(threw, 'malformed cursor rejected');
 });

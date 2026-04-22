@@ -22,6 +22,76 @@ export {iterateList, iterateItems} from './iterate-list.js';
 export {readByKeys} from './read-by-keys.js';
 export {writeItems} from './write-items.js';
 export {mergeMapFn, type MapFn} from './map-fns.js';
+export {encodeCursor, decodeCursor, type CursorPayload} from './cursor.js';
+
+/**
+ * Common option bag accepted by resumable mass operations (copy / move /
+ * delete / edit list-variants). Each op ignores options that do not apply
+ * to its write model.
+ */
+export interface MassOpOptions {
+  /**
+   * Write-if-absent — per-item `ConditionExpression: attribute_not_exists(<pk>)`.
+   * Mutually exclusive with `ifExists`. When set, the op takes the per-item
+   * `PutItem` path instead of `BatchWriteItem`.
+   */
+  ifNotExists?: boolean;
+  /**
+   * Write-if-present — per-item `ConditionExpression: attribute_exists(<pk>)`.
+   * Mutually exclusive with `ifNotExists`.
+   */
+  ifExists?: boolean;
+  /**
+   * Soft cap on items processed in this call. When reached, the op returns
+   * early with a `cursor` so the caller can resume. Defaults to unlimited.
+   */
+  maxItems?: number;
+  /**
+   * Opaque cursor from a prior call's `MassOpResult.cursor`. Resumes
+   * where the previous call stopped.
+   */
+  resumeToken?: string;
+}
+
+/**
+ * Reason classification for per-item mass-op failures. Unknown SDK errors
+ * fall through to `'Unknown'`; the original SDK error is preserved on
+ * `sdkError` so callers can inspect the underlying AWS error.
+ */
+export type MassOpFailureReason = 'ConditionalCheckFailed' | 'ValidationException' | 'ProvisionedThroughputExceeded' | 'Unknown';
+
+/** A single item that failed during a mass op. */
+export interface MassOpFailure {
+  key: Record<string, unknown>;
+  reason: MassOpFailureReason;
+  details?: string;
+  sdkError?: unknown;
+}
+
+/**
+ * Version-conflict record — separated from the general `failed` bucket so
+ * callers can distinguish optimistic-concurrency retries from other
+ * `ConditionalCheckFailed` cases. Populated when `versionField` is
+ * declared on the adapter (3.4.0).
+ */
+export interface MassOpConflict {
+  key: Record<string, unknown>;
+  reason: 'VersionConflict';
+  sdkError?: unknown;
+}
+
+/**
+ * Uniform return envelope for resumable mass operations. `cursor` is
+ * present iff the op stopped before exhausting the input (either
+ * `maxItems` was reached or throughput-limited).
+ */
+export interface MassOpResult {
+  processed: number;
+  skipped: number;
+  failed: MassOpFailure[];
+  conflicts: MassOpConflict[];
+  cursor?: string;
+}
 
 import type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
 
