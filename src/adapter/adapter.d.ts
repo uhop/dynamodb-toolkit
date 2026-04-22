@@ -174,6 +174,22 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
    * read-modify-write cycles without any explicit handling.
    */
   versionField?: string;
+  /**
+   * Optional creation-timestamp field. When declared, mass ops accept
+   * an `asOf: Date | string | number` option that scopes the scan to
+   * items with `<createdAtField> <= :asOf` — the scope-freeze pattern
+   * for replays, audits, and snapshot exports.
+   *
+   * The toolkit does NOT auto-write this field — the user's `prepare`
+   * hook is responsible (e.g., `{...item, _createdAt: Date.now()}` on
+   * first insert). The stored format dictates what `asOf` values to
+   * pass. `Date` is auto-converted to ISO 8601 as a convenience; other
+   * types pass through untouched.
+   *
+   * Must start with `technicalPrefix` (required to declare together).
+   * Preserved across `revive`.
+   */
+  createdAtField?: string;
   /** Per-instance hook overrides; merges over {@link defaultHooks}. */
   hooks?: AdapterHooks<TItem>;
 }
@@ -342,6 +358,18 @@ export interface MassOptions {
    * Mutually exclusive with `ifNotExists`. See note on `ifNotExists`.
    */
   ifExists?: boolean;
+  /**
+   * Scope-freeze upper bound for the mass-op. AND-merges
+   * `<createdAtField> <= :asOf` into the `Query` / `Scan` FilterExpression,
+   * restricting the op to items that existed at or before the given
+   * point in time. Requires `createdAtField` to be declared on the
+   * adapter — otherwise throws {@link CreatedAtFieldNotDeclared}.
+   *
+   * `Date` is auto-converted to ISO 8601; `string` / `number` pass
+   * through (format must match what the `prepare` hook writes into
+   * `createdAtField`).
+   */
+  asOf?: Date | string | number;
 }
 
 /** Options for list reads (`getList` / `getListByParams`). */

@@ -861,6 +861,173 @@ test('cloneByKeys: ValidationException → failed bucket, not thrown', async t =
   t.equal(r.failed[0].reason, 'ValidationException');
 });
 
+// --- createdAtField / asOf (scope-freeze) ---
+
+const makeTimedAdapter = clientHandler =>
+  makeAdapter(clientHandler, {
+    technicalPrefix: '_',
+    createdAtField: '_createdAt'
+  });
+
+test('Adapter: createdAtField requires technicalPrefix', t => {
+  t.throws(
+    () =>
+      new Adapter({
+        client: makeMockClient(async () => ({})),
+        table: TABLE,
+        keyFields: ['name'],
+        createdAtField: '_c'
+      }),
+    'throws without technicalPrefix'
+  );
+});
+
+test('Adapter: createdAtField must start with technicalPrefix', t => {
+  t.throws(
+    () =>
+      new Adapter({
+        client: makeMockClient(async () => ({})),
+        table: TABLE,
+        keyFields: ['name'],
+        technicalPrefix: '_',
+        createdAtField: 'createdAt'
+      }),
+    'throws on prefix mismatch'
+  );
+});
+
+test('asOf: adds FilterExpression <= :asOf on deleteListByParams', async t => {
+  const sent = [];
+  const {adapter} = makeTimedAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') return {Items: []};
+    return {};
+  });
+  await adapter.deleteListByParams({TableName: TABLE}, {asOf: '2026-04-20T00:00:00Z'});
+  const scan = sent.find(c => c.constructor.name === 'ScanCommand' || c.constructor.name === 'QueryCommand');
+  t.matchString(scan.input.FilterExpression, /<=/);
+  const values = scan.input.ExpressionAttributeValues || {};
+  t.ok(Object.values(values).includes('2026-04-20T00:00:00Z'));
+});
+
+test('asOf: Date is auto-converted to ISO 8601', async t => {
+  const sent = [];
+  const {adapter} = makeTimedAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'QueryCommand' || cmd.constructor.name === 'ScanCommand') return {Items: []};
+    return {};
+  });
+  const d = new Date('2026-04-20T00:00:00Z');
+  await adapter.deleteListByParams({TableName: TABLE}, {asOf: d});
+  const scan = sent.find(c => c.constructor.name === 'ScanCommand' || c.constructor.name === 'QueryCommand');
+  const values = scan.input.ExpressionAttributeValues || {};
+  t.ok(Object.values(values).includes(d.toISOString()));
+});
+
+test('asOf: numeric timestamp passed through', async t => {
+  const sent = [];
+  const {adapter} = makeTimedAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'QueryCommand' || cmd.constructor.name === 'ScanCommand') return {Items: []};
+    return {};
+  });
+  await adapter.deleteListByParams({TableName: TABLE}, {asOf: 1745107200000});
+  const scan = sent.find(c => c.constructor.name === 'ScanCommand' || c.constructor.name === 'QueryCommand');
+  const values = scan.input.ExpressionAttributeValues || {};
+  t.ok(Object.values(values).includes(1745107200000));
+});
+
+test('asOf: AND-merges with existing FilterExpression', async t => {
+  const sent = [];
+  const {adapter} = makeTimedAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'QueryCommand' || cmd.constructor.name === 'ScanCommand') return {Items: []};
+    return {};
+  });
+  await adapter.deleteListByParams(
+    {
+      TableName: TABLE,
+      FilterExpression: 'attribute_exists(#foo)',
+      ExpressionAttributeNames: {'#foo': 'foo'}
+    },
+    {asOf: '2026-04-20T00:00:00Z'}
+  );
+  const scan = sent.find(c => c.constructor.name === 'ScanCommand' || c.constructor.name === 'QueryCommand');
+  t.matchString(scan.input.FilterExpression, /AND/);
+  t.matchString(scan.input.FilterExpression, /attribute_exists/);
+  t.matchString(scan.input.FilterExpression, /<=/);
+});
+
+test('asOf: throws CreatedAtFieldNotDeclared when adapter lacks the field', async t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  let err;
+  try {
+    await adapter.deleteListByParams({TableName: TABLE}, {asOf: new Date()});
+  } catch (e) {
+    err = e;
+  }
+  t.equal(err?.name, 'CreatedAtFieldNotDeclared');
+});
+
+test('asOf: works on cloneListByParams / moveListByParams / editListByParams', async t => {
+  const sent = [];
+  const {adapter} = makeTimedAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'ScanCommand' || cmd.constructor.name === 'QueryCommand') return {Items: []};
+    return {};
+  });
+  await adapter.cloneListByParams({TableName: TABLE}, x => x, {asOf: 1000});
+  await adapter.moveListByParams({TableName: TABLE}, x => x, {asOf: 2000});
+  await adapter.editListByParams({TableName: TABLE}, x => x, {asOf: 3000});
+  const scans = sent.filter(c => c.constructor.name === 'ScanCommand' || c.constructor.name === 'QueryCommand');
+  t.equal(scans.length, 3);
+  for (const s of scans) t.matchString(s.input.FilterExpression, /<=/);
+});
+
+test('asOf: works on rename / cloneWithOverwrite macros', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(
+    async cmd => {
+      sent.push(cmd);
+      if (cmd.constructor.name === 'QueryCommand' || cmd.constructor.name === 'ScanCommand') return {Items: []};
+      return {};
+    },
+    {
+      keyFields: [
+        {name: 'state', type: 'string'},
+        {name: 'rentalName', type: 'string'}
+      ],
+      structuralKey: {name: '_sk'},
+      technicalPrefix: '_',
+      createdAtField: '_createdAt'
+    }
+  );
+  await adapter.rename({state: 'TX'}, {state: 'FL'}, {asOf: '2026-04-20T00:00:00Z'});
+  await adapter.cloneWithOverwrite({state: 'TX'}, {state: 'FL'}, {asOf: '2026-04-20T00:00:00Z'});
+  const queries = sent.filter(c => c.constructor.name === 'QueryCommand');
+  t.equal(queries.length, 2);
+  for (const q of queries) t.matchString(q.input.FilterExpression, /<=/);
+});
+
+test('revive: preserves createdAtField', async t => {
+  const {adapter} = makeTimedAdapter(async () => ({
+    Item: {name: 'X', _createdAt: 1000, hp: 10}
+  }));
+  const item = await adapter.getByKey({name: 'X'});
+  t.equal(item._createdAt, 1000);
+});
+
+test('prepare: accepts incoming createdAtField', async t => {
+  const sent = [];
+  const {adapter} = makeTimedAdapter(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  await adapter.post({name: 'X', _createdAt: 1000});
+  t.equal(sent[0].input.Item._createdAt, 1000);
+});
+
 // --- versionField (optimistic concurrency) ---
 
 const makeVersionedAdapter = clientHandler =>

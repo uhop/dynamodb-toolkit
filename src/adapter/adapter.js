@@ -23,7 +23,7 @@ import {runPaged} from '../mass/run-paged.js';
 
 import {defaultHooks, restrictKey} from './hooks.js';
 import {dispatchWrite} from './transaction-upgrade.js';
-import {ConsistentReadOnGSIRejected, NoIndexForSortField, BadFilterField, BadFilterOp, KeyFieldChanged} from '../errors.js';
+import {ConsistentReadOnGSIRejected, NoIndexForSortField, BadFilterField, BadFilterOp, KeyFieldChanged, CreatedAtFieldNotDeclared} from '../errors.js';
 
 const MOVE_CHUNK = 12;
 
@@ -268,6 +268,20 @@ export class Adapter {
       this.versionField = options.versionField;
     }
 
+    // Optional createdAtField — stores the item's creation timestamp.
+    // Used by the `asOf` mass-op option to scope to items that existed
+    // at a point in time (`<createdAtField> <= :asOf`). Toolkit does
+    // NOT auto-write this field — the user's `prepare` hook is
+    // responsible. Whatever format they write (epoch ms, ISO string,
+    // epoch seconds) dictates what `asOf` must pass through. Date
+    // instances are auto-converted to ISO 8601 as a convenience.
+    if (options.createdAtField !== undefined) {
+      if (typeof options.createdAtField !== 'string' || options.createdAtField.length === 0) {
+        throw new Error('options.createdAtField must be a non-empty string');
+      }
+      this.createdAtField = options.createdAtField;
+    }
+
     this.client = options.client;
     this.table = options.table;
     this.projectionFieldMap = options.projectionFieldMap || {};
@@ -344,10 +358,18 @@ export class Adapter {
           `options.versionField '${this.versionField}' must start with options.technicalPrefix '${prefix}'`
         );
       }
-    } else if (this.versionField) {
-      // versionField is adapter-managed — without technicalPrefix we can't
-      // guarantee prepare rejects user collisions. Require the pair.
-      throw new Error('options.versionField requires options.technicalPrefix to be declared');
+      if (this.createdAtField && !this.createdAtField.startsWith(prefix)) {
+        throw new Error(
+          `options.createdAtField '${this.createdAtField}' must start with options.technicalPrefix '${prefix}'`
+        );
+      }
+    } else {
+      if (this.versionField) {
+        throw new Error('options.versionField requires options.technicalPrefix to be declared');
+      }
+      if (this.createdAtField) {
+        throw new Error('options.createdAtField requires options.technicalPrefix to be declared');
+      }
     }
 
     // Compute the DB primary-key attribute names. With `structuralKey`
@@ -406,12 +428,14 @@ export class Adapter {
     if (!this.technicalPrefix && !this.structuralKey && !hasSearchable) return item;
 
     // 1. Reject incoming user fields that start with technicalPrefix.
-    //    Exception: `versionField` is allowed — callers round-trip it
-    //    through reads for optimistic concurrency.
+    //    Exceptions: `versionField` and `createdAtField` are allowed —
+    //    callers round-trip them through reads (for OC and for
+    //    scope-freeze caller awareness).
     if (this.technicalPrefix) {
       const versionField = this.versionField;
+      const createdAtField = this.createdAtField;
       for (const key of Object.keys(item)) {
-        if (key.startsWith(this.technicalPrefix) && key !== versionField) {
+        if (key.startsWith(this.technicalPrefix) && key !== versionField && key !== createdAtField) {
           throw new Error(
             `prepare: incoming field '${key}' starts with technicalPrefix '${this.technicalPrefix}' — this is an adapter-managed namespace and must not appear in caller items`
           );
@@ -463,9 +487,10 @@ export class Adapter {
     if (!this.technicalPrefix || !rawItem || typeof rawItem !== 'object') return rawItem;
     const prefix = this.technicalPrefix;
     const versionField = this.versionField;
+    const createdAtField = this.createdAtField;
     const out = {};
     for (const key of Object.keys(rawItem)) {
-      if (!key.startsWith(prefix) || key === versionField) out[key] = rawItem[key];
+      if (!key.startsWith(prefix) || key === versionField || key === createdAtField) out[key] = rawItem[key];
     }
     return out;
   }
@@ -781,6 +806,31 @@ export class Adapter {
     params.ConditionExpression = params.ConditionExpression
       ? `(${condition}) AND (${params.ConditionExpression})`
       : condition;
+    return params;
+  }
+
+  // AND-merge `<createdAtField> <= :asOf` into FilterExpression for a
+  // mass-op scope-freeze. `asOf` accepts Date (auto-converted to ISO
+  // 8601), string, or number — toolkit passes scalar through, so the
+  // caller's chosen storage format drives the comparison. Throws
+  // `CreatedAtFieldNotDeclared` when `asOf` is supplied without the
+  // adapter opting in.
+  _applyAsOf(params, asOf) {
+    if (asOf === undefined || asOf === null) return params;
+    if (!this.createdAtField) throw new CreatedAtFieldNotDeclared();
+
+    const value = asOf instanceof Date ? asOf.toISOString() : asOf;
+    const names = params.ExpressionAttributeNames || {};
+    const values = params.ExpressionAttributeValues || {};
+    const nameAlias = '#asOfn' + Object.keys(names).length;
+    const valueAlias = ':asOfv' + Object.keys(values).length;
+    names[nameAlias] = this.createdAtField;
+    values[valueAlias] = value;
+    params.ExpressionAttributeNames = names;
+    params.ExpressionAttributeValues = values;
+
+    const filter = `${nameAlias} <= ${valueAlias}`;
+    params.FilterExpression = params.FilterExpression ? `(${filter}) AND (${params.FilterExpression})` : filter;
     return params;
   }
 
@@ -1243,6 +1293,7 @@ export class Adapter {
 
   async editListByParams(params, mapFn, options) {
     let p = this._cloneParams(params);
+    p = this._applyAsOf(p, options?.asOf);
     p = cleanParams(p);
 
     return runPaged(this.client, p, options, async items => {
@@ -1331,8 +1382,9 @@ export class Adapter {
   // `move` (TransactWriteCommand).
 
   async rename(fromExample, toExample, options) {
-    const queryParams = this.buildKey(fromExample, {kind: options?.kind || 'children'});
+    let queryParams = this.buildKey(fromExample, {kind: options?.kind || 'children'});
     queryParams.TableName = this.table;
+    queryParams = this._applyAsOf(queryParams, options?.asOf);
 
     const keyShifter = this.swapPrefix(fromExample, toExample);
     const mapFn = options?.mapFn ? mergeMapFn(keyShifter, options.mapFn) : keyShifter;
@@ -1388,8 +1440,9 @@ export class Adapter {
   }
 
   async cloneWithOverwrite(fromExample, toExample, options) {
-    const queryParams = this.buildKey(fromExample, {kind: options?.kind || 'children'});
+    let queryParams = this.buildKey(fromExample, {kind: options?.kind || 'children'});
     queryParams.TableName = this.table;
+    queryParams = this._applyAsOf(queryParams, options?.asOf);
 
     const keyShifter = this.swapPrefix(fromExample, toExample);
     const mapFn = options?.mapFn ? mergeMapFn(keyShifter, options.mapFn) : keyShifter;
@@ -1577,6 +1630,7 @@ export class Adapter {
   async deleteListByParams(params, options) {
     let p = this._cloneParams(params);
     p = addProjection(p, this.primaryKeyAttrs.join(','), null, true);
+    p = this._applyAsOf(p, options?.asOf);
     p = cleanParams(p);
 
     return runPaged(this.client, p, options, async items => {
@@ -1614,6 +1668,7 @@ export class Adapter {
 
   async cloneListByParams(params, mapFn, options) {
     let p = this._cloneParams(params);
+    p = this._applyAsOf(p, options?.asOf);
     p = cleanParams(p);
 
     const useConditionPath = options?.ifNotExists || options?.ifExists;
@@ -1707,6 +1762,7 @@ export class Adapter {
 
   async moveListByParams(params, mapFn, options) {
     let p = this._cloneParams(params);
+    p = this._applyAsOf(p, options?.asOf);
     p = cleanParams(p);
 
     return runPaged(this.client, p, options, async items => {
