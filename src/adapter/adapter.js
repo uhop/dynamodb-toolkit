@@ -32,6 +32,17 @@ const MOVE_CHUNK = 12;
 // bundlers, but `.name` is stable.
 const isConditionFailure = err => err && (err.name === 'ConditionalCheckFailedException' || err.__type === 'ConditionalCheckFailedException');
 
+// Map an SDK error to a `MassOpFailureReason` enum value. Unmapped
+// errors fall through to `'Unknown'`; the original error is preserved
+// on `sdkError`.
+const classifyMassOpError = err => {
+  const name = err?.name;
+  if (name === 'ConditionalCheckFailedException') return 'ConditionalCheckFailed';
+  if (name === 'ValidationException') return 'ValidationException';
+  if (name === 'ProvisionedThroughputExceededException') return 'ProvisionedThroughputExceeded';
+  return 'Unknown';
+};
+
 // Deep-equality for DynamoDB attribute values: scalars, arrays, plain
 // objects, Sets. Used by `edit()` to suppress SET clauses for unchanged
 // fields. Not a general-purpose equality — e.g., Binary (Uint8Array) in
@@ -984,26 +995,16 @@ export class Adapter {
     return dispatchWrite(this.client, batch, checks);
   }
 
-  async edit(key, mapFn, options) {
-    // Fetch the raw DB item so we can diff against the actual stored shape
-    // (technical fields included). `readFields` limits the GetItem
-    // projection — callers who know only a subset of fields matter for the
-    // diff can save RCU. When projected, the diff is restricted to those
-    // fields plus whatever `prepare` touches (structural key, searchable
-    // mirrors) — the toolkit re-adds them, so they are never missed.
-    const rawResult = await this.getByKey(key, options?.readFields, {...options, reviveItems: false});
-    if (rawResult === undefined) return undefined;
-    const rawItem = rawResult instanceof Raw ? rawResult.item : rawResult;
-
+  // Compute the edit diff from a raw DB item + mapFn. Returns a tagged
+  // descriptor so callers (single-item `edit` vs mass `editListByParams`)
+  // can decide what to do for each outcome: throw vs bucket, auto-move
+  // vs fail. No I/O — pure transform.
+  _diffForUpdate(rawItem, mapFn) {
     const revived = this.hooks.revive(rawItem);
     const mapped = mapFn(revived);
-    if (!mapped) return undefined;
+    if (!mapped) return {status: 'mapfn-dropped'};
     const prepared = this._prepareItem(mapped);
 
-    // Shallow diff: every field in either side that differs goes to SET
-    // (new value) or REMOVE (value disappeared). Fields present but
-    // unchanged are suppressed to avoid needless WCU and
-    // `updateInput` churn.
     /** @type {Record<string, unknown>} */
     const setOps = {};
     /** @type {string[]} */
@@ -1019,31 +1020,109 @@ export class Adapter {
       }
     }
 
-    // Key-field change detection — edit is for non-key fields only. Key
-    // changes require move (put-at-new-key + delete-at-old-key).
     const changedKeyFields = this.keyFields.map(f => f.name).filter(n => n in setOps || removeOps.includes(n));
-    if (changedKeyFields.length) {
-      if (!options?.allowKeyChange) throw new KeyFieldChanged(changedKeyFields);
-      // Auto-promote to move: build the new key from prepared, delete old, put new.
-      await this.move(key, () => mapped, options);
-      return mapped;
-    }
+    if (changedKeyFields.length) return {status: 'keyfield-changed', changedKeyFields, mapped, revived};
+    if (!Object.keys(setOps).length && !removeOps.length) return {status: 'noop', revived};
+    return {status: 'update', setOps, removeOps, mapped, prepared, revived};
+  }
 
-    // No-op short-circuit — nothing to write.
-    if (!Object.keys(setOps).length && !removeOps.length) return revived;
-
+  // Build + send the UpdateCommand from a diff descriptor. Caller
+  // supplies the Dynamo-shaped Key (already run through `_toKey` or
+  // `_restrictKey`), so this helper doesn't re-derive it.
+  async _dispatchEdit(dynamoKey, setOps, removeOps, options) {
     let p = this._cloneParams(options?.params);
-    p.Key = this._toKey(key);
+    p.Key = dynamoKey;
     p = this._checkExistence(p);
     p = buildUpdate(setOps, {delete: removeOps}, p);
     if (options?.returnFailedItem) p.ReturnValuesOnConditionCheckFailure = 'ALL_OLD';
     p = this.hooks.updateInput(p, {name: 'edit'});
-
     /** @type {{action: 'patch', params: any}} */
     const batch = {action: 'patch', params: cleanParams(p)};
     const checks = await this.hooks.checkConsistency(batch);
     await dispatchWrite(this.client, batch, checks);
-    return this.hooks.revive(prepared);
+  }
+
+  async edit(key, mapFn, options) {
+    // Fetch the raw DB item so we can diff against the actual stored shape
+    // (technical fields included). `readFields` limits the GetItem
+    // projection — callers who know only a subset of fields matter for the
+    // diff can save RCU. When projected, the diff is restricted to those
+    // fields plus whatever `prepare` touches (structural key, searchable
+    // mirrors) — the toolkit re-adds them, so they are never missed.
+    const rawResult = await this.getByKey(key, options?.readFields, {...options, reviveItems: false});
+    if (rawResult === undefined) return undefined;
+    const rawItem = rawResult instanceof Raw ? rawResult.item : rawResult;
+
+    const diff = this._diffForUpdate(rawItem, mapFn);
+
+    if (diff.status === 'mapfn-dropped') return undefined;
+    if (diff.status === 'noop') return diff.revived;
+
+    if (diff.status === 'keyfield-changed') {
+      if (!options?.allowKeyChange) throw new KeyFieldChanged(diff.changedKeyFields);
+      await this.move(key, () => diff.mapped, options);
+      return diff.mapped;
+    }
+
+    // status === 'update'
+    await this._dispatchEdit(this._toKey(key), diff.setOps, diff.removeOps, options);
+    return this.hooks.revive(diff.prepared);
+  }
+
+  async editListByParams(params, mapFn, options) {
+    let p = this._cloneParams(params);
+    p = cleanParams(p);
+
+    return runPaged(this.client, p, options, async items => {
+      let processed = 0;
+      let skipped = 0;
+      /** @type {import('../mass/index.js').MassOpFailure[]} */
+      const failed = [];
+
+      for (const rawItem of items) {
+        const key = this._restrictKey(rawItem);
+        const diff = this._diffForUpdate(rawItem, mapFn);
+
+        if (diff.status === 'mapfn-dropped' || diff.status === 'noop') {
+          skipped++;
+          continue;
+        }
+
+        if (diff.status === 'keyfield-changed') {
+          if (!options?.allowKeyChange) {
+            failed.push({
+              key,
+              reason: 'Unknown',
+              details: `editListByParams: key field(s) changed [${diff.changedKeyFields.join(', ')}]; pass {allowKeyChange: true} to auto-promote to move`
+            });
+            continue;
+          }
+          try {
+            await this.move(key, () => diff.mapped, options);
+            processed++;
+          } catch (err) {
+            failed.push({key, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
+          }
+          continue;
+        }
+
+        // status === 'update'
+        try {
+          await this._dispatchEdit(key, diff.setOps, diff.removeOps, options);
+          processed++;
+        } catch (err) {
+          // Item deleted between scan and update → silent skip (not a
+          // bug; the scan is not a read-committed snapshot).
+          if (isConditionFailure(err)) {
+            skipped++;
+            continue;
+          }
+          failed.push({key, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
+        }
+      }
+
+      return {processed, skipped, failed};
+    });
   }
 
   async delete(key, options) {

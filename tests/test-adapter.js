@@ -861,6 +861,107 @@ test('cloneByKeys: ValidationException → failed bucket, not thrown', async t =
   t.equal(r.failed[0].reason, 'ValidationException');
 });
 
+// --- editListByParams ---
+
+test('editListByParams: updates per item, buckets no-ops as skipped', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand')
+      return {
+        Items: [
+          {name: 'A', hp: 10},
+          {name: 'B', hp: 20}
+        ]
+      };
+    return {};
+  });
+  const r = await adapter.editListByParams({TableName: TABLE}, item => ({...item, hp: item.name === 'A' ? 100 : item.hp}));
+  t.equal(r.processed, 1, 'only A changed');
+  t.equal(r.skipped, 1, 'B unchanged → skipped');
+  t.equal(r.failed.length, 0);
+  const updates = sent.filter(c => c.constructor.name === 'UpdateCommand');
+  t.equal(updates.length, 1);
+});
+
+test('editListByParams: mapFn falsy → skipped, not failed', async t => {
+  const {adapter} = makeAdapter(async cmd => {
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') return {Items: [{name: 'A', hp: 10}]};
+    return {};
+  });
+  const r = await adapter.editListByParams({TableName: TABLE}, () => null);
+  t.equal(r.processed, 0);
+  t.equal(r.skipped, 1);
+});
+
+test('editListByParams: key-field change default → failed bucket (no throw)', async t => {
+  const {adapter} = makeAdapter(async cmd => {
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand')
+      return {
+        Items: [
+          {name: 'A', hp: 10},
+          {name: 'B', hp: 20}
+        ]
+      };
+    return {};
+  });
+  const r = await adapter.editListByParams({TableName: TABLE}, item => ({...item, name: item.name + '-new'}));
+  t.equal(r.processed, 0);
+  t.equal(r.failed.length, 2, 'both items rejected');
+  t.matchString(r.failed[0].details || '', /key field/);
+});
+
+test('editListByParams: allowKeyChange auto-promotes to move per item', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') return {Items: [{name: 'A', hp: 10}]};
+    if (n === 'GetCommand') return {Item: {name: 'A', hp: 10}};
+    return {};
+  });
+  const r = await adapter.editListByParams({TableName: TABLE}, item => ({...item, name: 'A-new'}), {allowKeyChange: true});
+  t.equal(r.processed, 1);
+  const txn = sent.find(c => c.constructor.name === 'TransactWriteCommand');
+  t.ok(txn, 'emits TransactWriteCommand for the promoted move');
+});
+
+test('editListByParams: race-loss on CCF → skipped', async t => {
+  const {adapter} = makeAdapter(async cmd => {
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') return {Items: [{name: 'A', hp: 10}]};
+    if (n === 'UpdateCommand') {
+      const err = new Error('gone');
+      err.name = 'ConditionalCheckFailedException';
+      throw err;
+    }
+    return {};
+  });
+  const r = await adapter.editListByParams({TableName: TABLE}, item => ({...item, hp: 999}));
+  t.equal(r.processed, 0);
+  t.equal(r.skipped, 1, 'race-loss bucketed as skipped');
+  t.equal(r.failed.length, 0);
+});
+
+test('editListByParams: ValidationException → failed bucket with classified reason', async t => {
+  const {adapter} = makeAdapter(async cmd => {
+    const n = cmd.constructor.name;
+    if (n === 'QueryCommand' || n === 'ScanCommand') return {Items: [{name: 'A', hp: 10}]};
+    if (n === 'UpdateCommand') {
+      const err = new Error('bad');
+      err.name = 'ValidationException';
+      throw err;
+    }
+    return {};
+  });
+  const r = await adapter.editListByParams({TableName: TABLE}, item => ({...item, hp: 999}));
+  t.equal(r.failed.length, 1);
+  t.equal(r.failed[0].reason, 'ValidationException');
+});
+
 // --- resumable list mass ops (MassOpResult envelope) ---
 
 test('deleteListByParams: returns MassOpResult envelope', async t => {

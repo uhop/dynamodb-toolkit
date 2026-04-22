@@ -748,6 +748,25 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    *   (≈ 2× the moved-item count on success); `cursor` present when stopped by `maxItems`.
    */
   moveListByParams(params: Record<string, unknown>, mapFn: (item: TItem) => TItem, options?: MassOptions): Promise<MassOpResult>;
+  /**
+   * Resumable per-item edit across a `Query` / `Scan` scope. For each
+   * item in the scan, runs `mapFn(revived)` → shallow-diff → emit
+   * `UpdateCommand`. Unchanged items are counted as `skipped` (no WCU
+   * spent); `mapFn` returning a falsy value also buckets to `skipped`.
+   *
+   * When the diff touches any declared `keyFields`:
+   *   - Default: the item is bucketed into `failed` with a descriptive
+   *     message (edit is for non-key fields only; mass-edit does not
+   *     throw `KeyFieldChanged` because one bad item shouldn't halt the
+   *     whole run).
+   *   - `{allowKeyChange: true}`: auto-promotes that item to a `move`
+   *     (put-at-new-key + delete-at-old-key transaction).
+   *
+   * Items that vanish between the scan and the update (race with
+   * another writer) are bucketed into `skipped` via the
+   * `ConditionalCheckFailed` on the existence guard.
+   */
+  editListByParams(params: Record<string, unknown>, mapFn: (item: TItem) => TItem, options?: MassOptions & EditOptions): Promise<MassOpResult>;
 
   /** @deprecated Use {@link Adapter.putItems}. Removed in a future minor. */
   putAll(items: (TItem | Raw<TItem>)[], options?: MassOptions): Promise<{processed: number}>;
