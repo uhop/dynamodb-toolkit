@@ -23,7 +23,7 @@ import {moveList} from '../mass/move-list.js';
 
 import {defaultHooks, restrictKey} from './hooks.js';
 import {dispatchWrite} from './transaction-upgrade.js';
-import {ConsistentReadOnGSIRejected} from '../errors.js';
+import {ConsistentReadOnGSIRejected, NoIndexForSortField} from '../errors.js';
 
 const MOVE_CHUNK = 12;
 
@@ -674,6 +674,36 @@ export class Adapter {
     if (spec && spec.type === 'gsi') throw new ConsistentReadOnGSIRejected(idx);
   }
 
+  /**
+   * Find the declared secondary index whose sort key (`sk.name`) matches
+   * the requested sort field. Prefers LSI over GSI when both match.
+   * Throws `NoIndexForSortField` when no declared index matches — the
+   * toolkit does not in-memory-sort (per the no-client-side-list-
+   * manipulation principle).
+   *
+   * @param field Sort field name (from `?sort=<field>` or programmatic
+   *   `options.sort`).
+   * @returns The name of the matching index.
+   * @throws `NoIndexForSortField` when nothing matches.
+   */
+  findIndexForSort(field) {
+    let lsiMatch;
+    let gsiMatch;
+    for (const name of Object.keys(this.indices)) {
+      const spec = this.indices[name];
+      if (spec.sk && spec.sk.name === field) {
+        if (spec.type === 'lsi') {
+          lsiMatch = name;
+          break;
+        }
+        if (!gsiMatch) gsiMatch = name;
+      }
+    }
+    const resolved = lsiMatch ?? gsiMatch;
+    if (!resolved) throw new NoIndexForSortField(field);
+    return resolved;
+  }
+
   // --- batch builders (return descriptors for use with applyBatch / applyTransaction) ---
 
   /** @returns {Promise<{action: 'get', adapter: Adapter, params: any}>} */
@@ -1008,9 +1038,22 @@ export class Adapter {
   // --- list params helper ---
 
   async _buildListParams(options, project, example, index) {
-    let p = this.hooks.prepareListInput(example || {}, index);
+    // Resolve the effective index. Precedence:
+    //   1. Explicit `index` argument (from REST handler or caller).
+    //   2. `options.useIndex` override.
+    //   3. `options.sort` → `findIndexForSort` (throws on no match).
+    let resolvedIndex = index;
+    if (resolvedIndex === undefined) {
+      if (options?.useIndex !== undefined) {
+        resolvedIndex = options.useIndex;
+      } else if (options?.sort) {
+        resolvedIndex = this.findIndexForSort(options.sort);
+      }
+    }
+
+    let p = this.hooks.prepareListInput(example || {}, resolvedIndex);
     p = this._cloneParams(p);
-    if (index) p.IndexName = index;
+    if (resolvedIndex) p.IndexName = resolvedIndex;
     if (options?.consistent) p.ConsistentRead = true;
     if (options?.descending) p.ScanIndexForward = false;
     if (project && options?.fields) {

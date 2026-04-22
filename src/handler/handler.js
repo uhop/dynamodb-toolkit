@@ -17,6 +17,7 @@ import {
 
 import {matchRoute} from './match-route.js';
 import {readJsonBody} from './read-json-body.js';
+import {NoIndexForSortField} from '../errors.js';
 import {Buffer} from 'node:buffer';
 
 const sendJson = (req, res, status, body) => {
@@ -48,9 +49,31 @@ const requestUrl = req => {
   return new URL(path, `http://${host}`);
 };
 
+// Build a sortable-indices map from the adapter's declared `indices`.
+// Walks every declared index that has an `sk` and maps its `sk.name` →
+// index name. When two indices would map the same field, LSI wins over
+// GSI (LSIs are cheaper + support strong consistency). The returned map
+// is a convenience default; user-supplied `options.sortableIndices` wins
+// when provided (e.g., to restrict which fields are publicly sortable).
+const buildSortableFromIndices = indices => {
+  const out = {};
+  const lsiFields = new Set();
+  for (const [name, spec] of Object.entries(indices)) {
+    if (!spec.sk) continue;
+    const field = spec.sk.name;
+    if (spec.type === 'lsi') {
+      out[field] = name;
+      lsiFields.add(field);
+    } else if (!lsiFields.has(field) && !out[field]) {
+      out[field] = name;
+    }
+  }
+  return out;
+};
+
 export const createHandler = (adapter, options = {}) => {
   const policy = mergePolicy(options.policy);
-  const sortableIndices = options.sortableIndices || {};
+  const sortableIndices = options.sortableIndices || buildSortableFromIndices(adapter.indices || {});
   const keyFromPath = options.keyFromPath || ((rawKey, adp) => ({[adp.keyFields[0].name]: rawKey}));
   const exampleFromContext = options.exampleFromContext || (() => ({}));
   const maxBodyBytes = options.maxBodyBytes ?? 1024 * 1024;
@@ -72,11 +95,15 @@ export const createHandler = (adapter, options = {}) => {
     return out;
   };
 
-  // Resolve a `?sort=...` query into {index, descending}.
+  // Resolve a `?sort=...` query into {index, descending}. Throws
+  // `NoIndexForSortField` when the sort field has no matching index —
+  // toolkit-wide policy: no in-memory sort.
   const resolveSort = query => {
     const sort = parseSort(query.sort);
     if (!sort) return {index: undefined, descending: false};
-    return {index: sortableIndices[sort.field], descending: sort.direction === 'desc'};
+    const index = sortableIndices[sort.field];
+    if (!index) throw new NoIndexForSortField(sort.field);
+    return {index, descending: sort.direction === 'desc'};
   };
 
   const sendError = (req, res, err) => {

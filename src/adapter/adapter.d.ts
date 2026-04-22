@@ -253,6 +253,16 @@ export interface ListOptions {
   limit?: number;
   /** Descending sort (reverses `ScanIndexForward`). */
   descending?: boolean;
+  /**
+   * Sort field. When set, the Adapter resolves it via
+   * {@link Adapter.findIndexForSort} and picks a matching index (LSI over
+   * GSI). Throws `NoIndexForSortField` when nothing matches. Ignored when
+   * an explicit `index` argument is passed to `getList`, or when `useIndex`
+   * is set.
+   */
+  sort?: string;
+  /** Explicit index override — bypasses `sort` inference. */
+  useIndex?: string;
   /** Strong consistency. */
   consistent?: boolean;
   /** Field spec for projection. */
@@ -350,6 +360,18 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @param item The item to classify.
    */
   typeOf(item: Partial<TItem> | undefined | null): string | number | undefined;
+
+  /**
+   * Find the declared secondary index whose sort key (`sk.name`) matches
+   * the requested sort field. Prefers LSI over GSI when both match.
+   * Throws `NoIndexForSortField` when no declared index matches — the
+   * toolkit does not in-memory-sort.
+   *
+   * @param field Sort field name.
+   * @returns The name of the matching index.
+   * @throws NoIndexForSortField when nothing matches.
+   */
+  findIndexForSort(field: string): string;
 
   /**
    * Build a `KeyConditionExpression` for a Query against this Adapter's main

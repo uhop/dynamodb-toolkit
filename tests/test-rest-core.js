@@ -600,9 +600,20 @@ test('resolveSort: ascending + descending', t => {
   t.deepEqual(resolveSort({sort: '-name'}, {name: 'name-gsi'}), {index: 'name-gsi', descending: true});
 });
 
-test('resolveSort: no sort or unmapped field', t => {
+test('resolveSort: no sort returns {index: undefined}', t => {
   t.deepEqual(resolveSort({}, {name: 'name-gsi'}), {index: undefined, descending: false});
-  t.deepEqual(resolveSort({sort: 'unknown'}, {name: 'name-gsi'}).index, undefined);
+});
+
+test('resolveSort: unmapped sort field throws NoIndexForSortField', t => {
+  let threw;
+  try {
+    resolveSort({sort: 'unknown'}, {name: 'name-gsi'});
+  } catch (err) {
+    threw = err;
+  }
+  t.ok(threw);
+  t.equal(threw.name, 'NoIndexForSortField');
+  t.equal(threw.sortField, 'unknown');
 });
 
 // --- matchRoute HEAD → GET ---
@@ -711,7 +722,7 @@ test('createHandler: HEAD /:key returns 200 headers + empty body with Content-Le
 
 test('createHandler: HEAD / dispatches through GET (pagination envelope headers, empty body)', async t => {
   const adapter = makeTestAdapter();
-  adapter.getAll = async () => ({data: [{name: 'a'}], offset: 0, limit: 10, total: 1});
+  adapter.getList = async () => ({data: [{name: 'a'}], offset: 0, limit: 10, total: 1});
   const handler = createHandler(adapter);
   const req = makeFakeReq('HEAD', '/');
   const res = makeFakeRes();
@@ -727,7 +738,7 @@ test('createHandler: body-always-parsed invariant — exampleFromContext receive
   const adapter = makeTestAdapter();
   let capturedBody;
   adapter._buildListParams = async () => ({TableName: 'T'});
-  adapter.cloneAllByParams = async () => ({processed: 0});
+  adapter.cloneListByParams = async () => ({processed: 0});
   const handler = createHandler(adapter, {
     exampleFromContext: (_query, body) => {
       capturedBody = body;

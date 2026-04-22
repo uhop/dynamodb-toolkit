@@ -1711,3 +1711,105 @@ test('getListByParams: defers to DynamoDB for undeclared indices (legacy/unknown
   await adapter.getListByParams({TableName: 'T', IndexName: 'unknown-idx', ConsistentRead: true});
   t.ok(true, 'undeclared index: no local refusal');
 });
+
+// --- findIndexForSort + sort-to-index inference ---
+
+test('adapter.findIndexForSort: picks declared GSI by sk.name', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      'by-status': {type: 'gsi', pk: 'status', sk: 'createdAt'}
+    }
+  });
+  t.equal(adapter.findIndexForSort('createdAt'), 'by-status');
+});
+
+test('adapter.findIndexForSort: prefers LSI over GSI when both match', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName'],
+    structuralKey: '-sk',
+    indices: {
+      'by-foo-gsi': {type: 'gsi', pk: 'bucket', sk: 'altField'},
+      'by-foo-lsi': {type: 'lsi', sk: 'altField'}
+    }
+  });
+  t.equal(adapter.findIndexForSort('altField'), 'by-foo-lsi');
+});
+
+test('adapter.findIndexForSort: throws NoIndexForSortField on miss', t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  let threw;
+  try {
+    adapter.findIndexForSort('missing');
+  } catch (err) {
+    threw = err;
+  }
+  t.ok(threw);
+  t.equal(threw.name, 'NoIndexForSortField');
+  t.equal(threw.sortField, 'missing');
+});
+
+test('getList: options.sort → resolves to index automatically', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    const name = cmd.constructor.name;
+    if (name === 'QueryCommand' && cmd.input?.Select === 'COUNT') return {Count: 0};
+    if (name === 'QueryCommand' || name === 'ScanCommand') return {Items: [], Count: 0};
+    return {};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      'by-status': {type: 'gsi', pk: 'status', sk: 'createdAt'}
+    }
+  });
+  await adapter.getList({sort: 'createdAt'});
+  const queryCmd = sent.find(c => (c.constructor.name === 'QueryCommand' || c.constructor.name === 'ScanCommand') && c.input?.Select !== 'COUNT');
+  t.equal(queryCmd?.input?.IndexName, 'by-status');
+});
+
+test('getList: options.useIndex overrides sort inference', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    const name = cmd.constructor.name;
+    if (name === 'QueryCommand' && cmd.input?.Select === 'COUNT') return {Count: 0};
+    if (name === 'QueryCommand' || name === 'ScanCommand') return {Items: [], Count: 0};
+    return {};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      'by-status': {type: 'gsi', pk: 'status', sk: 'createdAt'},
+      'legacy-idx': {type: 'gsi', pk: 'bucket'}
+    }
+  });
+  // sort='createdAt' would pick by-status, but useIndex forces legacy-idx.
+  await adapter.getList({sort: 'createdAt', useIndex: 'legacy-idx'});
+  const queryCmd = sent.find(c => (c.constructor.name === 'QueryCommand' || c.constructor.name === 'ScanCommand') && c.input?.Select !== 'COUNT');
+  t.equal(queryCmd?.input?.IndexName, 'legacy-idx');
+});
+
+test('getList: unmapped sort throws NoIndexForSortField', async t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({client, table: 'T', keyFields: ['name']});
+  let threw;
+  try {
+    await adapter.getList({sort: 'createdAt'});
+  } catch (err) {
+    threw = err;
+  }
+  t.ok(threw);
+  t.equal(threw.name, 'NoIndexForSortField');
+});
