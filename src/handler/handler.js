@@ -79,8 +79,41 @@ export const createHandler = (adapter, options = {}) => {
   const maxBodyBytes = options.maxBodyBytes ?? 1024 * 1024;
 
   // Build adapter list options from a parsed query.
+  // Expand `*<wildcard>` tokens in a parsed fields array against this
+  // adapter's declared projections. Currently: `*keys` → the adapter's
+  // declared `keyFields` names. Unknown wildcards throw (silent
+  // pass-through would silently misroute to a non-existent attribute).
+  // Non-wildcard field names pass through; duplicates are deduped while
+  // preserving first-seen order.
+  const expandFieldsWildcards = fields => {
+    if (!fields) return fields;
+    const list = Array.isArray(fields) ? fields : [fields];
+    const hasWildcard = list.some(f => typeof f === 'string' && f.startsWith('*'));
+    if (!hasWildcard) return fields;
+    const seen = new Set();
+    const out = [];
+    const push = f => {
+      if (!seen.has(f)) {
+        seen.add(f);
+        out.push(f);
+      }
+    };
+    for (const f of list) {
+      if (typeof f === 'string' && f.startsWith('*')) {
+        if (f === '*keys') {
+          for (const kf of adapter.keyFields || []) push(kf.name);
+        } else {
+          throw new Error(`Unknown fields wildcard '${f}'. Supported: '*keys'.`);
+        }
+      } else {
+        push(f);
+      }
+    }
+    return out;
+  };
+
   const buildListOptions = query => {
-    const fields = parseFields(query.fields);
+    const fields = expandFieldsWildcards(parseFields(query.fields));
     const filter = parseFilter(query.filter);
     const paging = parsePaging(query, {defaultLimit: policy.defaultLimit, maxLimit: policy.maxLimit, maxOffset: policy.maxOffset});
     const consistent = parseFlag(query.consistent);

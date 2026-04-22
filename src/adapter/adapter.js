@@ -1056,8 +1056,22 @@ export class Adapter {
     if (resolvedIndex) p.IndexName = resolvedIndex;
     if (options?.consistent) p.ConsistentRead = true;
     if (options?.descending) p.ScanIndexForward = false;
-    if (project && options?.fields) {
-      p = addProjection(p, options.fields, this.projectionFieldMap);
+    // Project either the caller's `keysOnly` shortcut or explicit fields.
+    // `options.keysOnly: true` takes precedence — "I just want identities"
+    // expands to the keyFields names. Otherwise honor `options.fields`
+    // (REST-layer wildcards like `?fields=*keys` are already expanded
+    // before we see them).
+    if (project) {
+      if (options?.keysOnly) {
+        p = addProjection(
+          p,
+          this.keyFields.map(f => f.name),
+          null,
+          true
+        );
+      } else if (options?.fields) {
+        p = addProjection(p, options.fields, this.projectionFieldMap);
+      }
     }
     if (options?.filter) {
       p = buildFilter(

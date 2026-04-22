@@ -1813,3 +1813,54 @@ test('getList: unmapped sort throws NoIndexForSortField', async t => {
   t.ok(threw);
   t.equal(threw.name, 'NoIndexForSortField');
 });
+
+// --- keysOnly + *keys wildcard ---
+
+test('getList: keysOnly: true projects only keyFields', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    const name = cmd.constructor.name;
+    if (name === 'QueryCommand' && cmd.input?.Select === 'COUNT') return {Count: 0};
+    if (name === 'QueryCommand' || name === 'ScanCommand') return {Items: [], Count: 0};
+    return {};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName'],
+    structuralKey: '-sk'
+  });
+  await adapter.getList({keysOnly: true});
+  const queryCmd = sent.find(c => (c.constructor.name === 'QueryCommand' || c.constructor.name === 'ScanCommand') && c.input?.Select !== 'COUNT');
+  // ProjectionExpression should reference keyFields attrs.
+  t.ok(queryCmd?.input?.ProjectionExpression);
+  // Each keyField name should be in the EAN map pointing to itself.
+  const names = Object.values(queryCmd.input.ExpressionAttributeNames || {});
+  t.ok(names.includes('state'));
+  t.ok(names.includes('rentalName'));
+});
+
+test('getList: keysOnly takes precedence over fields', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    const name = cmd.constructor.name;
+    if (name === 'QueryCommand' && cmd.input?.Select === 'COUNT') return {Count: 0};
+    if (name === 'QueryCommand' || name === 'ScanCommand') return {Items: [], Count: 0};
+    return {};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName'],
+    structuralKey: '-sk'
+  });
+  await adapter.getList({keysOnly: true, fields: ['climate']});
+  const queryCmd = sent.find(c => (c.constructor.name === 'QueryCommand' || c.constructor.name === 'ScanCommand') && c.input?.Select !== 'COUNT');
+  const names = Object.values(queryCmd.input.ExpressionAttributeNames || {});
+  // keysOnly wins — climate should NOT be in the projection.
+  t.notOk(names.includes('climate'), 'fields ignored when keysOnly is true');
+  t.ok(names.includes('state'));
+  t.ok(names.includes('rentalName'));
+});

@@ -263,6 +263,13 @@ export interface ListOptions {
   sort?: string;
   /** Explicit index override — bypasses `sort` inference. */
   useIndex?: string;
+  /**
+   * Shortcut: project only the adapter's `keysOnlyFields` (the declared
+   * `keyFields` names). Mutually exclusive with `fields` — when both are
+   * set, `keysOnly` wins. Programmatic equivalent of the `?fields=*keys`
+   * wire wildcard.
+   */
+  keysOnly?: boolean;
   /** Strong consistency. */
   consistent?: boolean;
   /** Field spec for projection. */

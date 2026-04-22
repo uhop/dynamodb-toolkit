@@ -752,3 +752,74 @@ test('createHandler: body-always-parsed invariant — exampleFromContext receive
   await p;
   t.deepEqual(capturedBody, {overlay: 'ok'}, 'body parsed and passed through, not null');
 });
+
+// --- ?fields=*keys wildcard ---
+
+test('createHandler: ?fields=*keys expands to adapter keyField names', async t => {
+  const adapter = makeTestAdapter();
+  // makeTestAdapter builds keyFields: [{name: 'name', type: 'string'}] already.
+  let capturedOpts;
+  adapter.getList = async opts => {
+    capturedOpts = opts;
+    return {data: [], offset: 0, limit: 10, total: 0};
+  };
+  const handler = createHandler(adapter);
+  const req = makeFakeReq('GET', '/?fields=*keys');
+  const res = makeFakeRes();
+  const p = handler(req, res);
+  await waitForResponse(res);
+  await p;
+  t.deepEqual(capturedOpts.fields, ['name']);
+});
+
+test('createHandler: ?fields=*keys,extra dedups + expands', async t => {
+  const adapter = makeTestAdapter();
+  // Override keyFields for this test (makeTestAdapter defaults to single-field 'name').
+  adapter.keyFields = [
+    {name: 'state', type: 'string'},
+    {name: 'rentalName', type: 'string'}
+  ];
+  let capturedOpts;
+  adapter.getList = async opts => {
+    capturedOpts = opts;
+    return {data: [], offset: 0, limit: 10, total: 0};
+  };
+  const handler = createHandler(adapter);
+  const req = makeFakeReq('GET', '/?fields=*keys,state,climate');
+  const res = makeFakeRes();
+  const p = handler(req, res);
+  await waitForResponse(res);
+  await p;
+  // state appears once (dedup); order preserves *keys expansion first, then climate.
+  t.deepEqual(capturedOpts.fields, ['state', 'rentalName', 'climate']);
+});
+
+test('createHandler: unknown wildcard returns 500 (from thrown Error)', async t => {
+  const adapter = makeTestAdapter();
+  const handler = createHandler(adapter);
+  const req = makeFakeReq('GET', '/?fields=*unknown');
+  const res = makeFakeRes();
+  const p = handler(req, res);
+  await waitForResponse(res);
+  await p;
+  // Unknown wildcard → generic Error → 500 via mapErrorStatus default.
+  t.equal(res.statusCode, 500);
+  const body = JSON.parse(res.body);
+  t.matchString(body.message || body.error || JSON.stringify(body), /\*unknown/);
+});
+
+test('createHandler: no wildcard → fields pass through', async t => {
+  const adapter = makeTestAdapter();
+  let capturedOpts;
+  adapter.getList = async opts => {
+    capturedOpts = opts;
+    return {data: [], offset: 0, limit: 10, total: 0};
+  };
+  const handler = createHandler(adapter);
+  const req = makeFakeReq('GET', '/?fields=a,b');
+  const res = makeFakeRes();
+  const p = handler(req, res);
+  await waitForResponse(res);
+  await p;
+  t.deepEqual(capturedOpts.fields, ['a', 'b']);
+});
