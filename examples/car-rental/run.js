@@ -1,0 +1,253 @@
+// End-to-end walkthrough against DynamoDB Local. Runs the full 3.6.0
+// surface through the car-rental data model. Prints each section's
+// outcome; exits 0 on success, non-zero on failure. Docker is required
+// — script skips with a clear message otherwise.
+
+import {DynamoDBClient, DeleteTableCommand} from '@aws-sdk/client-dynamodb';
+import {DynamoDBDocumentClient, QueryCommand, ScanCommand} from '@aws-sdk/lib-dynamodb';
+
+import {ensureTable, verifyTable} from 'dynamodb-toolkit/provisioning';
+import {marshallDateISO, unmarshallDateISO} from 'dynamodb-toolkit/marshalling';
+
+import {createAdapter, TABLE} from './adapter.js';
+import {seedVehicles} from './seed-data.js';
+import {startDynamoDBLocal} from '../../tests/helpers/dynamodb-local.js';
+
+// -------------------------------------------------------------------
+// plumbing
+// -------------------------------------------------------------------
+
+const header = label => console.log(`\n▶ ${label}`);
+const info = (...args) => console.log('  ', ...args);
+
+const fail = (msg, err) => {
+  console.error(`✗ ${msg}`);
+  if (err) console.error(err);
+  process.exitCode = 1;
+};
+
+const withServer = async run => {
+  const local = await startDynamoDBLocal();
+  if (local.skip) {
+    console.log(`SKIP: ${local.reason}`);
+    return;
+  }
+  const base = new DynamoDBClient({
+    endpoint: local.endpoint,
+    region: 'us-east-1',
+    credentials: {accessKeyId: 'fake', secretAccessKey: 'fake'}
+  });
+  const client = DynamoDBDocumentClient.from(base, {marshallOptions: {removeUndefinedValues: true}});
+  try {
+    await run(client);
+  } finally {
+    try {
+      await base.send(new DeleteTableCommand({TableName: TABLE}));
+    } catch {}
+    await local.stop();
+    client.destroy();
+    base.destroy();
+  }
+};
+
+// -------------------------------------------------------------------
+// walkthrough
+// -------------------------------------------------------------------
+
+const walkthrough = async client => {
+  const adapter = createAdapter(client);
+
+  // ─── §Setup ────────────────────────────────────────────────────
+  header('§Setup — ensureTable (ADD-only plan, executed on {yes: true})');
+  const dryPlan = await ensureTable(adapter);
+  info(
+    'Dry-run steps:',
+    dryPlan.steps.map(s => s.action)
+  );
+  dryPlan.summary.forEach(l => info(`  ${l}`));
+  const created = await ensureTable(adapter, {yes: true});
+  info('Executed:', created.executed.join(', '));
+  info('Descriptor written:', Boolean(created.descriptorWritten));
+
+  // ─── §Seed ─────────────────────────────────────────────────────
+  header('§Seed — individual .post() so _createdAt prepare hook stamps each item');
+  for (const v of seedVehicles) await adapter.post(v);
+  info(`Seeded ${seedVehicles.length} vehicles via post().`);
+
+  // ─── §Simple read — round-trip version + createdAt ─────────────
+  header('§Read — getByKey exposes _version (1 after post) and _createdAt');
+  const camry = await adapter.getByKey({state: 'TX', facility: 'Dallas', vehicle: 'VIN-TX-001'});
+  info(`Camry: v${camry._version} created ${camry._createdAt}`);
+  info(`  → adapter.typeOf = ${adapter.typeOf(camry)}`);
+
+  // ─── §Subtree reads via buildKey ───────────────────────────────
+  header('§Subtree queries — adapter.buildKey({...}, {kind: "children"})');
+  const txAll = await client.send(new QueryCommand({TableName: TABLE, ...adapter.buildKey({state: 'TX'}, {kind: 'children'})}));
+  info(`All TX vehicles (children of {state: 'TX'}): ${txAll.Items.length}`);
+  const txDallasAll = await client.send(new QueryCommand({TableName: TABLE, ...adapter.buildKey({state: 'TX', facility: 'Dallas'}, {kind: 'children'})}));
+  info(`TX/Dallas vehicles: ${txDallasAll.Items.length}`);
+  const exact = await client.send(
+    new QueryCommand({
+      TableName: TABLE,
+      ...adapter.buildKey({state: 'TX', facility: 'Dallas', vehicle: 'VIN-TX-001'}, {kind: 'exact'})
+    })
+  );
+  info(`Exact-key query: ${exact.Items.length} hit`);
+
+  // ─── §Filter grammar ───────────────────────────────────────────
+  header('§Filter grammar — f-<field>-<op>=<value> parsed, allowlist-enforced');
+  const listCars = await adapter.getListByParams(
+    {...adapter.buildKey({state: 'FL'}, {kind: 'children'}), TableName: TABLE},
+    {fFilter: [{field: 'kind', op: 'eq', values: ['car']}], limit: 50}
+  );
+  info(`FL cars only: ${listCars.data.length} (of ${listCars.total} scanned)`);
+  const budget = await adapter.getListByParams(
+    {...adapter.buildKey({state: 'FL'}, {kind: 'children'}), TableName: TABLE},
+    {
+      fFilter: [
+        {field: 'kind', op: 'eq', values: ['boat']},
+        {field: 'dailyPriceCents', op: 'lt', values: [30000]}
+      ],
+      limit: 50
+    }
+  );
+  info(`FL boats under $300/day: ${budget.data.length}`);
+
+  // ─── §Typed multi-type dispatch ────────────────────────────────
+  header('§typeOf dispatch — car vs boat branches from one mixed scan');
+  const mixed = await client.send(new ScanCommand({TableName: TABLE}));
+  const summary = {car: 0, boat: 0, state: 0, facility: 0, other: 0};
+  for (const item of mixed.Items) {
+    const t = adapter.typeOf(item);
+    summary[t] = (summary[t] || 0) + 1;
+    if (t === 'car') {
+      // car-specific validation shape
+      if (!item.make || !item.model) fail(`car ${item.vehicle} missing make/model`);
+    } else if (t === 'boat') {
+      if (item.length === undefined || item.motorHP === undefined) fail(`boat ${item.vehicle} missing length/motorHP`);
+    }
+  }
+  info('Dispatch counts:', summary);
+
+  // ─── §Resumable mass op ────────────────────────────────────────
+  header('§Resumable mass op — deleteListByParams {maxItems} emits a cursor');
+  // Create a throwaway subtree we can chew through in pages.
+  const throwaway = Array.from({length: 7}, (_, i) => ({
+    state: 'NV',
+    facility: 'Vegas',
+    vehicle: `VIN-NV-${String(i).padStart(3, '0')}`,
+    kind: 'car',
+    status: 'available',
+    dailyPriceCents: 5000 + i * 100,
+    make: 'Generic',
+    model: 'Rental',
+    year: 2024
+  }));
+  for (const v of throwaway) await adapter.post(v);
+  let cursor;
+  let pass = 0;
+  let processed = 0;
+  do {
+    const params = {
+      ...adapter.buildKey({state: 'NV', facility: 'Vegas'}, {kind: 'children'}),
+      TableName: TABLE
+    };
+    const page = await adapter.deleteListByParams(params, {maxItems: 3, resumeToken: cursor});
+    processed += page.processed;
+    info(`  pass ${++pass}: processed=${page.processed} cursor=${page.cursor ? 'present' : 'done'}`);
+    cursor = page.cursor;
+  } while (cursor);
+  info(`Total processed across ${pass} pages: ${processed}`);
+
+  // ─── §edit() ───────────────────────────────────────────────────
+  header('§edit() — read-diff-update; no-op short-circuits WCU');
+  const edited = await adapter.edit({state: 'TX', facility: 'Dallas', vehicle: 'VIN-TX-001'}, item => ({...item, status: 'rented'}));
+  info(`VIN-TX-001 status → ${edited.status}, version → ${edited._version}`);
+  const noop = await adapter.edit({state: 'TX', facility: 'Dallas', vehicle: 'VIN-TX-001'}, item => item);
+  info(`no-op edit version unchanged: ${noop._version === edited._version}`);
+
+  // ─── §editListByParams ─────────────────────────────────────────
+  header('§editListByParams — in-place update of every Austin car');
+  const bulkEdit = await adapter.editListByParams({...adapter.buildKey({state: 'TX', facility: 'Austin'}, {kind: 'children'}), TableName: TABLE}, item => ({
+    ...item,
+    promotionTag: 'summer2026'
+  }));
+  info(`Austin edits: processed=${bulkEdit.processed} skipped=${bulkEdit.skipped}`);
+
+  // ─── §rename — move TX/Austin to TX/NewAustin ──────────────────
+  header('§rename — subtree prefix-swap via put-ifNotExists + delete');
+  const renameResult = await adapter.rename({state: 'TX', facility: 'Austin'}, {state: 'TX', facility: 'NewAustin'});
+  info(`Renamed: processed=${renameResult.processed} skipped=${renameResult.skipped}`);
+  const newAustin = await client.send(new QueryCommand({TableName: TABLE, ...adapter.buildKey({state: 'TX', facility: 'NewAustin'}, {kind: 'children'})}));
+  info(`TX/NewAustin now holds ${newAustin.Items.length} vehicles.`);
+
+  // ─── §Cascade primitives ───────────────────────────────────────
+  header('§Cascade — cloneAllUnder TX/Dallas → TX/Plano then deleteAllUnder TX/Plano');
+  const clone = await adapter.cloneAllUnder({state: 'TX', facility: 'Dallas'}, {state: 'TX', facility: 'Plano'});
+  info(`cloneAllUnder: processed=${clone.processed} skipped=${clone.skipped}`);
+  const del = await adapter.deleteAllUnder({state: 'TX', facility: 'Plano'});
+  info(`deleteAllUnder: processed=${del.processed}`);
+
+  // ─── §Optimistic concurrency ───────────────────────────────────
+  header('§Concurrency — versionField guards stale writes');
+  const fresh = await adapter.getByKey({state: 'FL', facility: 'Miami', vehicle: 'VIN-FL-001'});
+  info(`Observed version: ${fresh._version}`);
+  // Someone else patches → version advances.
+  await adapter.patch({state: 'FL', facility: 'Miami', vehicle: 'VIN-FL-001'}, {status: 'maintenance'});
+  try {
+    // Our stale put should fail the OC check.
+    await adapter.put(fresh);
+    fail('stale put unexpectedly succeeded');
+  } catch (err) {
+    info(`Stale put rejected: ${err.name} (${err.message.slice(0, 70)}…)`);
+  }
+  // Delete with {expectedVersion} on a fresh read succeeds.
+  const latest = await adapter.getByKey({state: 'FL', facility: 'Miami', vehicle: 'VIN-FL-001'});
+  await adapter.delete({state: 'FL', facility: 'Miami', vehicle: 'VIN-FL-001'}, {expectedVersion: latest._version});
+  info('Delete with {expectedVersion} succeeded.');
+
+  // ─── §asOf scope-freeze ────────────────────────────────────────
+  header('§asOf — filter scans to items createdAt ≤ T');
+  const asOf = new Date().toISOString();
+  await new Promise(r => setTimeout(r, 20));
+  await adapter.post({
+    state: 'CA',
+    facility: 'LA',
+    vehicle: 'VIN-CA-NEW',
+    kind: 'car',
+    status: 'available',
+    dailyPriceCents: 6000,
+    make: 'Kia',
+    model: 'Telluride',
+    year: 2024
+  });
+  const frozen = await adapter.getListByParams({...adapter.buildKey({state: 'CA'}, {kind: 'children'}), TableName: TABLE}, {asOf, limit: 50});
+  info(`CA vehicles at ${asOf}: ${frozen.data.length} (new post excluded)`);
+  const live = await adapter.getListByParams({...adapter.buildKey({state: 'CA'}, {kind: 'children'}), TableName: TABLE}, {limit: 50});
+  info(`CA vehicles live: ${live.data.length}`);
+
+  // ─── §Marshalling helpers ──────────────────────────────────────
+  header('§Marshalling — marshallDateISO round-trip');
+  const now = new Date();
+  const stored = marshallDateISO(now);
+  const revived = unmarshallDateISO(stored);
+  info(`Date → ${stored} → Date (equal? ${revived.getTime() === now.getTime()})`);
+
+  // ─── §verifyTable ──────────────────────────────────────────────
+  header('§verifyTable — declaration vs. live table drift check');
+  const verification = await verifyTable(adapter);
+  info(`ok=${verification.ok} diffs=${verification.diffs.length}`);
+  if (!verification.ok) {
+    console.error(verification.diffs);
+    fail('verifyTable reported errors');
+  }
+};
+
+// -------------------------------------------------------------------
+// main
+// -------------------------------------------------------------------
+
+withServer(walkthrough).catch(err => {
+  console.error(err);
+  process.exit(1);
+});

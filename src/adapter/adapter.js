@@ -755,19 +755,36 @@ export class Adapter {
     }
 
     // Composite keyFields → join into structuralKey.name.
+    //
+    // DynamoDB's Query requires BOTH the partition-key equality AND the
+    // optional sort-key condition in the same KeyConditionExpression —
+    // otherwise it rejects with "Query condition missed key schema
+    // element". The primitive's `pkName` / `pkValue` knobs let us emit
+    // both clauses in one call.
     const sep = this.structuralKey.separator;
     const base = components.join(sep);
+    const pkName = this.keyFields[0].name;
+    const pkValue = components[0];
     if (kind === 'exact') {
-      return buildKeyCondition({name: this.structuralKey.name, value: base, kind: 'exact'}, params);
+      return buildKeyCondition(
+        {name: this.structuralKey.name, value: base, kind: 'exact', pkName, pkValue},
+        params
+      );
     }
     if (kind === 'children') {
-      return buildKeyCondition({name: this.structuralKey.name, value: base + sep, kind: 'prefix'}, params);
+      return buildKeyCondition(
+        {name: this.structuralKey.name, value: base + sep, kind: 'prefix', pkName, pkValue},
+        params
+      );
     }
     // kind === 'partial'
     if (typeof partial !== 'string' || partial.length === 0) {
       throw new Error("buildKey: kind 'partial' requires options.partial to be a non-empty string");
     }
-    return buildKeyCondition({name: this.structuralKey.name, value: base + sep + partial, kind: 'prefix'}, params);
+    return buildKeyCondition(
+      {name: this.structuralKey.name, value: base + sep + partial, kind: 'prefix', pkName, pkValue},
+      params
+    );
   }
 
   // --- internal helpers ---
@@ -1169,8 +1186,14 @@ export class Adapter {
 
     let p = this._cloneParams(options?.params);
     p.Key = this._toKey(key, p.IndexName);
-    if (this.versionField) {
-      p = this._addVersionCondition(p, options?.expectedVersion);
+    // Patch always requires the item to exist — applying an
+    // UpdateExpression to an absent key would silently upsert, which is
+    // not what `patch` means. Version condition is additive only when
+    // the caller supplied `expectedVersion`; without it we condition on
+    // existence but not on version (the version still ADDs +1 via
+    // `_addVersionIncrement` below).
+    if (this.versionField && options?.expectedVersion !== undefined) {
+      p = this._addVersionCondition(p, options.expectedVersion);
     } else {
       p = this._checkExistence(p);
     }
@@ -1817,6 +1840,24 @@ export class Adapter {
       delete activeParams.ProjectionExpression;
       activeParams = addProjection(activeParams, this.primaryKeyAttrs, null, true);
     }
+    // Honor options.fFilter / options.filter / options.asOf the same
+    // way the mass-op list methods (`deleteListByParams` etc.) do —
+    // otherwise passing these through a hand-built-params path would
+    // silently ignore them. Both entry points (getList via
+    // `_buildListParams`, and getListByParams via hand-built params)
+    // funnel through here.
+    if (options?.fFilter && options.fFilter.length) {
+      activeParams = this.applyFFilter(activeParams, options.fFilter);
+    }
+    if (options?.filter) {
+      activeParams = buildFilter(
+        this.searchable,
+        options.filter,
+        {fields: options.fields, prefix: this.searchablePrefix, caseSensitive: options.caseSensitive},
+        activeParams
+      );
+    }
+    activeParams = this._applyAsOf(activeParams, options?.asOf);
     activeParams = cleanParams(activeParams);
 
     const needTotal = options?.needTotal !== false;
@@ -2101,19 +2142,11 @@ export class Adapter {
         p = addProjection(p, options.fields, this.projectionFieldMap);
       }
     }
-    // `f-<field>-<op>=<value>` clauses. Parsed by rest-core; compiled here
-    // against the declared `filterable` allowlist + index metadata.
-    if (options?.fFilter && options.fFilter.length) {
-      p = this.applyFFilter(p, options.fFilter);
-    }
-    if (options?.filter) {
-      p = buildFilter(
-        this.searchable,
-        options.filter,
-        {fields: options.fields, prefix: this.searchablePrefix, caseSensitive: options.caseSensitive},
-        p
-      );
-    }
+    // `f-<field>-<op>=<value>` and `?search=<text>` translations have
+    // moved to `getListByParams` so both entry points (`getList` via
+    // example + options, and `getListByParams` via hand-built params)
+    // apply filters consistently. `_buildListParams` stops at
+    // example → base params + index / projection / consistency.
     return p;
   }
 }

@@ -1141,7 +1141,7 @@ test('patch: with expectedVersion conditions + ADD increments version', async t 
   t.ok(Object.values(values).includes(1), 'ADD clause uses +1');
 });
 
-test('patch: without expectedVersion still increments version, no OC condition on version', async t => {
+test('patch: without expectedVersion still increments version, conditions on existence only', async t => {
   const sent = [];
   const {adapter} = makeVersionedAdapter(async cmd => {
     sent.push(cmd);
@@ -1149,8 +1149,11 @@ test('patch: without expectedVersion still increments version, no OC condition o
   });
   await adapter.patch({name: 'X'}, {hp: 20});
   t.matchString(sent[0].input.UpdateExpression, /ADD /);
-  t.matchString(sent[0].input.ConditionExpression, /attribute_not_exists/);
+  // Patch requires the item to exist; without `expectedVersion` the
+  // version condition is skipped but the existence guard stays.
+  t.matchString(sent[0].input.ConditionExpression, /attribute_exists/);
   t.ok(!/OR/.test(sent[0].input.ConditionExpression), 'no OR branch without expectedVersion');
+  t.ok(!/attribute_not_exists/.test(sent[0].input.ConditionExpression), 'no attribute_not_exists guard');
 });
 
 test('delete: with expectedVersion adds version condition; no increment', async t => {
@@ -1959,7 +1962,7 @@ test('adapter.buildKey: single-field keyFields → equality', t => {
   t.equal(p.ExpressionAttributeValues[':kcv0'], 'Hoth');
 });
 
-test('adapter.buildKey: composite kind=exact joins with separator', t => {
+test('adapter.buildKey: composite kind=exact emits pk equality AND structuralKey equality', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
@@ -1968,12 +1971,14 @@ test('adapter.buildKey: composite kind=exact joins with separator', t => {
     structuralKey: {name: '-sk'}
   });
   const p = adapter.buildKey({state: 'TX', rentalName: 'Dallas'});
-  t.equal(p.KeyConditionExpression, '#kc0 = :kcv0');
-  t.equal(p.ExpressionAttributeNames['#kc0'], '-sk');
-  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX|Dallas');
+  t.equal(p.KeyConditionExpression, '#kc0 = :kcv0 AND #kc1 = :kcv1');
+  t.equal(p.ExpressionAttributeNames['#kc0'], 'state');
+  t.equal(p.ExpressionAttributeNames['#kc1'], '-sk');
+  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX');
+  t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX|Dallas');
 });
 
-test('adapter.buildKey: kind=children appends trailing separator + begins_with', t => {
+test('adapter.buildKey: kind=children emits pk equality AND begins_with on structuralKey', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
@@ -1982,11 +1987,12 @@ test('adapter.buildKey: kind=children appends trailing separator + begins_with',
     structuralKey: {name: '-sk'}
   });
   const p = adapter.buildKey({state: 'TX', rentalName: 'Dallas'}, {kind: 'children'});
-  t.equal(p.KeyConditionExpression, 'begins_with(#kc0, :kcv0)');
-  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX|Dallas|');
+  t.equal(p.KeyConditionExpression, '#kc0 = :kcv0 AND begins_with(#kc1, :kcv1)');
+  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX');
+  t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX|Dallas|');
 });
 
-test('adapter.buildKey: partial appends separator + prefix', t => {
+test('adapter.buildKey: partial emits pk equality AND begins_with on structuralKey', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
@@ -1995,8 +2001,9 @@ test('adapter.buildKey: partial appends separator + prefix', t => {
     structuralKey: {name: '-sk'}
   });
   const p = adapter.buildKey({state: 'TX'}, {partial: 'Dal'});
-  t.equal(p.KeyConditionExpression, 'begins_with(#kc0, :kcv0)');
-  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX|Dal');
+  t.equal(p.KeyConditionExpression, '#kc0 = :kcv0 AND begins_with(#kc1, :kcv1)');
+  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX');
+  t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX|Dal');
 });
 
 test('adapter.buildKey: kind=partial requires non-empty partial string', t => {
@@ -2043,7 +2050,8 @@ test('adapter.buildKey: number keyFields zero-padded per width', t => {
     structuralKey: {name: '-sk'}
   });
   const p = adapter.buildKey({state: 'TX', rentalId: 42, carVin: 'V1'});
-  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX|00042|V1');
+  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX');
+  t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX|00042|V1');
 });
 
 test('adapter.buildKey: custom separator applied', t => {
@@ -2055,7 +2063,8 @@ test('adapter.buildKey: custom separator applied', t => {
     structuralKey: {name: '-sk', separator: '::'}
   });
   const p = adapter.buildKey({state: 'TX', carVin: 'V1'});
-  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX::V1');
+  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX');
+  t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX::V1');
 });
 
 test('adapter.buildKey: indexName option throws until declarative GSI surface lands', t => {
