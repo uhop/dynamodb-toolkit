@@ -212,6 +212,31 @@ export interface PatchOptions {
   returnFailedItem?: boolean;
 }
 
+/** Options for `edit`. */
+export interface EditOptions {
+  /**
+   * Projection for the initial GetItem read. When the caller knows only a
+   * subset of fields matter for the diff, limiting the projection saves
+   * RCU. The toolkit always re-adds any fields `prepare` touches
+   * (structural key, searchable mirrors), so declaring those is optional.
+   */
+  readFields?: string[];
+  /** Extra condition clauses on the UpdateCommand. */
+  conditions?: ConditionClause[];
+  /** Extra DynamoDB input merged into the Command. */
+  params?: Record<string, unknown>;
+  /**
+   * When `true`, sets `ReturnValuesOnConditionCheckFailure: 'ALL_OLD'`.
+   */
+  returnFailedItem?: boolean;
+  /**
+   * Skip the default `KeyFieldChanged` guard and auto-promote the edit
+   * to a `move` (put-at-new-key + delete-at-old-key transaction) when
+   * the mapFn diff touches any keyField.
+   */
+  allowKeyChange?: boolean;
+}
+
 /** Options for `delete`. */
 export interface DeleteOptions {
   /** Extra condition clauses. DynamoDB Delete is idempotent without them. */
@@ -600,6 +625,19 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * @returns The raw DynamoDB Command output (or transaction output when upgraded).
    */
   patch(key: TKey | Raw<TKey>, patch: Partial<TItem> | Raw<Partial<TItem>>, options?: PatchOptions): Promise<unknown>;
+  /**
+   * Read → transform → shallow-diff → UpdateItem. `mapFn(revived)`
+   * returns the new full item; the toolkit emits SET / REMOVE clauses
+   * only for fields that actually changed. Returns the revived new item
+   * on success, or `undefined` when the source item is absent or the
+   * `mapFn` returns falsy.
+   *
+   * When the diff touches any declared `keyFields`, throws
+   * {@link KeyFieldChanged} unless `{allowKeyChange: true}` is set, in
+   * which case the edit auto-promotes to a `move`
+   * (put-at-new-key + delete-at-old-key transaction).
+   */
+  edit(key: TKey | Raw<TKey>, mapFn: (item: TItem) => TItem, options?: EditOptions): Promise<TItem | undefined>;
 
   /**
    * Delete an item by key. DynamoDB Delete is idempotent; succeeds whether

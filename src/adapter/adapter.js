@@ -22,9 +22,27 @@ import {runPaged} from '../mass/run-paged.js';
 
 import {defaultHooks, restrictKey} from './hooks.js';
 import {dispatchWrite} from './transaction-upgrade.js';
-import {ConsistentReadOnGSIRejected, NoIndexForSortField, BadFilterField, BadFilterOp} from '../errors.js';
+import {ConsistentReadOnGSIRejected, NoIndexForSortField, BadFilterField, BadFilterOp, KeyFieldChanged} from '../errors.js';
 
 const MOVE_CHUNK = 12;
+
+// Deep-equality for DynamoDB attribute values: scalars, arrays, plain
+// objects, Sets. Used by `edit()` to suppress SET clauses for unchanged
+// fields. Not a general-purpose equality — e.g., Binary (Uint8Array) in
+// Sets won't compare structurally, but no-op SETs on binaries only
+// cost a wasted WCU, not correctness.
+const deepEqual = (a, b) => {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (a instanceof Set) return b instanceof Set && a.size === b.size && [...a].every(v => b.has(v));
+  if (b instanceof Set) return false;
+  if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => deepEqual(v, b[i]));
+  if (Array.isArray(b)) return false;
+  const ak = Object.keys(a),
+    bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  return ak.every(k => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]));
+};
 
 // Closed op vocabulary for the `f-<field>-<op>=<value>` filter grammar.
 // Kept in sync with the rest-core `parseFFilter` parser's op set.
@@ -958,6 +976,70 @@ export class Adapter {
     const batch = await this.makePatch(key, patch, options);
     const checks = await this.hooks.checkConsistency(batch);
     return dispatchWrite(this.client, batch, checks);
+  }
+
+  async edit(key, mapFn, options) {
+    if (typeof mapFn !== 'function') throw new TypeError('adapter.edit: mapFn is required');
+
+    // Fetch the raw DB item so we can diff against the actual stored shape
+    // (technical fields included). `readFields` limits the GetItem
+    // projection — callers who know only a subset of fields matter for the
+    // diff can save RCU. When projected, the diff is restricted to those
+    // fields plus whatever `prepare` touches (structural key, searchable
+    // mirrors) — the toolkit re-adds them, so they are never missed.
+    const rawResult = await this.getByKey(key, options?.readFields, {...options, reviveItems: false});
+    if (rawResult === undefined) return undefined;
+    const rawItem = rawResult instanceof Raw ? rawResult.item : rawResult;
+
+    const revived = this.hooks.revive(rawItem);
+    const mapped = mapFn(revived);
+    if (!mapped) return undefined;
+    const prepared = this._prepareItem(mapped);
+
+    // Shallow diff: every field in either side that differs goes to SET
+    // (new value) or REMOVE (value disappeared). Fields present but
+    // unchanged are suppressed to avoid needless WCU and
+    // `updateInput` churn.
+    /** @type {Record<string, unknown>} */
+    const setOps = {};
+    /** @type {string[]} */
+    const removeOps = [];
+    const allFields = new Set([...Object.keys(rawItem), ...Object.keys(prepared)]);
+    for (const field of allFields) {
+      const before = rawItem[field];
+      const after = prepared[field];
+      if (after === undefined) {
+        if (before !== undefined) removeOps.push(field);
+      } else if (!deepEqual(before, after)) {
+        setOps[field] = after;
+      }
+    }
+
+    // Key-field change detection — edit is for non-key fields only. Key
+    // changes require move (put-at-new-key + delete-at-old-key).
+    const changedKeyFields = this.keyFields.map(f => f.name).filter(n => n in setOps || removeOps.includes(n));
+    if (changedKeyFields.length) {
+      if (!options?.allowKeyChange) throw new KeyFieldChanged(changedKeyFields);
+      // Auto-promote to move: build the new key from prepared, delete old, put new.
+      await this.move(key, () => mapped, options);
+      return mapped;
+    }
+
+    // No-op short-circuit — nothing to write.
+    if (!Object.keys(setOps).length && !removeOps.length) return revived;
+
+    let p = this._cloneParams(options?.params);
+    p.Key = this._toKey(key);
+    p = this._checkExistence(p);
+    p = buildUpdate(setOps, {delete: removeOps}, p);
+    if (options?.returnFailedItem) p.ReturnValuesOnConditionCheckFailure = 'ALL_OLD';
+    p = this.hooks.updateInput(p, {name: 'edit'});
+
+    /** @type {{action: 'patch', params: any}} */
+    const batch = {action: 'patch', params: cleanParams(p)};
+    const checks = await this.hooks.checkConsistency(batch);
+    await dispatchWrite(this.client, batch, checks);
+    return this.hooks.revive(prepared);
   }
 
   async delete(key, options) {

@@ -328,6 +328,110 @@ test('delete: sends DeleteCommand', async t => {
   t.deepEqual(sent[0].input.Key, {name: 'Hoth'});
 });
 
+// --- edit ---
+
+test('edit: diffs and emits UpdateCommand with SET/REMOVE only for changed fields', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'GetCommand') {
+      return {Item: {name: 'X', hp: 10, force: 'light', stale: 'yes'}};
+    }
+    return {};
+  });
+  const result = await adapter.edit({name: 'X'}, () => ({name: 'X', hp: 20, force: 'light'}));
+  const update = sent.find(c => c.constructor.name === 'UpdateCommand');
+  t.ok(update, 'emits UpdateCommand');
+  const expr = update.input.UpdateExpression;
+  t.ok(/SET /.test(expr), 'has SET');
+  t.ok(/REMOVE /.test(expr), 'has REMOVE for dropped field');
+  const values = update.input.ExpressionAttributeValues || {};
+  const valueList = Object.values(values);
+  t.ok(valueList.includes(20), 'hp=20 written');
+  t.notOk(valueList.includes('light'), 'unchanged field not written');
+  t.equal(result?.hp, 20);
+});
+
+test('edit: no-op when mapFn returns identical item', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'GetCommand') return {Item: {name: 'X', hp: 10}};
+    return {};
+  });
+  const result = await adapter.edit({name: 'X'}, item => ({...item}));
+  const updates = sent.filter(c => c.constructor.name === 'UpdateCommand');
+  t.equal(updates.length, 0, 'no UpdateCommand emitted');
+  t.equal(result?.hp, 10, 'returns the revived item');
+});
+
+test('edit: undefined when source item missing', async t => {
+  const {adapter} = makeAdapter(async () => ({Item: undefined}));
+  const result = await adapter.edit({name: 'MISS'}, item => ({...item, hp: 100}));
+  t.equal(result, undefined);
+});
+
+test('edit: undefined when mapFn returns falsy', async t => {
+  const {adapter} = makeAdapter(async cmd => {
+    if (cmd.constructor.name === 'GetCommand') return {Item: {name: 'X', hp: 10}};
+    return {};
+  });
+  const result = await adapter.edit({name: 'X'}, () => null);
+  t.equal(result, undefined);
+});
+
+test('edit: throws KeyFieldChanged when mapFn changes a key field', async t => {
+  const {adapter} = makeAdapter(async cmd => {
+    if (cmd.constructor.name === 'GetCommand') return {Item: {name: 'X', hp: 10}};
+    return {};
+  });
+  let err;
+  try {
+    await adapter.edit({name: 'X'}, () => ({name: 'Y', hp: 10}));
+  } catch (e) {
+    err = e;
+  }
+  t.ok(err, 'threw');
+  t.equal(err?.name, 'KeyFieldChanged');
+  t.deepEqual(err?.fields, ['name']);
+});
+
+test('edit: allowKeyChange auto-promotes to move', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'GetCommand') return {Item: {name: 'X', hp: 10}};
+    return {};
+  });
+  await adapter.edit({name: 'X'}, () => ({name: 'Y', hp: 10}), {allowKeyChange: true});
+  // move() does post+delete in a transaction
+  const txn = sent.find(c => c.constructor.name === 'TransactWriteCommand');
+  t.ok(txn, 'emits TransactWriteCommand for the promoted move');
+});
+
+test('edit: requires mapFn', async t => {
+  const {adapter} = makeAdapter(async () => ({}));
+  let err;
+  try {
+    await adapter.edit({name: 'X'});
+  } catch (e) {
+    err = e;
+  }
+  t.ok(err instanceof TypeError, 'TypeError when mapFn missing');
+});
+
+test('edit: readFields limits GetItem ProjectionExpression', async t => {
+  const sent = [];
+  const {adapter} = makeAdapter(async cmd => {
+    sent.push(cmd);
+    if (cmd.constructor.name === 'GetCommand') return {Item: {name: 'X', hp: 10}};
+    return {};
+  });
+  await adapter.edit({name: 'X'}, item => ({...item, hp: 20}), {readFields: ['name', 'hp']});
+  const get = sent.find(c => c.constructor.name === 'GetCommand');
+  t.ok(get?.input.ProjectionExpression, 'projection present');
+});
+
 // --- returnFailedItem ---
 
 test('post: returnFailedItem sets ReturnValuesOnConditionCheckFailure', async t => {
