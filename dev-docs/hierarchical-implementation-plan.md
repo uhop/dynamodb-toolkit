@@ -110,6 +110,7 @@ Biggest release of the workstream. Makes hierarchical adapters declarative inste
 
 ### Naming cleanup (§"Naming cleanup — drop 'List' from bulk-individual-read helpers")
 
+- [ ] **Rename `writeList` → `writeItems`** — bulk-individual write, not a list op. Same behaviour; drops "List" per the classification rule.
 - [ ] **Consolidate `readListByKeys` + `readOrderedListByKeys` → `readByKeys`** — always ordered, length-preserving, `undefined` at missing positions.
   - New file: `src/mass/read-by-keys.js` + `.d.ts` (content = current `read-ordered-list-by-keys.js`).
   - Delete: `src/mass/read-list-by-keys.js`, `src/mass/read-ordered-list-by-keys.js` (old content).
@@ -455,6 +456,46 @@ The four framework adapters (`dynamodb-toolkit-koa`, `-express`, `-fetch`, `-lam
 ### Tracking
 
 Per-adapter 0.3.0 scope mirrors in each adapter project's `queue.md`. Updates land alongside this document's commit. Audit-note cross-links: `projects/dynamodb-toolkit-<pkg>/audit.md` per adapter.
+
+---
+
+## Post-implementation ergonomics review (after 3.6.0 ships)
+
+**File: build a realistic hierarchical REST API against this toolkit and judge how the code looks.** The test the design principles can't self-validate — they can say "don't invent list manipulation" but not "does the programmer's code feel good?"
+
+### Proposed exercise
+
+Implement a fully-working REST API for the hierarchical use case Eugene sketched at design time: a national rental agency with **state ⇒ facility ⇒ vehicle**, where a facility can rent both cars and boats (the multi-type-same-tier wrinkle). Should exercise every helper that genuinely makes sense for the scenario:
+
+- Adapter declaration with `technicalPrefix`, typed `keyFields`, `structuralKey`, `indices` (at least one GSI, one LSI), `typeLabels`, `typeDiscriminator`, `filterable`, `versionField`, `createdAtField`.
+- `adapter.buildKey` + `f-<field>-<op>=<value>` filter grammar at the REST layer.
+- Mass operations with the new options bag: cursor-resumable deletes, `{ifNotExists}` clones, cascade primitives (`deleteAllUnder` across the hierarchy).
+- Canned `mapFn` builders (`swapPrefix` for cross-state moves, `overlayFields` for bulk-tagging).
+- Marshalling helpers (e.g., `Date` on `createdAt`, maybe `Map` on per-vehicle option pricing).
+- `edit()` for in-place attribute updates.
+- T1 `ensureTable` at setup, T2 `verifyTable` at boot.
+- `adapter.typeOf` for multi-type dispatch in the REST handler.
+
+The cars-AND-boats wrinkle surfaces the real question: **one Adapter per vehicle type, or one shared Adapter dispatching via `typeOf`?** Whichever path is less awkward reveals something about `typeOf`'s ergonomics (and possibly feeds back into the multi-Adapter shared-table dispatch that was deferred post-3.x per Q13).
+
+### Where it lives
+
+- **Probably** `examples/car-rental/` or `dev-docs/examples/hierarchical-rental/` — runnable against DynamoDB Local via the existing Docker harness in `tests/helpers/dynamodb-local.js`.
+- **Maybe both** a manual-test script (runs a sequence of REST calls, asserts expected responses) and a plain example directory consumers can clone as a starting template. The manual test doubles as an integration test; the example directory doubles as documentation.
+- Wire through one framework adapter (koa or fetch — whichever is cleanest) to validate the end-to-end path.
+
+### Success criteria
+
+- Adapter declaration is readable at a glance — a new user can look at it and understand the data model.
+- Call sites read as prose, not SDK-speak: `adapter.buildKey({state: 'TX', facility: 'Dallas'}, {kind: 'children'})` beats `{KeyConditionExpression: '...', ExpressionAttributeNames: {...}, ExpressionAttributeValues: {...}}`.
+- The cars-AND-boats wrinkle is solvable without layering our own dispatch logic on top of the toolkit.
+- No method or option feels out of place. If something does, it's a design flaw the audit should surface back into the queue.
+
+### Scope
+
+Post-3.6.0 — after all hierarchical implementation phases have shipped and stabilized. Before 0.3.0 adapter releases (so we can catch ergonomics issues before they propagate to adapter consumers).
+
+Tracked in [[projects/dynamodb-toolkit/queue]] as a post-implementation task.
 
 ---
 

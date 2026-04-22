@@ -3,7 +3,7 @@ export {iterateList, iterateItems} from './iterate-list.js';
 export {readList, readListGetItems} from './read-list.js';
 export {readByKeys} from './read-by-keys.js';
 export {mergeMapFn} from './map-fns.js';
-export {writeList} from './write-list.js';
+export {writeItems} from './write-items.js';
 export {deleteList, deleteByKeys} from './delete-list.js';
 export {copyList} from './copy-list.js';
 export {moveList} from './move-list.js';
@@ -16,10 +16,12 @@ export {getTotal} from './get-total.js';
 
 import {readByKeys} from './read-by-keys.js';
 import {deleteByKeys} from './delete-list.js';
+import {writeItems} from './write-items.js';
 
 let _warnedReadList = false;
 let _warnedReadOrderedList = false;
 let _warnedDeleteList = false;
+let _warnedWriteList = false;
 
 export const readListByKeys = (client, tableName, keys, params) => {
   if (!_warnedReadList) {
@@ -43,4 +45,12 @@ export const deleteListByKeys = (client, tableName, keys) => {
     console.warn('dynamodb-toolkit: deleteListByKeys is deprecated, use deleteByKeys.');
   }
   return deleteByKeys(client, tableName, keys);
+};
+
+export const writeList = (client, tableName, items, mapFn) => {
+  if (!_warnedWriteList) {
+    _warnedWriteList = true;
+    console.warn('dynamodb-toolkit: writeList is deprecated, use writeItems (same behaviour, new name — bulk-individual write, not a list op).');
+  }
+  return writeItems(client, tableName, items, mapFn);
 };

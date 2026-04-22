@@ -1167,11 +1167,11 @@ test('built-in prepare / revive compose with user hooks (run before user)', t =>
     structuralKey: {name: '-sk'},
     technicalPrefix: '-',
     hooks: {
-      prepare: (item, isPatch) => {
+      prepare: item => {
         prepareCalledWith = item;
         return {...item, _userFlag: true};
       },
-      revive: (rawItem, fields) => {
+      revive: rawItem => {
         reviveCalledWith = rawItem;
         return {...rawItem, _reviveFlag: true};
       }
@@ -1187,4 +1187,242 @@ test('built-in prepare / revive compose with user hooks (run before user)', t =>
   // User's revive sees the post-built-in item (with -sk stripped).
   t.equal(reviveCalledWith['-sk'], undefined, 'user hook sees stripped item');
   t.equal(revived._reviveFlag, true, 'user hook ran after built-in');
+});
+
+// --- indices declaration ---
+
+test('Adapter: indices — gsi with bare-string pk', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      'by-status': {type: 'gsi', pk: 'status'}
+    }
+  });
+  t.deepEqual(adapter.indices['by-status'], {
+    type: 'gsi',
+    pk: {name: 'status', type: 'string'},
+    projection: 'all',
+    sparse: false,
+    indirect: false
+  });
+});
+
+test('Adapter: indices — gsi with pk + sk + typed', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      'by-status-date': {
+        type: 'gsi',
+        pk: 'status',
+        sk: {name: 'createdAt', type: 'number'},
+        projection: 'all'
+      }
+    }
+  });
+  t.deepEqual(adapter.indices['by-status-date'].sk, {name: 'createdAt', type: 'number'});
+});
+
+test('Adapter: indices — gsi requires pk', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['name'], indices: {bad: {type: 'gsi'}}}), 'gsi without pk');
+});
+
+test('Adapter: indices — lsi requires sk', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['name'], indices: {bad: {type: 'lsi'}}}), 'lsi without sk');
+});
+
+test('Adapter: indices — lsi rejects pk declaration', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(
+    () =>
+      new Adapter({
+        client,
+        table: 'T',
+        keyFields: ['name'],
+        indices: {'by-alt': {type: 'lsi', pk: 'name', sk: 'altField'}}
+      }),
+    'lsi with pk'
+  );
+});
+
+test('Adapter: indices — lsi with sk only', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      'by-alt': {type: 'lsi', sk: {name: 'altField', type: 'string'}}
+    }
+  });
+  t.equal(adapter.indices['by-alt'].type, 'lsi');
+  t.deepEqual(adapter.indices['by-alt'].sk, {name: 'altField', type: 'string'});
+  t.equal(adapter.indices['by-alt'].pk, undefined);
+});
+
+test('Adapter: indices — rejects unknown type', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(
+    () =>
+      new Adapter({
+        client,
+        table: 'T',
+        keyFields: ['name'],
+        indices: {bad: {type: 'other', pk: 'x'}}
+      }),
+    'unknown type'
+  );
+});
+
+test('Adapter: indices — projection defaults to all', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {x: {type: 'gsi', pk: 'foo'}}
+  });
+  t.equal(adapter.indices['x'].projection, 'all');
+});
+
+test('Adapter: indices — projection accepts keys-only / include array', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      'keys-only-idx': {type: 'gsi', pk: 'a', projection: 'keys-only'},
+      'include-idx': {type: 'gsi', pk: 'b', projection: ['x', 'y']}
+    }
+  });
+  t.equal(adapter.indices['keys-only-idx'].projection, 'keys-only');
+  t.deepEqual(adapter.indices['include-idx'].projection, ['x', 'y']);
+});
+
+test('Adapter: indices — rejects invalid projection', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(
+    () =>
+      new Adapter({
+        client,
+        table: 'T',
+        keyFields: ['name'],
+        indices: {x: {type: 'gsi', pk: 'a', projection: 'nonsense'}}
+      }),
+    'unknown projection'
+  );
+  t.throws(
+    () =>
+      new Adapter({
+        client,
+        table: 'T',
+        keyFields: ['name'],
+        indices: {x: {type: 'gsi', pk: 'a', projection: []}}
+      }),
+    'empty projection array'
+  );
+});
+
+test('Adapter: indices — sparse true/false/object', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      a: {type: 'gsi', pk: 'a', sparse: true},
+      b: {type: 'gsi', pk: 'b'},
+      c: {type: 'gsi', pk: 'c', sparse: {onlyWhen: item => !!item.active}}
+    }
+  });
+  t.equal(adapter.indices['a'].sparse, true);
+  t.equal(adapter.indices['b'].sparse, false);
+  t.equal(typeof adapter.indices['c'].sparse.onlyWhen, 'function');
+});
+
+test('Adapter: indices — rejects invalid sparse', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(
+    () =>
+      new Adapter({
+        client,
+        table: 'T',
+        keyFields: ['name'],
+        indices: {x: {type: 'gsi', pk: 'a', sparse: 'yes'}}
+      }),
+    'string sparse'
+  );
+});
+
+test('Adapter: indices — indirect flag', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      thin: {type: 'gsi', pk: 'a', projection: 'keys-only', indirect: true}
+    }
+  });
+  t.equal(adapter.indices['thin'].indirect, true);
+});
+
+test('Adapter: indices — legacy indirectIndices synthesized into indices map', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indirectIndices: {'legacy-idx': 1}
+  });
+  t.equal(adapter.indices['legacy-idx'].type, 'gsi');
+  t.equal(adapter.indices['legacy-idx'].indirect, true);
+  t.equal(adapter.indices['legacy-idx'].projection, 'keys-only');
+  // pk/sk remain undefined for legacy-only entries — no metadata available.
+  t.equal(adapter.indices['legacy-idx'].pk, undefined);
+});
+
+test('Adapter: indices — legacy indirectIndices marks existing entry as indirect', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      'my-idx': {type: 'gsi', pk: 'status', projection: 'keys-only'}
+    },
+    indirectIndices: {'my-idx': 1}
+  });
+  t.equal(adapter.indices['my-idx'].indirect, true, 'legacy marker promoted to indirect');
+  t.deepEqual(adapter.indices['my-idx'].pk, {name: 'status', type: 'string'}, 'original pk preserved');
+});
+
+test('Adapter: indices — _isIndirect reads from indices', async t => {
+  const client = makeMockClient(async cmd => {
+    const name = cmd.constructor.name;
+    if (name === 'QueryCommand' && cmd.input?.Select === 'COUNT') return {Count: 1};
+    if (name === 'QueryCommand' || name === 'ScanCommand') return {Items: [{name: 'X'}], Count: 1};
+    if (name === 'BatchGetCommand') {
+      return {Responses: {T: [{name: 'X', climate: 'frozen'}]}, UnprocessedKeys: {}};
+    }
+    return {};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      thin: {type: 'gsi', pk: 'status', projection: 'keys-only', indirect: true}
+    }
+  });
+  const result = await adapter.getAllByParams({IndexName: 'thin'});
+  t.equal(result.data[0]?.climate, 'frozen', 'second-hop BatchGet happened (indirect=true)');
 });

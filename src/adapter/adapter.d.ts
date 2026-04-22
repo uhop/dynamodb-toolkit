@@ -32,6 +32,55 @@ export interface StructuralKey {
   separator?: string;
 }
 
+/**
+ * Descriptor for a GSI / LSI partition-key or sort-key attribute. Simpler
+ * than {@link KeyFieldSpec} — no `width`, since index keys aren't joined
+ * (DynamoDB sorts them natively by declared type).
+ */
+export interface IndexKeySpec {
+  /** Attribute name on the item. */
+  name: string;
+  /** DynamoDB scalar type. Defaults to `'string'`. */
+  type?: 'string' | 'number' | 'binary';
+}
+
+/**
+ * Declaration of a secondary index. Discriminated by `type`:
+ * - `'gsi'` — global secondary index. `pk` required; `sk` optional.
+ * - `'lsi'` — local secondary index. Shares the base table's partition key
+ *   (do not declare `pk`); `sk` required.
+ *
+ * `projection` controls which attributes the index stores:
+ * - `'all'` (default) — every attribute.
+ * - `'keys-only'` — just the primary + index keys.
+ * - `string[]` — `INCLUDE`-style list of extra attributes to project.
+ *
+ * `sparse` declares sparse-index-by-absence behaviour: when `true`, items
+ * without the index key fields are omitted from the index. Pass
+ * `{onlyWhen: (item) => boolean}` for a per-item predicate (e.g. "only
+ * include rows of a certain type"). Default `false`.
+ *
+ * `indirect: true` declares the index as "keys-only + second-hop BatchGet":
+ * the toolkit's `getAllByParams` against this index reads keys, then
+ * BatchGets full items from the base table. Compatible with any projection
+ * but typically paired with `projection: 'keys-only'` to minimise GSI
+ * storage cost.
+ */
+export interface IndexSpec {
+  /** Discriminator — `'gsi'` or `'lsi'`. */
+  type: 'gsi' | 'lsi';
+  /** Partition key — required on GSI, must be omitted on LSI. */
+  pk?: IndexKeySpec;
+  /** Sort key — optional on GSI, required on LSI. */
+  sk?: IndexKeySpec;
+  /** Attribute projection — default `'all'`. */
+  projection?: 'all' | 'keys-only' | string[];
+  /** Sparse-index-by-absence; default `false`. */
+  sparse?: boolean | {onlyWhen: (item: unknown) => boolean};
+  /** Two-hop routing: reads do a BatchGet against the base table after Query/Get on the index. */
+  indirect?: boolean;
+}
+
 /** Constructor options for {@link Adapter}. */
 export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = Partial<TItem>> {
   /** The DynamoDB DocumentClient. Build via `DynamoDBDocumentClient.from(...)`. */
@@ -63,6 +112,13 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
    * `keyFields.length > 1`.
    */
   structuralKey?: StructuralKey;
+  /**
+   * Declared secondary indices (GSIs and LSIs) — single map discriminated by
+   * each entry's `type`. See {@link IndexSpec}. Legacy `indirectIndices` is
+   * synthesised into this map at construction with minimal metadata
+   * (`{type: 'gsi', indirect: true, projection: 'keys-only'}`).
+   */
+  indices?: Record<string, IndexSpec>;
   /**
    * Optional type labels, paired 1:1 with `keyFields`. `typeLabels[i]` is the
    * label returned by {@link Adapter.typeOf} for a record with
@@ -263,6 +319,11 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   searchablePrefix: string;
   /** Indirect-index map — reads against these GSIs do a second-hop BatchGet. */
   indirectIndices: Record<string, 1 | true>;
+  /**
+   * Normalised secondary-index map. Populated from `options.indices`, plus
+   * legacy `indirectIndices` entries synthesised into minimal GSI shapes.
+   */
+  indices: Record<string, Required<Omit<IndexSpec, 'pk' | 'sk'>> & {pk?: IndexKeySpec; sk?: IndexKeySpec}>;
   /** Resolved hooks bag (defaults merged with user overrides). */
   hooks: Required<AdapterHooks<TItem>>;
 

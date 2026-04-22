@@ -1,22 +1,26 @@
 /**
- * Mass operations — paginated reads, bulk-individual reads/deletes by key,
- * bulk writes, and copy/move primitives. Used internally by the Adapter but
- * callable standalone when you only want a slice of the toolkit.
+ * Mass operations — three categories:
  *
- * Naming convention:
- * - `readList` / `iterateList` / `paginateList` / `writeList` / `deleteList` /
- *   `copyList` / `moveList` — **list operations**: the database produces the
- *   set via Query / Scan.
- * - `readByKeys` / `deleteByKeys` — **bulk-individual operations**: the caller
- *   supplies N keys and wants N items back at the positions they named.
+ * 1. **Individual ops** on single items live on the Adapter (`get`, `put`,
+ *    `post`, `patch`, `delete`, `clone`, `move`).
+ * 2. **Bulk-individual ops** take N caller-supplied items or keys and batch
+ *    them for efficiency. The caller defines the set; the helper returns a
+ *    result aligned to that set. `readByKeys`, `writeItems`, `deleteByKeys`.
+ * 3. **List ops** (read or consume) use `Query` / `Scan` — the database
+ *    produces the set. Read-shaped: `readList`, `iterateList`,
+ *    `paginateList`, `getTotal`. Consume-shaped: `deleteList`, `copyList`,
+ *    `moveList` — walk pages and apply a per-item op.
  *
- * The two categories have different semantics (see
- * `topics/bulk-individual-vs-list-operations.md` in the knowledge vault).
+ * Naming follows the categories: "List" in a helper name means
+ * DB-produces-set; bulk-individual helpers drop "List" because the caller
+ * supplies the items. See `topics/bulk-individual-vs-list-operations.md` in
+ * the knowledge vault for the design rationale.
  */
 
 export {paginateList, type PaginateOptions, type PaginatedResult} from './paginate-list.js';
 export {iterateList, iterateItems} from './iterate-list.js';
 export {readByKeys} from './read-by-keys.js';
+export {writeItems} from './write-items.js';
 export {mergeMapFn, type MapFn} from './map-fns.js';
 
 import type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
@@ -49,24 +53,6 @@ export function readListGetItems(
   client: DynamoDBDocumentClient,
   params: Record<string, unknown>
 ): Promise<{nextParams: Record<string, unknown> | null; items: Record<string, unknown>[]}>;
-
-/**
- * Bulk-write items via chunked `BatchWriteItem`.
- *
- * @param client The DynamoDB DocumentClient.
- * @param tableName Target table.
- * @param items Items to write.
- * @param mapFn Optional transform applied to each item before writing.
- *   Returning a falsy value skips that item.
- * @returns Count of items that DynamoDB accepted into the table — excludes entries
- *   skipped by `mapFn` returning a falsy value.
- */
-export function writeList(
-  client: DynamoDBDocumentClient,
-  tableName: string,
-  items: Record<string, unknown>[],
-  mapFn?: (item: Record<string, unknown>) => Record<string, unknown>
-): Promise<number>;
 
 /**
  * Delete items matching a `Query` / `Scan`. Reads pages, extracts each item's
@@ -158,3 +144,11 @@ export function readOrderedListByKeys<T = Record<string, unknown>>(
 
 /** @deprecated Use `deleteByKeys`. This alias is removed in a future minor. */
 export function deleteListByKeys(client: DynamoDBDocumentClient, tableName: string, keys: Record<string, unknown>[]): Promise<number>;
+
+/** @deprecated Use `writeItems` (same behaviour, new name — bulk-individual write, not a list op). Removed in a future minor. */
+export function writeList(
+  client: DynamoDBDocumentClient,
+  tableName: string,
+  items: Record<string, unknown>[],
+  mapFn?: (item: Record<string, unknown>) => Record<string, unknown>
+): Promise<number>;

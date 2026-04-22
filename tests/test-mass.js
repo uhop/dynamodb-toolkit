@@ -4,7 +4,7 @@ import {
   iterateList,
   iterateItems,
   readByKeys,
-  writeList,
+  writeItems,
   deleteList,
   deleteByKeys,
   copyList,
@@ -125,22 +125,22 @@ test('readByKeys: record with partition-key value "__proto__" does not pollute O
   t.equal({}.polluted, undefined, 'Object.prototype not polluted');
 });
 
-// writeList
+// writeItems
 
-test('writeList: writes items via batch', async t => {
+test('writeItems: writes items via batch', async t => {
   const client = makeMockClient(async () => ({UnprocessedItems: {}}));
-  const count = await writeList(client, 'T', [{id: '1'}, {id: '2'}]);
+  const count = await writeItems(client, 'T', [{id: '1'}, {id: '2'}]);
   t.equal(count, 2);
 });
 
-test('writeList: applies mapFn', async t => {
+test('writeItems: applies mapFn', async t => {
   const written = [];
   const client = makeMockClient(async cmd => {
     const items = cmd.input.RequestItems.T;
     items.forEach(r => written.push(r.PutRequest.Item));
     return {UnprocessedItems: {}};
   });
-  await writeList(client, 'T', [{id: '1'}], item => ({...item, extra: true}));
+  await writeItems(client, 'T', [{id: '1'}], item => ({...item, extra: true}));
   t.ok(written[0].extra, 'mapFn applied');
 });
 

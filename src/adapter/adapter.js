@@ -16,7 +16,7 @@ import {applyTransaction} from '../batch/apply-transaction.js';
 
 import {paginateList} from '../mass/paginate-list.js';
 import {readByKeys} from '../mass/read-by-keys.js';
-import {writeList} from '../mass/write-list.js';
+import {writeItems} from '../mass/write-items.js';
 import {deleteList, deleteByKeys} from '../mass/delete-list.js';
 import {copyList} from '../mass/copy-list.js';
 import {moveList} from '../mass/move-list.js';
@@ -25,6 +25,74 @@ import {defaultHooks, restrictKey} from './hooks.js';
 import {dispatchWrite} from './transaction-upgrade.js';
 
 const MOVE_CHUNK = 12;
+
+// Normalize an index-key entry (GSI/LSI pk or sk) — accepts a bare string or
+// a `{name, type?}` descriptor. Width is not applicable to index keys (no
+// joining on them — DynamoDB sorts natively by declared type).
+const normalizeIndexKey = (entry, ctx) => {
+  if (typeof entry === 'string') return {name: entry, type: 'string'};
+  if (!entry || typeof entry !== 'object' || typeof entry.name !== 'string') {
+    throw new Error(`${ctx} must be a string or {name, type?}`);
+  }
+  const type = entry.type || 'string';
+  if (type !== 'string' && type !== 'number' && type !== 'binary') {
+    throw new Error(`${ctx}.type must be 'string' | 'number' | 'binary'`);
+  }
+  return {name: entry.name, type};
+};
+
+// Normalize one entry from the `indices` declaration map. Validates shape +
+// fills defaults (`projection: 'all'`, `sparse: false`, `indirect: false`).
+const normalizeIndex = (name, def) => {
+  if (!def || typeof def !== 'object') {
+    throw new Error(`options.indices['${name}'] must be an object`);
+  }
+  const type = def.type;
+  if (type !== 'gsi' && type !== 'lsi') {
+    throw new Error(`options.indices['${name}'].type must be 'gsi' | 'lsi'`);
+  }
+  const out = {type};
+  if (type === 'gsi') {
+    if (def.pk === undefined) {
+      throw new Error(`options.indices['${name}'] (gsi) requires pk`);
+    }
+    out.pk = normalizeIndexKey(def.pk, `options.indices['${name}'].pk`);
+    if (def.sk !== undefined) {
+      out.sk = normalizeIndexKey(def.sk, `options.indices['${name}'].sk`);
+    }
+  } else {
+    // lsi — inherits base table's partition key; only alternate sort is declared.
+    if (def.pk !== undefined) {
+      throw new Error(
+        `options.indices['${name}'] (lsi) does not accept pk — LSIs inherit the base table's partition key`
+      );
+    }
+    if (def.sk === undefined) {
+      throw new Error(`options.indices['${name}'] (lsi) requires sk`);
+    }
+    out.sk = normalizeIndexKey(def.sk, `options.indices['${name}'].sk`);
+  }
+  const projection = def.projection === undefined ? 'all' : def.projection;
+  if (
+    projection !== 'all' &&
+    projection !== 'keys-only' &&
+    !(Array.isArray(projection) && projection.length > 0 && projection.every(f => typeof f === 'string'))
+  ) {
+    throw new Error(`options.indices['${name}'].projection must be 'all' | 'keys-only' | non-empty string[]`);
+  }
+  out.projection = Array.isArray(projection) ? projection.slice() : projection;
+  if (def.sparse === undefined || def.sparse === false) {
+    out.sparse = false;
+  } else if (def.sparse === true) {
+    out.sparse = true;
+  } else if (def.sparse && typeof def.sparse === 'object' && typeof def.sparse.onlyWhen === 'function') {
+    out.sparse = {onlyWhen: def.sparse.onlyWhen};
+  } else {
+    throw new Error(`options.indices['${name}'].sparse must be boolean or {onlyWhen: (item) => boolean}`);
+  }
+  out.indirect = def.indirect === true;
+  return out;
+};
 
 // Normalize a keyFields entry — accepts a bare string or a full descriptor.
 // Bare string `'state'` → `{name: 'state', type: 'string'}`.
@@ -128,6 +196,31 @@ export class Adapter {
     this.searchable = options.searchable || {};
     this.searchablePrefix = options.searchablePrefix || '-search-';
     this.indirectIndices = options.indirectIndices || {};
+
+    // Normalize the `indices` map. Legacy `indirectIndices: {name: 1}` entries
+    // are synthesised into minimal `{type: 'gsi', indirect: true,
+    // projection: 'keys-only'}` shapes — enough for the second-hop BatchGet
+    // routing, without the pk/sk info that the new declaration carries
+    // (legacy entries can't participate in sort inference or filter-grammar
+    // type coercion; users who need those features migrate to `indices`).
+    this.indices = {};
+    if (options.indices !== undefined) {
+      if (typeof options.indices !== 'object' || options.indices === null) {
+        throw new Error('options.indices must be a plain object');
+      }
+      for (const name of Object.keys(options.indices)) {
+        this.indices[name] = normalizeIndex(name, options.indices[name]);
+      }
+    }
+    for (const name of Object.keys(this.indirectIndices)) {
+      if (!this.indirectIndices[name]) continue;
+      if (this.indices[name]) {
+        // Already declared via `indices` — just ensure indirect=true.
+        this.indices[name].indirect = true;
+      } else {
+        this.indices[name] = {type: 'gsi', indirect: true, projection: 'keys-only', sparse: false};
+      }
+    }
 
     // Validate that all adapter-managed field names start with technicalPrefix
     // (when declared). This guarantees revive-time stripping catches them
@@ -483,7 +576,7 @@ export class Adapter {
   _isIndirect(params, options) {
     if (options?.ignoreIndirection) return false;
     const idx = params?.IndexName;
-    return Boolean(idx && this.indirectIndices[idx] === 1);
+    return Boolean(idx && this.indices[idx]?.indirect);
   }
 
   // --- batch builders (return descriptors for use with applyBatch / applyTransaction) ---
@@ -697,7 +790,7 @@ export class Adapter {
       }
       return {processed};
     }
-    const processed = await writeList(this.client, this.table, items, item => this._prepareItem(item));
+    const processed = await writeItems(this.client, this.table, items, item => this._prepareItem(item));
     return {processed};
   }
 
@@ -738,7 +831,7 @@ export class Adapter {
       return this._prepareItem(mapped);
     });
     if (!cloned.length) return {processed: 0};
-    const processed = await writeList(this.client, this.table, cloned);
+    const processed = await writeItems(this.client, this.table, cloned);
     return {processed};
   }
 
