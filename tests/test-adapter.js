@@ -683,6 +683,76 @@ test('makeGet/makePost/makePut/makePatch/makeDelete return descriptors', async t
 
 // --- getList / getListByParams ---
 
+// --- resumable list mass ops (MassOpResult envelope) ---
+
+test('deleteListByParams: returns MassOpResult envelope', async t => {
+  const {adapter} = makeAdapter(async cmd => {
+    const name = cmd.constructor.name;
+    if (name === 'BatchWriteCommand') return {UnprocessedItems: {}};
+    return {Items: [{name: 'A'}, {name: 'B'}]};
+  });
+  const r = await adapter.deleteListByParams({TableName: TABLE});
+  t.equal(r.processed, 2);
+  t.equal(r.skipped, 0);
+  t.deepEqual(r.failed, []);
+  t.deepEqual(r.conflicts, []);
+  t.equal(r.cursor, undefined);
+});
+
+test('cloneListByParams: returns MassOpResult envelope', async t => {
+  const {adapter} = makeAdapter(async cmd => {
+    const name = cmd.constructor.name;
+    if (name === 'BatchWriteCommand') return {UnprocessedItems: {}};
+    return {Items: [{name: 'A'}]};
+  });
+  const r = await adapter.cloneListByParams({TableName: TABLE}, item => ({...item, name: item.name + '-copy'}));
+  t.equal(r.processed, 1);
+  t.deepEqual(r.failed, []);
+  t.equal(r.cursor, undefined);
+});
+
+test('moveListByParams: returns MassOpResult envelope', async t => {
+  const {adapter} = makeAdapter(async cmd => {
+    const name = cmd.constructor.name;
+    if (name === 'BatchWriteCommand') return {UnprocessedItems: {}};
+    return {Items: [{name: 'A'}]};
+  });
+  const r = await adapter.moveListByParams({TableName: TABLE}, item => ({...item, name: item.name + '-moved'}));
+  t.equal(r.processed, 2, 'put + delete');
+  t.equal(r.cursor, undefined);
+});
+
+test('deleteListByParams: maxItems stops at page boundary and emits cursor', async t => {
+  const pages = [{Items: [{name: 'A'}, {name: 'B'}], LastEvaluatedKey: {name: 'B'}}, {Items: [{name: 'C'}, {name: 'D'}]}];
+  let call = 0;
+  const {adapter} = makeAdapter(async cmd => {
+    const name = cmd.constructor.name;
+    if (name === 'BatchWriteCommand') return {UnprocessedItems: {}};
+    return pages[call++];
+  });
+  const r = await adapter.deleteListByParams({TableName: TABLE}, {maxItems: 2});
+  t.equal(r.processed, 2);
+  t.ok(r.cursor, 'cursor emitted on truncation');
+});
+
+test('cloneListByParams: resumes from cursor', async t => {
+  const {decodeCursor, encodeCursor} = await import('dynamodb-toolkit/mass');
+  const seen = [];
+  const {adapter} = makeAdapter(async cmd => {
+    const n = cmd.constructor.name;
+    if (n === 'BatchWriteCommand') return {UnprocessedItems: {}};
+    const start = cmd.input.ExclusiveStartKey;
+    if (start?.name === 'A') return {Items: [{name: 'B'}, {name: 'C'}]};
+    seen.push('unexpected-initial');
+    return {Items: []};
+  });
+  const token = encodeCursor({LastEvaluatedKey: {name: 'A'}});
+  const r = await adapter.cloneListByParams({TableName: TABLE}, x => x, {resumeToken: token});
+  t.equal(r.processed, 2);
+  t.equal(r.cursor, undefined);
+  t.notOk(decodeCursor(token).cursor);
+});
+
 test('Adapter: deprecated aliases forward to the new names (putAll / getAll / getAllByParams / deleteAllByParams / cloneAllByParams / moveAllByParams)', async t => {
   // The aliases emit console.warn once per process on first call; we don't
   // test the warning itself (module-level state makes ordering flaky) —

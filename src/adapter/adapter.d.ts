@@ -1,4 +1,5 @@
 import type {DynamoDBDocumentClient, GetCommandInput, PutCommandInput, UpdateCommandInput, DeleteCommandInput} from '@aws-sdk/lib-dynamodb';
+import type {MassOpResult} from '../mass/index.js';
 
 import type {Raw} from '../raw.js';
 import type {ArrayOp} from '../expressions/update.js';
@@ -251,6 +252,30 @@ export interface MassOptions {
   strategy?: 'native' | 'sequential';
   /** Extra DynamoDB input merged into the Command. */
   params?: Record<string, unknown>;
+  /**
+   * Soft cap on items processed in this call. Page-boundary enforced —
+   * the current page finishes before the cap takes effect. When reached,
+   * the result includes a `cursor` so the caller can resume via
+   * `resumeToken`. Only honored by list-op variants
+   * (`deleteListByParams`, `cloneListByParams`, `moveListByParams`).
+   */
+  maxItems?: number;
+  /**
+   * Opaque cursor from a prior call's `MassOpResult.cursor`. Resumes at
+   * the page boundary where the previous call stopped.
+   */
+  resumeToken?: string;
+  /**
+   * Write-if-absent — per-item `ConditionExpression: attribute_not_exists`.
+   * Mutually exclusive with `ifExists`. Wired in 3.3.0 clone/move macros;
+   * currently ignored by the bulk-batch list-op path.
+   */
+  ifNotExists?: boolean;
+  /**
+   * Write-if-present — per-item `ConditionExpression: attribute_exists`.
+   * Mutually exclusive with `ifNotExists`. See note on `ifNotExists`.
+   */
+  ifExists?: boolean;
 }
 
 /** Options for list reads (`getList` / `getListByParams`). */
@@ -629,13 +654,18 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    */
   deleteByKeys(keys: (TKey | Raw<TKey>)[], options?: MassOptions): Promise<{processed: number}>;
   /**
-   * Delete every item matching `params` (Query / Scan).
+   * Delete every item matching `params` (Query / Scan). Resumable via
+   * `options.maxItems` + `options.resumeToken` — when `maxItems` is
+   * reached at a page boundary, the result carries a `cursor` for
+   * continuation. Re-delete of already-absent items is idempotent; safe
+   * to retry.
    *
    * @param params Pre-built DynamoDB `Query` / `Scan` input.
-   * @param options Strategy / extra DynamoDB input.
-   * @returns `{processed}` — total delete actions DynamoDB accepted.
+   * @param options Resumable mass-op options.
+   * @returns `MassOpResult` — `processed` counts delete actions accepted;
+   *   `cursor` present when stopped by `maxItems`.
    */
-  deleteListByParams(params: Record<string, unknown>, options?: MassOptions): Promise<{processed: number}>;
+  deleteListByParams(params: Record<string, unknown>, options?: MassOptions): Promise<MassOpResult>;
   /**
    * Clone each item identified by a key, optionally transformed by `mapFn`.
    *
@@ -647,13 +677,17 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   cloneByKeys(keys: (TKey | Raw<TKey>)[], mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
   /**
    * Clone every item matching `params`, optionally transformed by `mapFn`.
+   * Resumable via `options.maxItems` + `options.resumeToken`. `mapFn`
+   * returning a falsy value drops that item silently (not counted as a
+   * failure).
    *
    * @param params Pre-built `Query` / `Scan` input.
    * @param mapFn Transform applied before writing the copy. Default identity.
-   * @param options Strategy / extra DynamoDB input.
-   * @returns `{processed}` — total copies written.
+   * @param options Resumable mass-op options.
+   * @returns `MassOpResult` — `processed` counts copies written;
+   *   `cursor` present when stopped by `maxItems`.
    */
-  cloneListByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
+  cloneListByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<MassOpResult>;
   /**
    * Move each item identified by a key (paired put + delete chunks).
    *
@@ -665,22 +699,26 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   moveByKeys(keys: (TKey | Raw<TKey>)[], mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
   /**
    * Move every item matching `params` (paired put + delete chunks).
+   * Resumable via `options.maxItems` + `options.resumeToken`. `mapFn`
+   * returning a falsy value drops both legs (the source is NOT deleted
+   * when its destination copy is not written).
    *
    * @param params Pre-built `Query` / `Scan` input.
    * @param mapFn Transform applied before writing the destination. Default identity.
-   * @param options Strategy / extra DynamoDB input.
-   * @returns `{processed}` — sum of put + delete actions (≈ 2× the moved-item count on success).
+   * @param options Resumable mass-op options.
+   * @returns `MassOpResult` — `processed` is the sum of put + delete actions
+   *   (≈ 2× the moved-item count on success); `cursor` present when stopped by `maxItems`.
    */
-  moveListByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
+  moveListByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<MassOpResult>;
 
   /** @deprecated Use {@link Adapter.putItems}. Removed in a future minor. */
   putAll(items: (TItem | Raw<TItem>)[], options?: MassOptions): Promise<{processed: number}>;
   /** @deprecated Use {@link Adapter.deleteListByParams}. Removed in a future minor. */
-  deleteAllByParams(params: Record<string, unknown>, options?: MassOptions): Promise<{processed: number}>;
+  deleteAllByParams(params: Record<string, unknown>, options?: MassOptions): Promise<MassOpResult>;
   /** @deprecated Use {@link Adapter.cloneListByParams}. Removed in a future minor. */
-  cloneAllByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
+  cloneAllByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<MassOpResult>;
   /** @deprecated Use {@link Adapter.moveListByParams}. Removed in a future minor. */
-  moveAllByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<{processed: number}>;
+  moveAllByParams(params: Record<string, unknown>, mapFn?: (item: TItem) => TItem, options?: MassOptions): Promise<MassOpResult>;
 
   // --- Batch builders ---
 

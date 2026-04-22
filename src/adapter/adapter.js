@@ -17,9 +17,8 @@ import {applyTransaction} from '../batch/apply-transaction.js';
 import {paginateList} from '../mass/paginate-list.js';
 import {readByKeys} from '../mass/read-by-keys.js';
 import {writeItems} from '../mass/write-items.js';
-import {deleteList, deleteByKeys} from '../mass/delete-list.js';
-import {copyList} from '../mass/copy-list.js';
-import {moveList} from '../mass/move-list.js';
+import {deleteByKeys} from '../mass/delete-list.js';
+import {runPaged} from '../mass/run-paged.js';
 
 import {defaultHooks, restrictKey} from './hooks.js';
 import {dispatchWrite} from './transaction-upgrade.js';
@@ -1096,12 +1095,19 @@ export class Adapter {
     return {processed};
   }
 
-  async deleteListByParams(params, _options) {
+  async deleteListByParams(params, options) {
     let p = this._cloneParams(params);
     p = addProjection(p, this.primaryKeyAttrs.join(','), null, true);
     p = cleanParams(p);
-    const processed = await deleteList(this.client, p, item => this._restrictKey(item));
-    return {processed};
+
+    return runPaged(this.client, p, options, async items => {
+      const keys = items.map(item => this._restrictKey(item)).filter(Boolean);
+      if (!keys.length) return {processed: 0};
+      /** @type {{action: 'delete', params: any}[]} */
+      const batch = keys.map(key => ({action: 'delete', params: {TableName: this.table, Key: key}}));
+      const processed = await applyBatch(this.client, batch);
+      return {processed};
+    });
   }
 
   async cloneByKeys(keys, mapFn, _options) {
@@ -1117,16 +1123,24 @@ export class Adapter {
     return {processed};
   }
 
-  async cloneListByParams(params, mapFn, _options) {
+  async cloneListByParams(params, mapFn, options) {
     let p = this._cloneParams(params);
     p = cleanParams(p);
-    const fn = item => {
-      const revived = this.hooks.revive(item);
-      const mapped = mapFn ? mapFn(revived) : revived;
-      return this._prepareItem(mapped);
-    };
-    const processed = await copyList(this.client, p, fn);
-    return {processed};
+
+    return runPaged(this.client, p, options, async items => {
+      const prepared = items
+        .map(item => {
+          const revived = this.hooks.revive(item);
+          const mapped = mapFn ? mapFn(revived) : revived;
+          return mapped ? this._prepareItem(mapped) : null;
+        })
+        .filter(Boolean);
+      if (!prepared.length) return {processed: 0};
+      /** @type {{action: 'put', params: any}[]} */
+      const batch = prepared.map(item => ({action: 'put', params: {TableName: this.table, Item: item}}));
+      const processed = await applyBatch(this.client, batch);
+      return {processed};
+    });
   }
 
   async moveByKeys(keys, mapFn, _options) {
@@ -1157,18 +1171,32 @@ export class Adapter {
     return {processed};
   }
 
-  async moveListByParams(params, mapFn, _options) {
+  async moveListByParams(params, mapFn, options) {
     let p = this._cloneParams(params);
-    p = addProjection(p, this.primaryKeyAttrs.join(','), null, true);
     p = cleanParams(p);
-    const itemMapper = item => {
-      const revived = this.hooks.revive(item);
-      const mapped = mapFn ? mapFn(revived) : revived;
-      return this._prepareItem(mapped);
-    };
-    const keyMapper = item => this._restrictKey(item);
-    const processed = await moveList(this.client, p, itemMapper, keyMapper);
-    return {processed};
+
+    return runPaged(this.client, p, options, async items => {
+      let processed = 0;
+      for (let offset = 0; offset < items.length; offset += MOVE_CHUNK) {
+        const slice = items.slice(offset, offset + MOVE_CHUNK);
+        // Pair put + delete per item so a falsy mapFn drops BOTH legs —
+        // otherwise the source gets deleted without its transformed copy being written.
+        const pairs = [];
+        for (const item of slice) {
+          const revived = this.hooks.revive(item);
+          const mapped = mapFn ? mapFn(revived) : revived;
+          if (!mapped) continue;
+          pairs.push({put: this._prepareItem(mapped), key: this._restrictKey(item)});
+        }
+        if (!pairs.length) continue;
+        /** @type {{action: 'put', params: any}[]} */
+        const puts = pairs.map(({put}) => ({action: 'put', params: {TableName: this.table, Item: put}}));
+        /** @type {{action: 'delete', params: any}[]} */
+        const deletes = pairs.map(({key}) => ({action: 'delete', params: {TableName: this.table, Key: key}}));
+        processed += await applyBatch(this.client, [...puts, ...deletes]);
+      }
+      return {processed};
+    });
   }
 
   // --- single clone / move ---

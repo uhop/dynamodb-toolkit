@@ -14,6 +14,7 @@ import {
   encodeCursor,
   decodeCursor
 } from 'dynamodb-toolkit/mass';
+import {runPaged} from 'dynamodb-toolkit/mass/run-paged.js';
 import {makeMockClient} from './helpers/mock-client.js';
 
 // Helper: make a simple scan-like mock that returns all items in one page
@@ -342,4 +343,79 @@ test('decodeCursor: throws on malformed input', t => {
     threw = true;
   }
   t.ok(threw, 'malformed cursor rejected');
+});
+
+// runPaged
+
+test('runPaged: exhausts scan, returns no cursor', async t => {
+  const pages = [{Items: [{id: '1'}, {id: '2'}], LastEvaluatedKey: {id: '2'}}, {Items: [{id: '3'}]}];
+  let call = 0;
+  const client = makeMockClient(async () => pages[call++]);
+  const seen = [];
+  const result = await runPaged(client, {TableName: 'T'}, {}, items => {
+    seen.push(...items.map(i => i.id));
+    return {processed: items.length};
+  });
+  t.deepEqual(seen, ['1', '2', '3']);
+  t.equal(result.processed, 3);
+  t.equal(result.cursor, undefined, 'no cursor when exhausted');
+});
+
+test('runPaged: stops at page boundary when maxItems reached, emits cursor', async t => {
+  const pages = [
+    {Items: [{id: '1'}, {id: '2'}], LastEvaluatedKey: {id: '2'}},
+    {Items: [{id: '3'}, {id: '4'}], LastEvaluatedKey: {id: '4'}},
+    {Items: [{id: '5'}]}
+  ];
+  let call = 0;
+  const client = makeMockClient(async () => pages[call++]);
+  const result = await runPaged(client, {TableName: 'T'}, {maxItems: 2}, items => ({processed: items.length}));
+  t.equal(result.processed, 2, 'first page fully consumed');
+  t.ok(result.cursor, 'cursor emitted');
+  const payload = decodeCursor(result.cursor);
+  t.deepEqual(payload.LastEvaluatedKey, {id: '2'}, 'cursor points past first page');
+});
+
+test('runPaged: resumes from cursor', async t => {
+  const pagesByStartKey = new Map([
+    ['initial', {Items: [{id: '1'}], LastEvaluatedKey: {id: '1'}}],
+    ['1', {Items: [{id: '2'}, {id: '3'}]}]
+  ]);
+  const client = makeMockClient(async cmd => {
+    const start = cmd.input.ExclusiveStartKey;
+    return pagesByStartKey.get(start ? start.id : 'initial');
+  });
+  const resumeToken = encodeCursor({LastEvaluatedKey: {id: '1'}});
+  const seen = [];
+  const result = await runPaged(client, {TableName: 'T'}, {resumeToken}, items => {
+    seen.push(...items.map(i => i.id));
+    return {processed: items.length};
+  });
+  t.deepEqual(seen, ['2', '3'], 'resumed past first page');
+  t.equal(result.processed, 2);
+  t.equal(result.cursor, undefined);
+});
+
+test('runPaged: accumulates failed + conflicts across pages', async t => {
+  const pages = [{Items: [{id: '1'}, {id: '2'}], LastEvaluatedKey: {id: '2'}}, {Items: [{id: '3'}]}];
+  let call = 0;
+  const client = makeMockClient(async () => pages[call++]);
+  const result = await runPaged(client, {TableName: 'T'}, {}, items => ({
+    processed: items.length - 1,
+    failed: [{key: {id: items[0].id}, reason: 'Unknown'}],
+    conflicts: []
+  }));
+  t.equal(result.processed, 3 - 2);
+  t.equal(result.failed.length, 2, 'one failed per page');
+});
+
+test('runPaged: empty pages do not invoke onPage', async t => {
+  let onPageCalls = 0;
+  const client = makeMockClient(async () => ({Items: []}));
+  const result = await runPaged(client, {TableName: 'T'}, {}, items => {
+    onPageCalls++;
+    return {processed: items.length};
+  });
+  t.equal(onPageCalls, 0);
+  t.equal(result.processed, 0);
 });
