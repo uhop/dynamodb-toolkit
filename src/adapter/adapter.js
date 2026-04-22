@@ -23,6 +23,7 @@ import {moveList} from '../mass/move-list.js';
 
 import {defaultHooks, restrictKey} from './hooks.js';
 import {dispatchWrite} from './transaction-upgrade.js';
+import {ConsistentReadOnGSIRejected} from '../errors.js';
 
 const MOVE_CHUNK = 12;
 
@@ -659,6 +660,20 @@ export class Adapter {
     return Boolean(idx && this.indices[idx]?.indirect);
   }
 
+  /**
+   * Refuse strong-consistent reads against a declared GSI (DynamoDB rejects
+   * `ConsistentRead: true` on GSI Query — GSIs are eventually consistent
+   * by design). LSIs support strong consistency and are left alone;
+   * undeclared indices are deferred to DynamoDB (no local knowledge).
+   */
+  _checkConsistentRead(params) {
+    if (!params?.ConsistentRead) return;
+    const idx = params.IndexName;
+    if (!idx) return;
+    const spec = this.indices[idx];
+    if (spec && spec.type === 'gsi') throw new ConsistentReadOnGSIRejected(idx);
+  }
+
   // --- batch builders (return descriptors for use with applyBatch / applyTransaction) ---
 
   /** @returns {Promise<{action: 'get', adapter: Adapter, params: any}>} */
@@ -824,6 +839,7 @@ export class Adapter {
   }
 
   async getListByParams(params, options) {
+    this._checkConsistentRead(params);
     const isIndirect = this._isIndirect(params, options);
     let activeParams = this._cloneParams(params);
     if (isIndirect) {

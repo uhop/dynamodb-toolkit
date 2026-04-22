@@ -25,6 +25,17 @@ export {
 } from './adapter/adapter.js';
 export {type AdapterHooks, type OpName} from './adapter/hooks.js';
 export {TransactionLimitExceededError} from './adapter/transaction-upgrade.js';
+export {
+  ToolkitError,
+  ConsistentReadOnGSIRejected,
+  NoIndexForSortField,
+  BadFilterField,
+  BadFilterOp,
+  AmbiguousDestination,
+  KeyFieldChanged,
+  CreatedAtFieldNotDeclared,
+  CascadeNotDeclared
+} from './errors.js';
 
 // Type re-exports from SDK peers for convenience.
 export type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';

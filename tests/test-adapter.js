@@ -1640,3 +1640,74 @@ test('Adapter: typeDiscriminator empty-string shorthand throws', t => {
     'empty string'
   );
 });
+
+// --- ConsistentReadOnGSIRejected ---
+
+test('getListByParams: refuses ConsistentRead on declared GSI', async t => {
+  const client = makeMockClient(async () => ({Items: [], Count: 0}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      'by-status': {type: 'gsi', pk: 'status'}
+    }
+  });
+  // Strong-consistent read on a GSI should throw ConsistentReadOnGSIRejected.
+  let threw;
+  try {
+    await adapter.getListByParams({TableName: 'T', IndexName: 'by-status', ConsistentRead: true});
+  } catch (err) {
+    threw = err;
+  }
+  t.ok(threw, 'throws');
+  t.equal(threw.name, 'ConsistentReadOnGSIRejected');
+  t.equal(threw.indexName, 'by-status');
+});
+
+test('getListByParams: allows ConsistentRead on declared LSI', async t => {
+  const client = makeMockClient(async cmd => {
+    const name = cmd.constructor.name;
+    if (name === 'QueryCommand' && cmd.input?.Select === 'COUNT') return {Count: 0};
+    if (name === 'QueryCommand' || name === 'ScanCommand') return {Items: [], Count: 0};
+    return {};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName'],
+    structuralKey: '-sk',
+    indices: {
+      'by-alt': {type: 'lsi', sk: 'altSort'}
+    }
+  });
+  // Should NOT throw — LSI supports strong consistency.
+  await adapter.getListByParams({TableName: 'T', IndexName: 'by-alt', ConsistentRead: true});
+  t.ok(true, 'LSI consistent read allowed');
+});
+
+test('getListByParams: allows ConsistentRead on base table (no IndexName)', async t => {
+  const client = makeMockClient(async cmd => {
+    const name = cmd.constructor.name;
+    if (name === 'QueryCommand' && cmd.input?.Select === 'COUNT') return {Count: 0};
+    if (name === 'QueryCommand' || name === 'ScanCommand') return {Items: [], Count: 0};
+    return {};
+  });
+  const adapter = new Adapter({client, table: 'T', keyFields: ['name']});
+  await adapter.getListByParams({TableName: 'T', ConsistentRead: true});
+  t.ok(true, 'base-table consistent read allowed');
+});
+
+test('getListByParams: defers to DynamoDB for undeclared indices (legacy/unknown)', async t => {
+  const client = makeMockClient(async cmd => {
+    const name = cmd.constructor.name;
+    if (name === 'QueryCommand' && cmd.input?.Select === 'COUNT') return {Count: 0};
+    if (name === 'QueryCommand' || name === 'ScanCommand') return {Items: [], Count: 0};
+    return {};
+  });
+  const adapter = new Adapter({client, table: 'T', keyFields: ['name']});
+  // Unknown index — toolkit doesn't know if it's a GSI or LSI; no refusal here.
+  // (DynamoDB will reject if it's actually a GSI.)
+  await adapter.getListByParams({TableName: 'T', IndexName: 'unknown-idx', ConsistentRead: true});
+  t.ok(true, 'undeclared index: no local refusal');
+});

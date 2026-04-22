@@ -6,3 +6,14 @@ export {seq} from './seq.js';
 export {random} from './random.js';
 export {Adapter} from './adapter/adapter.js';
 export {TransactionLimitExceededError} from './adapter/transaction-upgrade.js';
+export {
+  ToolkitError,
+  ConsistentReadOnGSIRejected,
+  NoIndexForSortField,
+  BadFilterField,
+  BadFilterOp,
+  AmbiguousDestination,
+  KeyFieldChanged,
+  CreatedAtFieldNotDeclared,
+  CascadeNotDeclared
+} from './errors.js';
