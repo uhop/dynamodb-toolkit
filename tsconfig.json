@@ -1,5 +1,5 @@
 {
-  "include": ["src/**/*", "tests/**/*"],
+  "include": ["src/**/*", "tests/**/*", "examples/**/*.ts"],
   "compilerOptions": {
     "target": "ES2022",
     "module": "Node16",
@@ -9,6 +9,7 @@
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "skipLibCheck": false,
-    "types": ["node"]
+    "types": ["node"],
+    "allowImportingTsExtensions": true
   }
 }
