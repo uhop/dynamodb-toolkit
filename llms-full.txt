@@ -816,7 +816,13 @@ const adapter = new Adapter({client: {send}, table: 'T', keyFields: ['name']});
 
 See `tests/helpers/dynamodb-local.js` — spawns `amazon/dynamodb-local` via Docker on a random port, skips with a clear message when Docker is unavailable.
 
-## 16. Migration v2 → v3
+## 16. Problem-first recipes
+
+Pattern-first pages indexed at https://github.com/uhop/dynamodb-toolkit/wiki/Recipes. Each recipe opens with the SQL-equivalent question, shows the declaration + worked code, and calls out "when this doesn't fit." The full catalog (with one-line hooks) is in `llms.txt` §Recipes and on the wiki index page. Eleven recipes grouped as: **hierarchical data + type dispatch** (tier listing across / within partitions; per-tier sparse GSI markers) · **subtree operations** (`buildKey` shapes, cascade delete / clone / move) · **concurrency + time-bounded state** (reservation with auto-release) · **index design** (keys-only GSI with runtime projection) · **REST query surface** (Filter URL grammar, text search) · **bulk operations + lifecycle** (resumable mass operations, provisioning workflow).
+
+Reach for a recipe when the question is "how do I do X" rather than "what does method Y do." For method-level detail stay in this file or `llms.txt`.
+
+## 17. Migration v2 → v3
 
 - AWS SDK v3 peer-deps replace `aws-sdk` v2.
 - One data format (plain JS via `lib-dynamodb`); `Raw` / `DbRaw` collapsed to `Raw<T>`.
@@ -829,7 +835,7 @@ See `tests/helpers/dynamodb-local.js` — spawns `amazon/dynamodb-local` via Doc
 - Transaction limit raised 25 → 100.
 - v2 documentation snapshot lives in the wiki at the `v2.3-docs` git tag. v2 source remains available on npm as `dynamodb-toolkit@2.3.0`.
 
-## 17. Major 3.x milestones
+## 18. Major 3.x milestones
 
 - **3.1.1** — Pre-adapter security audit (prototype pollution closed in `paths/`, `parse-patch`, `read-ordered-list-by-keys`; DoS-on-self closed in batch retry loop, handler unbounded body, `?offset=`; silent-data-loss fixed in `moveList`, `moveByKeys`).
 - **3.1.2** — Tier-A rest-core extractions (`buildListOptions`, `resolveSort`, `stripMount`, `coerceStringQuery`, `validateWriteBody`, `readJsonBody`). Byte-accurate body cap (was UTF-16 code units).

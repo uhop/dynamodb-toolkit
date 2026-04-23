@@ -170,7 +170,7 @@ The package ships discrete, tree-shakable sub-exports for callers who want only 
 
 A bundled CLI (`dynamodb-toolkit`) wraps the provisioning helpers for scripted use — see [Table provisioning](https://github.com/uhop/dynamodb-toolkit/wiki/Table-provisioning) in the wiki.
 
-Full reference docs live in the [wiki](https://github.com/uhop/dynamodb-toolkit/wiki).
+Full reference docs live in the [wiki](https://github.com/uhop/dynamodb-toolkit/wiki). Problem-first [recipes](https://github.com/uhop/dynamodb-toolkit/wiki/Recipes) cover common patterns (hierarchical lookups, cascade ops, reservations with auto-release, filter URL grammar, text search, resumable mass ops, provisioning).
 
 ## Compatibility
 

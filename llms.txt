@@ -368,6 +368,41 @@ All extend `ToolkitError` (which extends `Error`). `err.name` matches the class 
 | `TableVerificationFailed` | `tableName`, `diffs` | `verifyTable({throwOnMismatch})` detected drift. |
 | `TransactionLimitExceededError` | `count`, `limit` | Combined `TransactWriteItems` actions > 100. |
 
+## Recipes (problem-first patterns)
+
+Wiki index: https://github.com/uhop/dynamodb-toolkit/wiki/Recipes
+
+Each recipe opens with the SQL-equivalent question, shows the minimal declaration, walks through worked code, and ends with honest "when this doesn't fit" caveats. Grouped by problem domain:
+
+### Hierarchical data + type dispatch
+
+- [List records of a tier](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-List-records-of-a-tier) — `SELECT * WHERE kind = 'state'`. Sparse GSI on auto-populated `typeField`; one GSI covers every tier.
+- [List records of a tier within a partition](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-List-records-of-a-tier-within-a-partition) — `SELECT * WHERE state = 'TX' AND kind = 'facility'`. Sparse LSI sharing the base pk; cheapest when listing is always partition-scoped.
+- [Per-tier sparse GSI markers](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-Per-tier-sparse-GSI-markers) — one GSI per tier with a per-tier marker attribute. Finer projection / write-cost control; sharded-marker variant for hot-partition risk.
+
+### Subtree operations
+
+- [Querying subtrees with `buildKey`](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-Querying-subtrees-with-buildKey) — `buildKey(values, options?)` composes three KCE shapes: children-only (default), self+descendants (`{self: true}`), narrow-prefix (`{partial: 'Dal'}`). Plus `getListUnder` sugar.
+- [Cascade subtree operations](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-Cascade-subtree-operations) — `deleteAllUnder` / `cloneAllUnder[By]` / `moveAllUnder[By]` against composite `keyFields` + `relationships: {structural: true}`. Leaf-first vs root-first ordering, constructive-before-destructive, resumable.
+
+### Concurrency and time-bounded state
+
+- [Reservation with auto-release](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-Reservation-with-auto-release) — short-lived resource holds with auto-expiry. Composes `versionField` (OC) + `createdAtField` + `asOf` (scope-freeze) + `deleteListByParams` (resumable sweep). Covers ABA defense, DynamoDB-native-TTL-as-backstop.
+
+### Index design and storage cost
+
+- [Keys-only GSI with runtime projection](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-Keys-only-GSI-with-runtime-projection) — `projection: 'keys-only'` + `indirect: true`. GSI Query for keys → `BatchGetItem` for per-call projection. Cost tables comparing `all` / `keys-only` / `INCLUDE` at real item sizes.
+
+### REST query surface
+
+- [Filter URL grammar](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-Filter-URL-grammar) — `?<op>-<field>=<value>` end-to-end. `filterable` declaration, per-field type coercion, first-char delimiter for `in`/`btw`, KCE auto-promotion rules, cost model per path.
+- [Text search](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-Text-search) — `?search=term` over `searchable` mirror columns. Lowercased-mirror write path, OR-fan-out read path, custom normalization via user `prepare` hook, when to switch to OpenSearch / Algolia.
+
+### Bulk operations and lifecycle
+
+- [Resumable mass operations](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-Resumable-mass-operations) — `MassOpOptions` (`maxItems`, `resumeToken`, `asOf`, `ifNotExists`/`ifExists`) + `MassOpResult`. EventBridge / Step Functions / driver-script orchestration. Error buckets (`failed` vs `conflicts` vs `skipped`) and idempotency rules.
+- [Provisioning workflow](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-Provisioning-workflow) — `planTable` / `ensureTable` / `verifyTable` + CLI. ADD-only rules, descriptor-row round-trip for non-DescribeTable metadata (`filterable`, `searchable`, `versionField`, …), IaC-owned vs toolkit-owned vs CLI-only deploy patterns.
+
 ## Migration v2 → v3
 
 - AWS SDK v3 peer-deps replace `aws-sdk` v2.
