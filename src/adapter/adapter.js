@@ -1115,10 +1115,19 @@ export class Adapter {
     const kcParts = [];
     const feParts = [];
 
+    // At most one KeyCondition per key component — DynamoDB rejects `#sk = a
+    // AND begins_with(#sk, b)` as an over-specified sort-key condition.
+    // Track per-component so a `?eq-pk=x&eq-pk=y` (nonsense) or multi-clause
+    // sort-key request doesn't emit illegal KCE; the losers fall back to FE
+    // where both comparisons apply post-fetch.
+    let pkPromoted = false;
+    let skPromoted = false;
     for (const c of clauses) {
-      const canPromote =
-        (c.op === 'eq' && pkName && c.field === pkName) ||
-        (skName && c.field === skName && (c.op === 'eq' || c.op === 'beg' || c.op === 'btw'));
+      const pkMatch = c.op === 'eq' && pkName && c.field === pkName && !pkPromoted;
+      const skMatch = skName && c.field === skName && !skPromoted && (c.op === 'eq' || c.op === 'beg' || c.op === 'btw' || c.op === 'lt' || c.op === 'le' || c.op === 'gt' || c.op === 'ge');
+      const canPromote = pkMatch || skMatch;
+      if (pkMatch) pkPromoted = true;
+      if (skMatch) skPromoted = true;
       const target = canPromote ? kcParts : feParts;
       const nameAlias = allocName(c.field);
 

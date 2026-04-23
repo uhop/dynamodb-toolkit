@@ -3169,6 +3169,57 @@ test('applyFilter: beg on structural-key sort-key auto-promotes', t => {
   t.matchString(p.KeyConditionExpression, /begins_with\(#ff0, :ffv0\)/);
 });
 
+test('applyFilter: comparison op on sort key auto-promotes to KeyCondition', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName'],
+    structuralKey: '-sk',
+    filterable: {'-sk': ['lt', 'le', 'gt', 'ge']}
+  });
+  for (const op of ['lt', 'le', 'gt', 'ge']) {
+    const p = adapter.applyFilter({}, [{field: '-sk', op, value: 'TX|Dallas'}]);
+    t.ok(p.KeyConditionExpression, 'sort-key comparison goes to KC not FE');
+    t.equal(p.FilterExpression, undefined);
+  }
+});
+
+test('applyFilter: second sort-key clause falls back to FilterExpression', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName'],
+    structuralKey: '-sk',
+    filterable: {'-sk': ['gt', 'lt']}
+  });
+  const p = adapter.applyFilter({}, [
+    {field: '-sk', op: 'gt', value: 'TX|A'},
+    {field: '-sk', op: 'lt', value: 'TX|Z'}
+  ]);
+  t.ok(p.KeyConditionExpression, 'first sk clause promoted');
+  t.matchString(p.KeyConditionExpression, /#ff0 > :ffv0/);
+  t.ok(p.FilterExpression, 'second sk clause falls to FE (KCE allows one per component)');
+  t.matchString(p.FilterExpression, /#ff1 < :ffv1/);
+});
+
+test('applyFilter: second pk clause falls back to FilterExpression', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state'],
+    filterable: {state: ['eq']}
+  });
+  const p = adapter.applyFilter({}, [
+    {field: 'state', op: 'eq', value: 'TX'},
+    {field: 'state', op: 'eq', value: 'CA'}
+  ]);
+  t.ok(p.KeyConditionExpression, 'first pk clause promoted');
+  t.ok(p.FilterExpression, 'duplicate pk clause falls to FE');
+});
+
 test('applyFilter: btw requires exactly 2 values', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({client, table: 'T', keyFields: ['name'], filterable: {cost: ['btw']}});

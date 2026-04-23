@@ -1,12 +1,12 @@
-# dynamodb-toolkit — Full Reference (v3)
+# dynamodb-toolkit — Full Reference (v3.7.0)
 
-> Zero-runtime-dependency, ESM-only micro-library for AWS DynamoDB built on the AWS JS SDK v3 (`@aws-sdk/client-dynamodb` + `@aws-sdk/lib-dynamodb`). Provides the `Adapter` class, expression builders, batch + transaction chunking, mass operations, a framework-agnostic REST core, and a `node:http` request handler.
+> Zero-runtime-dependency, ESM-only micro-library for AWS DynamoDB built on the AWS JS SDK v3 (`@aws-sdk/client-dynamodb` + `@aws-sdk/lib-dynamodb`). Provides the `Adapter` class, expression builders, batch + transaction chunking, resumable mass operations, cascade primitives, optimistic concurrency, scope-freeze, marshallers, a framework-agnostic REST core, a `node:http` handler, and table-provisioning helpers + CLI.
 
 This file is the long-form companion to `llms.txt`. Read `llms.txt` first for the API surface; this file documents semantics, edge cases, and the per-module helper API.
 
 ## 1. Adapter
 
-`Adapter` (`src/adapter/adapter.js`) is the composition root. One Adapter typically maps to one logical entity (often one table). It owns long-lived state (`client`, `table`, `keyFields`, `hooks`) and delegates real work to the `expressions/`, `batch/`, `mass/`, and `paths/` modules — all of which are independently importable.
+`Adapter` (`src/adapter/adapter.js`) is the composition root. One Adapter typically maps to one logical entity (usually one table, though multi-type shared tables work via `typeDiscriminator`/`typeLabels`). It owns long-lived state (`client`, `table`, `keyFields`, hooks) and delegates real work to the `expressions/`, `batch/`, `mass/`, and `paths/` modules — all independently importable.
 
 ### 1.1 Constructor
 
@@ -15,31 +15,82 @@ import {DynamoDBClient} from '@aws-sdk/client-dynamodb';
 import {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
 import {Adapter} from 'dynamodb-toolkit';
 
-const client = new DynamoDBClient({region: 'us-east-1'});
-const docClient = DynamoDBDocumentClient.from(client, {
+const client = DynamoDBDocumentClient.from(new DynamoDBClient({region: 'us-east-1'}), {
   marshallOptions: {removeUndefinedValues: true}
 });
 
 const adapter = new Adapter({
-  client: docClient,                  // required: DynamoDBDocumentClient
-  table: 'planets',                   // required
-  keyFields: ['name'],                // required: partition key first, optional sort key second
-  projectionFieldMap: {},             // optional: alias → real field for projections
-  searchable: {name: 1},              // optional: '-search-<name>' lowercase mirrors
-  searchablePrefix: '-search-',       // optional default
-  indirectIndices: {},                // optional: {IndexName: 1} for key-only GSIs
-  hooks: {                            // optional: per-instance hook overrides
-    prepare(item, isPatch) { ... },
-    revive(rawItem, fields) { ... },
-    validateItem(item, isPatch) { ... },
-    checkConsistency(batch) { ... }
+  client,                           // required
+  table: 'rentals',                 // required
+  keyFields: [                      // required; partition key first, optional sort second
+    'state',
+    {name: 'rentalId', type: 'number', width: 5},
+    'carVin'
+  ],
+  structuralKey: {name: '-sk', separator: '|'},   // required when keyFields.length > 1
+  technicalPrefix: '-',                           // opt-in adapter-managed-field prefix
+  typeLabels: ['state', 'rental', 'car'],         // paired 1:1 with keyFields
+  typeDiscriminator: {name: 'kind'},
+  typeField: 'kind',                              // auto-populate via built-in prepare
+  indices: {
+    'by-status-date': {
+      type: 'gsi',
+      pk: 'status',
+      sk: {name: 'createdAt', type: 'number'},
+      projection: 'all',
+      sparse: true
+    },
+    'by-name': {type: 'lsi', sk: 'name', projection: 'all'}
+  },
+  filterable: {
+    status: ['eq', 'in'],
+    year: {ops: ['eq', 'ge', 'le', 'btw'], type: 'number'}
+  },
+  searchable: {name: 1},
+  versionField: '-version',
+  createdAtField: '-createdAt',
+  relationships: {structural: true},
+  descriptorKey: '__adapter__',
+  hooks: {
+    prepare: stampCreatedAtISO('-createdAt'),
+    validateItem: async item => { if (!item.name) throw new Error('name is required'); }
   }
 });
 ```
 
-The constructor throws synchronously if `client`, `table`, or a non-empty `keyFields` is missing.
+`client`, `table`, and a non-empty `keyFields` are required; the constructor throws synchronously without them.
 
-### 1.2 The Raw bypass marker
+**Normalization performed at construction:**
+- `keyFields` → `Required<KeyFieldSpec>[]` with `{name, type, width?}` per entry. Bare strings become `{name, type: 'string'}`. `{type: 'number'}` in a composite requires `width`.
+- `structuralKey` → `{name, separator}` with `separator` defaulting to `'|'`.
+- `indices` entries — `pk`/`sk` bare strings → `{name, type: 'string'}`; missing `projection` → `'all'`; missing `sparse` → `false`; missing `indirect` → `false`. Legacy `indirectIndices` entries are synthesised into `indices` as `{type: 'gsi', indirect: true, projection: 'keys-only'}`.
+- `typeDiscriminator` bare string → `{name}`.
+- `technicalPrefix` validates that every declared adapter-managed field (structural key, version, createdAt, searchable mirror prefix, descriptor key) starts with the prefix.
+- `hooks` are merged with `defaultHooks` and composed with the built-in prepare/revive steps described below.
+- `relationships.structural` requires composite `keyFields` + `structuralKey`.
+- `typeLabels` prefix-collision check: no label may be a prefix of another — needed for `{self: true}` correctness in `buildKey`.
+
+**Derived fields on the instance:**
+- `primaryKeyAttrs: string[]` — DB primary-key attribute names. `[keyFields[0].name, structuralKey.name]` for composite, `[keyFields[0].name]` for single.
+- `keysOnlyFields: string[]` — key attributes for `options.keysOnly` / `?fields=*keys`.
+- `filterableTypes: Record<string, 'string' | 'number' | 'binary'>` — per-field coercion types inferred from `filterable` + `keyFields` + `indices`.
+
+### 1.2 Built-in prepare / revive steps
+
+When `technicalPrefix` is declared, the constructor installs a built-in prepare step that runs **before** the user's `prepare` hook. On every non-patch write it:
+
+1. Validates no user field starts with `technicalPrefix`.
+2. Composes the **structural key** (contiguous-from-start `keyFields` joined by `separator`, zero-padded per `width` on `{type: 'number'}` components).
+3. Writes `searchable` mirror columns (`searchablePrefix + field` → lowercased value).
+4. Writes sparse-index marker fields per each `indices[*].sparse` predicate.
+5. Writes `typeField = typeOf(item)` when `typeField` is declared and the field isn't already set by the user.
+6. Inits `versionField` to `1` when declared and the item doesn't carry one (post-only).
+
+On patches, only #1 + the partial structural-key recomputation (when the patch touches a keyField component) run; mirrors/markers/typeField are left to the user if they need partial-update reshaping.
+
+The built-in revive step strips every field starting with `technicalPrefix` — except `versionField` and `createdAtField`, which round-trip through the client so callers can do read-modify-write cycles without re-sending. User `revive` hooks run last.
+
+### 1.3 The `Raw<T>` bypass marker
 
 `Raw<T>` (single class — the v2 `Raw` / `DbRaw` pair was collapsed) wraps an item to signal "I already shaped this for the DB; skip `prepare` and `validateItem`."
 
@@ -51,140 +102,209 @@ const item = await adapter.getByKey({name: 'X'}, undefined, {reviveItems: false}
 // → instanceof Raw; item.item is the verbatim raw record
 ```
 
-Marshalling (Set / Buffer handling) still runs unconditionally — `Raw` only affects the toolkit's hook layer, not the SDK middleware.
+Marshalling (Set / Buffer handling) still runs unconditionally — `Raw` only affects the toolkit's hook layer, not the SDK middleware. `Raw` bypasses the built-in prepare step too: callers are responsible for correct structural-key formation and technical-field stamping.
 
-### 1.3 Hooks
+### 1.4 Hooks
 
 | Hook | Default | When called |
 | --- | --- | --- |
-| `prepare(item, isPatch?)` | identity | Before every write to add technical fields, derived columns, search mirrors |
-| `prepareKey(key, index?)` | identity | Before every key-only operation; default keeps just `keyFields` |
-| `prepareListInput(example, index?)` | `() => ({})` | Provides extra DynamoDB params for list/scan/query (KeyCondition, IndexName, …) |
-| `updateInput(input, op)` | identity | Last-chance hook to mutate the SDK Command input before dispatch. `op.name` ∈ `'post' \| 'put' \| 'patch' \| 'delete'`; `op.force` set for `put` |
-| `revive(rawItem, fields?)` | `subsetObject(rawItem, fields)` | After every read; strips technical fields, applies field subsetting |
-| `validateItem(item, isPatch?)` | `async () => {}` | Async validator; throw to abort the write |
-| `checkConsistency(batch)` | `async () => null` | Returns extra `make*` descriptors to bundle in the same `transactWriteItems` |
+| `prepare(item, isPatch?)` | identity (chained after built-in) | Before every non-`Raw` write. Built-in step runs first (see §1.2). |
+| `prepareKey(key, index?)` | identity | Before every key-only operation; restricted to `keyFields` / index schema afterwards. |
+| `prepareListInput(example, index?)` | `() => ({})` | Supplies `IndexName` + `KeyConditionExpression` for list ops. Shallow-merged into params before caller's paging/filter/projection. |
+| `updateInput(input, op)` | identity | Last-chance hook to mutate the SDK Command input before dispatch. `op.name` ∈ `'post' \| 'put' \| 'patch' \| 'delete'`; `op.force` set for forced `put`. Runs after `buildUpdate` / `buildCondition` / existence checks but before `cleanParams`. |
+| `revive(rawItem, fields?)` | `subsetObject(rawItem, fields)` | After every read. Built-in step (strip `technicalPrefix` keys, preserve `versionField` / `createdAtField`) runs first. |
+| `validateItem(item, isPatch?)` | `async () => {}` | Async validator; throw to abort the write. Not called on `Raw`-wrapped items. |
+| `checkConsistency(batch)` | `async () => null` | Returns extra `make*` descriptors (or `[]`) to bundle into the same `TransactWriteItems`. `null` takes the single-Command fast path. |
 
-Hooks live in `this.hooks`. User overrides via `options.hooks` merge over the defaults; subclass overrides on `this.hooks` work too. Subclassing the Adapter and overriding methods is also supported.
+Hooks live in `this.hooks`. User overrides via `options.hooks` merge over the defaults; subclass overrides on `this.hooks` work too. Subclassing the Adapter and overriding methods is also supported — internal methods prefixed with `_` are call sites designed for override.
 
-### 1.4 Batch builders
+### 1.5 CRUD reads
 
-Each returns a discriminated descriptor `{action, params}` (or `{action, adapter, params}` for `makeGet`). Compose with `applyTransaction` / `applyBatch`.
+- `await adapter.getByKey(key, fields?, options?)` — options: `{consistent?, reviveItems?, ignoreIndirection?, params?}`. Returns `TItem | undefined`. Indirect-index hits trigger a second-hop `GetItem` against the base table.
+- `await adapter.getByKeys(keys, fields?, options?)` — length-preserving; `result[i]` is the revived item for `keys[i]` or `undefined` on miss. Callers filter `Boolean` if they want compact results. `BatchGetItem` with `UnprocessedKeys` retry.
+- `await adapter.getList(options?, example?, index?)` — `example` fed to `prepareListInput`. Returns `{data, offset, limit, total?}`. `options.sort` auto-resolves to an index via `findIndexForSort` unless an explicit `index` argument is passed.
+- `await adapter.getListByParams(params, options?)` — skips `prepareListInput`; `params` is the prepared Query/Scan input.
+- `await adapter.getListUnder(partialKey, options?)` — sugar for `getListByParams(buildKey(partialKey), options)`. Children-only descendants under `partialKey`. For `{self}` / `{partial}` shapes, compose `buildKey` + `getListByParams` directly.
 
-- `await adapter.makeGet(key, fields?, params?)` → `{action: 'get', adapter, params}`
-- `await adapter.makeCheck(key, params?)` → `{action: 'check', params}`
-- `await adapter.makePost(item, {returnFailedItem?}?)` → `{action: 'put', params}` (with `attribute_not_exists` on the partition key)
-- `await adapter.makePut(item, {force?, conditions?, params?, returnFailedItem?}?)` → `{action: 'put', params}`
-- `await adapter.makePatch(key, patch, {delete?, separator?, arrayOps?, conditions?, params?, returnFailedItem?}?)` → `{action: 'patch', params}`
-- `await adapter.makeDelete(key, {conditions?, params?, returnFailedItem?}?)` → `{action: 'delete', params}`
+**`ListOptions`:**
 
-`returnFailedItem: true` sets `ReturnValuesOnConditionCheckFailure: 'ALL_OLD'` on the request. Single-op CRUD: the thrown `ConditionalCheckFailedException` carries the colliding item on its `Item` field. Inside a `TransactWriteItems`: the matching `CancellationReason.Item` is populated. Pair with `explainTransactionCancellation` (see §3) to surface the failing descriptor + its pre-existing item in one call.
+```ts
+interface ListOptions {
+  offset?: number;             // default 0
+  limit?: number;              // default 10
+  descending?: boolean;        // reverses ScanIndexForward
+  sort?: string;               // auto-resolved via findIndexForSort; throws NoIndexForSortField
+  useIndex?: string;           // explicit index override; bypasses sort inference
+  consistent?: boolean;
+  fields?: string | string[] | null;
+  keysOnly?: boolean;          // shortcut for projecting adapter.keysOnlyFields
+  search?: string;             // free-form substring; requires searchable declared
+  prefix?: string;             // searchable-prefix override (default adapter.searchablePrefix)
+  caseSensitive?: boolean;     // for search
+  filter?: FilterClause[];     // structured filter grammar (see §6.1, §6.5)
+  needTotal?: boolean;         // default true; false skips COUNT pass
+  reviveItems?: boolean;       // false → Raw<T>
+  ignoreIndirection?: boolean;
+  includeDescriptor?: boolean; // true → include the reserved descriptor record
+}
+```
 
-### 1.5 CRUD
+`needTotal: false` skips the `Select: 'COUNT'` pagination. `paginateList` always accumulates matches when a `FilterExpression` is set (DynamoDB's `Limit` is pre-filter, so naive use returns short pages).
 
-- `await adapter.getByKey(key, fields?, options?)` — options: `{consistent?, reviveItems?, ignoreIndirection?, params?}`. Returns `TItem | undefined`.
-- `await adapter.getByKeys(keys, fields?, options?)` — returns `TItem[]`. Missing keys silently dropped. Uses `BatchGetItem` with `UnprocessedKeys` retry.
-- `await adapter.getList(options?, example?, index?)` — example is fed to `prepareListInput`. Returns `{data, offset, limit, total?}`.
-- `await adapter.getListByParams(params, options?)` — params is the prepared input (KeyCondition, IndexName, etc.); options drives offset/limit/fields/filter/needTotal/reviveItems.
-- `await adapter.post(item, {returnFailedItem?}?)` — fails if key exists (`ConditionalCheckFailedException`).
-- `await adapter.put(item, {force?, conditions?, params?, returnFailedItem?}?)` — `force=true` skips the existence check.
-- `await adapter.patch(key, patch, {delete?, separator?, arrayOps?, conditions?, params?, returnFailedItem?}?)` — applies `UpdateExpression`. Key fields are stripped from `patch` automatically.
-- `await adapter.delete(key, {conditions?, params?, returnFailedItem?}?)` — DynamoDB Delete is idempotent; missing items return success.
+### 1.6 CRUD writes — single
 
-`returnFailedItem: true` → sets `ReturnValuesOnConditionCheckFailure: 'ALL_OLD'` on the underlying request. Thrown `ConditionalCheckFailedException.Item` carries the colliding item; inside an auto-upgraded transaction the matching `CancellationReason.Item` is populated.
-- `await adapter.clone(key, mapFn?, {force?, params?})` — read → mapFn → post (or put if force). Returns the cloned item or `undefined` on miss.
-- `await adapter.move(key, mapFn?, {force?, params?})` — read → mapFn → write + delete original via `transactWriteItems`. Returns the moved item or `undefined`.
+Every single write funnels through `dispatchWrite(client, batch, checks)` (`src/adapter/transaction-upgrade.js`): build → `checkConsistency` → single Command or `TransactWriteItems`.
 
-### 1.6 Mass operations
+- `await adapter.post(item, {returnFailedItem?}?)` — create-only (`attribute_not_exists(<pk>)`). Throws `ConditionalCheckFailedException` on collision; with `returnFailedItem`, the error carries the colliding item on `.Item`.
+- `await adapter.put(item, {force?, conditions?, params?, returnFailedItem?}?)` — default conditions on `attribute_exists(<pk>)`; `force` skips. With `versionField`, conditions on `attribute_not_exists(<pk>) OR <versionField> = :observed`, writes `observed + 1` (or `1` when the item is new). `force: true` skips the OC check but still bumps the version.
+- `await adapter.patch(key, patch, options?)` — options: `{delete?, separator?, arrayOps?, conditions?, expectedVersion?, params?, returnFailedItem?}`. Key fields auto-stripped from `patch`. With `versionField`: default conditions on `attribute_exists(<pk>)` when `expectedVersion` is omitted; conditions on `<versionField> = :expectedVersion` when supplied. UpdateExpression always `ADD <versionField> :1` when the field is declared.
+- `await adapter.edit(key, mapFn, options?)` — read → mapFn(revived) → shallow diff → `UpdateItem`. Returns the revived new item on success; `undefined` when the source is missing or `mapFn` returns falsy. Options: `{readFields?, conditions?, allowKeyChange?, params?, returnFailedItem?}`. Throws `KeyFieldChanged` when the diff touches a keyField without `allowKeyChange: true`; with the flag, auto-promotes to a `move` transaction. Unchanged items short-circuit (no WCU spent).
+- `await adapter.delete(key, options?)` — options: `{conditions?, expectedVersion?, params?, returnFailedItem?}`. Idempotent without conditions. With `versionField` + `expectedVersion`, conditions on `<versionField> = :expectedVersion`.
+- `await adapter.clone(key, mapFn?, options?)` — read → mapFn → post (or `put({force})` with `options.force`). Returns the cloned item or `undefined` on source miss. Options: `{force?, params?, reviveItems?, ignoreIndirection?}`.
+- `await adapter.move(key, mapFn?, options?)` — read → mapFn → put-dst + delete-src bundled into a `TransactWriteItems`. Returns the moved item or `undefined`. Same options as `clone`.
 
-All return `{processed: number}`.
+**`returnFailedItem: true`** sets `ReturnValuesOnConditionCheckFailure: 'ALL_OLD'` on the underlying request. Thrown `ConditionalCheckFailedException.Item` carries the colliding item. Inside auto-upgraded transactions, the matching `TransactionCanceledException.CancellationReasons[i].Item` is populated — pair with `explainTransactionCancellation` (§3) to surface the failing descriptor + pre-existing item in one call.
 
-- `await adapter.putAll(items, {strategy?})` — `'native'` (default) uses `BatchWriteItem`; `'sequential'` does individual Puts.
-- `await adapter.deleteByKeys(keys, {strategy?})`
-- `await adapter.deleteAllByParams(params)`
-- `await adapter.cloneByKeys(keys, mapFn?)`
-- `await adapter.cloneAllByParams(params, mapFn?)`
-- `await adapter.moveByKeys(keys, mapFn?)`
-- `await adapter.moveAllByParams(params, mapFn?)`
+### 1.7 CRUD writes — mass
 
-### 1.7 Transaction auto-upgrade
+All mass ops carry a uniform options bag; the bulk-individual variants (`putItems`, `deleteByKeys`, `cloneByKeys`, `moveByKeys`) return `{processed: number}`; the list-op variants return `MassOpResult` (§4.1).
+
+**`MassOptions`:**
+
+```ts
+interface MassOptions {
+  strategy?: 'native' | 'sequential'; // default 'native' (BatchWriteItem); sequential = per-item Commands
+  params?: Record<string, unknown>;
+  maxItems?: number;                  // page-boundary soft cap; resumable list-ops only
+  resumeToken?: string;               // from prior MassOpResult.cursor
+  ifNotExists?: boolean;              // per-item attribute_not_exists (routes to PutCommand path)
+  ifExists?: boolean;                 // per-item attribute_exists (mutually exclusive with ifNotExists)
+  asOf?: Date | string | number;      // scope-freeze; requires createdAtField declared
+  includeDescriptor?: boolean;        // include reserved descriptor row in the scan
+}
+```
+
+Methods:
+- `putItems(items, options?)` → `{processed}`
+- `deleteByKeys(keys, options?)` → `{processed}`
+- `deleteListByParams(params, options?)` → `MassOpResult` (resumable)
+- `cloneByKeys(keys, mapFn, options?)` → `{processed}`
+- `cloneListByParams(params, mapFn, options?)` → `MassOpResult` (resumable; `mapFn` returning falsy drops that item silently)
+- `moveByKeys(keys, mapFn, options?)` → `{processed}` (sum of put + delete = ~2× item count on success)
+- `moveListByParams(params, mapFn, options?)` → `MassOpResult`
+- `editListByParams(params, mapFn, options?)` → `MassOpResult` — per-item read → diff → UpdateItem. Unchanged items → `skipped`; `mapFn` returning falsy → `skipped`; items that vanish mid-scan → `skipped` (via CCF on the existence guard). Key-touching diffs → `failed` (or auto-promote to move with `allowKeyChange`).
+- `rename(fromExample, toExample, options?)` → `MassOpResult` — subtree rename, constructive-before-destructive. Put at destination then delete at source. `options.kind` ∈ `'exact' \| 'children'` (default `'children'`). Crashes mid-phase leave source intact; resume completes delete. Put collisions → `skipped`. `options.mapFn` composes after the `swapPrefix(fromExample, toExample)` mapping. Non-transactional — caller's job to coordinate reads during the rename window.
+- `cloneWithOverwrite(fromExample, toExample, options?)` → `MassOpResult` — subtree clone, destructive-before-constructive. Delete at destination then put. Source remains intact. Caller asserts destination is disposable.
+
+**Cursor semantics:** `cursor` is present iff the op stopped early (`maxItems` reached). Resumption is page-boundary, so the cursor is safe across versions within the same workstream. Cursor is base64-url JSON — opaque to callers; `decodeCursor` is a debug helper, not a stable public API.
+
+**Idempotency:** re-running a mass op with the same `params` + `resumeToken` is safe:
+- `deleteListByParams` — re-delete of already-absent items succeeds (DynamoDB Delete is idempotent).
+- `cloneListByParams` / `moveListByParams` — put-collisions during resume bucket into `skipped` if `ifNotExists` is set; otherwise clobber (default BatchWrite semantics).
+
+### 1.8 Cascade primitives (A6')
+
+Gated by `relationships.structural` on the adapter. Throws `CascadeNotDeclared` when called without the declaration.
+
+- `deleteAllUnder(srcKey, options?)` → `MassOpResult` — leaf-first. Delete every descendant of `srcKey` via `deleteListByParams(buildKey(srcKey))`, then the self node. Self-delete runs only when descendants pagination completes (no intermediate cursor).
+- `cloneAllUnder(srcKey, dstKey, options?)` / `cloneAllUnderBy(srcKey, mapFn, options?)` — root-first. Copy self + descendants. The prefix-swap variant uses `swapPrefix(srcKey, dstKey)` + `options.mapFn` composition; the `-By` variant delegates destination choice to `mapFn`. Source untouched.
+- `moveAllUnder(srcKey, dstKey, options?)` / `moveAllUnderBy(srcKey, mapFn, options?)` — leaf-first, two-phase idempotent (shared `_subtreeRename` with `rename`).
+
+All cascade primitives honour `options.maxItems` / `options.resumeToken`. The self-node phase runs only on the first invocation (cloneAll/moveAll root-first) or the final invocation (deleteAll leaf-first).
+
+### 1.9 Batch builders
+
+Each `make*` returns a discriminated descriptor `{action, params}` (plus `adapter` for `makeGet`). Compose with `applyTransaction` / `applyBatch` / `getBatch` / `getTransaction`.
+
+- `await adapter.makeGet(key, fields?, params?)` → `{action: 'get', adapter, params}` — back-reference lets result routers revive against the right Adapter in multi-table reads.
+- `await adapter.makeCheck(key, params?)` → `{action: 'check', params}` — condition-only, for `applyTransaction`.
+- `await adapter.makePost(item, {returnFailedItem?}?)` → `{action: 'put', params}` with `attribute_not_exists(<pk>)`.
+- `await adapter.makePut(item, {force?, conditions?, expectedVersion?, params?, returnFailedItem?}?)` → `{action: 'put', params}`.
+- `await adapter.makePatch(key, patch, options?)` → `{action: 'patch', params}` with the built `UpdateExpression`.
+- `await adapter.makeDelete(key, {conditions?, expectedVersion?, params?, returnFailedItem?}?)` → `{action: 'delete', params}`.
+
+### 1.10 Query helpers
+
+- `adapter.typeOf(item)` → `string | number | undefined`. Priority: `typeDiscriminator.name` value on the item (coerced to string) → `typeLabels[depth-1]` where `depth` = count of contiguous-from-start defined `keyFields` → raw `depth` number → undefined.
+- `adapter.findIndexForSort(field)` → index name. Scans `this.indices` for entries whose `sk.name` matches `field`. Prefers LSI over GSI when both match. Throws `NoIndexForSortField` — the toolkit does not in-memory-sort.
+- `adapter.applyFilter(params, clauses)` → mutates `params`. Validates against `filterable`, coerces values per `filterableTypes`, auto-promotes index-compatible clauses to `KeyConditionExpression`, the rest land in `FilterExpression`. Throws `BadFilterField` / `BadFilterOp`.
+- `adapter.buildKey(values, options?, params?)` → mutates `params`. Keys against the main table (default) or a declared index (`options.indexName`). Default: children-only `begins_with` on the structural key. `{self: true}` → self + descendants (`begins_with` without the trailing separator; requires `typeLabels` to be non-prefix-colliding). `{partial: 'abc'}` → narrows next tier to items starting with `abc`. Single-field `keyFields` emit pk equality; `self`/`partial` rejected. Values must be contiguous-from-start.
+- `adapter.swapPrefix(srcPrefix, dstPrefix)` → `mapFn` that rewrites the leading prefix. Throws at construction on prefix-shape invariant violations; throws at apply time when an item's values don't match `srcPrefix` (signals a mis-scoped upstream query).
+- `adapter.overlayFields(overlay)` → `mapFn` that merges `overlay` into each item. Validates that overlay doesn't null/undefined a keyField.
+
+### 1.11 Transaction auto-upgrade
 
 Every write CRUD method funnels through `dispatchWrite(client, batch, checks)` (`src/adapter/transaction-upgrade.js`):
 
-1. Build the batch descriptor (`makePost` / `makePut` / `makePatch` / `makeDelete`).
+1. Build the batch descriptor via `makePost` / `makePut` / `makePatch` / `makeDelete`.
 2. Call `hooks.checkConsistency(descriptor)`.
-3. If the result is `null`, dispatch as a single `PutCommand` / `UpdateCommand` / `DeleteCommand`.
-4. If the result is an array (even an empty one), bundle the main op + checks into a single `TransactWriteCommand`.
-5. Throw `TransactionLimitExceededError` if total > `TRANSACTION_LIMIT` (100).
+3. If the result is `null` → dispatch as a single `PutCommand` / `UpdateCommand` / `DeleteCommand` (fast path).
+4. If the result is any array (even `[]`) → bundle main + checks into a `TransactWriteCommand`.
+5. Throw `TransactionLimitExceededError` when total > `TRANSACTION_LIMIT` (100).
 
-### 1.8 Indirect indices
+### 1.12 Indirect indices
 
 Mark sparse GSIs that project keys only:
 
 ```js
 new Adapter({
-  client: docClient,
-  table: 'planets',
-  keyFields: ['name'],
-  indirectIndices: {'climate-index': 1}
+  client, table, keyFields: ['name'],
+  indices: {
+    'climate-index': {type: 'gsi', pk: 'climate', projection: 'keys-only', indirect: true}
+  }
 });
 ```
 
 `getByKey({climate: 'frozen'}, undefined, {params: {IndexName: 'climate-index'}})` does:
 
-1. `GetItem` against the GSI to extract the base table key.
-2. `GetItem` against the base table for the full record.
+1. `GetItem` against the GSI → extracts the base-table key.
+2. `GetItem` against the base table → full record.
 
-`getByKeys`/`getList`/`getListByParams` also second-hop via `readListByKeys` / `readOrderedListByKeys`. Pass `{ignoreIndirection: true}` to skip.
+`getByKeys` / `getList` / `getListByParams` also second-hop via `readByKeys`. Pass `{ignoreIndirection: true}` to skip.
 
-### 1.9 List options shape
+Legacy `indirectIndices: {'name-of-gsi': 1}` is still accepted — normalised into `indices['name-of-gsi'] = {type: 'gsi', indirect: true, projection: 'keys-only'}`.
 
-`getList` / `getListByParams` accept:
+### 1.13 Deprecated aliases (still work with `warnOnce`)
 
-```ts
-interface ListOptions {
-  offset?: number;
-  limit?: number;
-  descending?: boolean;
-  consistent?: boolean;
-  fields?: string | string[];
-  filter?: string;            // searchable substring
-  caseSensitive?: boolean;
-  needTotal?: boolean;        // designer-time; default true
-  reviveItems?: boolean;
-  ignoreIndirection?: boolean;
-}
-```
+- `getAll` / `getAllByParams` → `getList` / `getListByParams`
+- `putAll` → `putItems`
+- `deleteAllByParams` → `deleteListByParams`
+- `cloneAllByParams` → `cloneListByParams`
+- `moveAllByParams` → `moveListByParams`
 
-`needTotal: false` skips the `Select: 'COUNT'` pagination. `paginateList` still accumulates matches when a `FilterExpression` is set (DynamoDB's `Limit` is pre-filter, so naive use returns short pages).
+First call emits `console.warn`; subsequent calls are silent. Planned removal in a future minor or 4.0.
 
 ## 2. Expressions (`dynamodb-toolkit/expressions`)
 
-Pure functions. Each accepts a `params` object and returns a new params with the relevant expression strings + attribute maps populated. All handle name de-duplication, alias namespacing (`#upk0`, `:upv0`, `#sr0`, `:flt0`, `#pj0`, `#fbe0`, `#cd0`, `:cdv0`), and reuse of pre-existing `ExpressionAttributeNames` / `ExpressionAttributeValues`.
+Pure functions. Each accepts a `params` object and returns a new params with the relevant expression strings + attribute maps populated. All handle name de-duplication, alias namespacing (each builder has its own placeholder prefix: `#upk`/`:upv` for update, `#kc`/`:kcv` for key-condition, `#cd`/`:cdv` for condition, `#sr`/`:flt` for search, `:fbe` for filter-by-example, `#pj` for projection, `#ff`/`:ffv` for Adapter's applyFilter), and reuse of pre-existing `ExpressionAttributeNames` / `ExpressionAttributeValues`.
 
 ### 2.1 `buildUpdate(patch, options?, params?)`
 
-Builds `UpdateExpression`. `options.delete: string[]` → `REMOVE` clause. `options.separator` (default `'.'`) splits dotted paths. Pure-digit segments become array indices. `options.arrayOps`:
+Builds `UpdateExpression`. Mutates and returns `params`.
 
-| `op` | DDB expression | Notes |
+- `options.delete: string[]` → `REMOVE` clauses.
+- `options.separator` (default `'.'`) splits dotted paths. Pure-digit segments become array indices.
+- `options.arrayOps: ArrayOp[]` — atomic array / Set operations:
+
+| `op` | DDB expression | Required fields |
 | --- | --- | --- |
-| `append` | `SET path = list_append(if_not_exists(path, :empty), :values)` | Adds to tail |
-| `prepend` | `SET path = list_append(:values, if_not_exists(path, :empty))` | Adds to head |
-| `setAtIndex` | `SET path[i] = :value` | Absolute-index write |
-| `removeAtIndex` | `REMOVE path[i]` | Absolute-index delete; DDB leaves a hole |
-| `add` | `ADD path :value` | Atomic numeric increment / Set add |
+| `append` | `SET path = list_append(if_not_exists(path, :empty), :values)` | `path`, `values` |
+| `prepend` | `SET path = list_append(:values, if_not_exists(path, :empty))` | `path`, `values` |
+| `setAtIndex` | `SET path[i] = :value` | `path`, `index`, `value` |
+| `removeAtIndex` | `REMOVE path[i]` | `path`, `index` (leaves hole — DDB doesn't shift) |
+| `add` | `ADD path :value` | `path`, `value` (atomic increment / Set add) |
 
 ### 2.2 `addProjection(params, fields, projectionFieldMap?, skipSelect?, separator?)`
 
-Builds `ProjectionExpression`. De-duplicates and applies `projectionFieldMap` aliases. Sets `Select: 'SPECIFIC_ATTRIBUTES'` unless `skipSelect`.
+Builds `ProjectionExpression`. De-duplicates, applies `projectionFieldMap` aliases to the first path segment. Sets `Select: 'SPECIFIC_ATTRIBUTES'` unless `skipSelect`.
 
 ### 2.3 `buildSearch(searchable, query, options?, params?)`
 
-Builds `FilterExpression` over `searchablePrefix + field` mirror columns. Default mode: substring + case-insensitive. Options: `{fields?, prefix?, caseSensitive?}`.
+Builds a substring `FilterExpression` over `searchablePrefix + field` mirror columns. Default: case-insensitive. Options: `{fields?, prefix?, caseSensitive?}`.
 
 ### 2.4 `buildFilterByExample(example, params?)`
 
-Builds an equality `FilterExpression` from a partial object (`#fbe0 = :fbe0 AND ...`).
+Builds an equality `FilterExpression` from a partial object: `{climate: 'frozen', gravity: '1 standard'}` → `#fbe0 = :fbe0 AND #fbe1 = :fbe1`.
 
 ### 2.5 `buildCondition(clauses, params?)`
 
@@ -200,47 +320,124 @@ type ConditionClause =
   | {op: 'not'; clause: ConditionClause};
 ```
 
-### 2.6 `cleanParams(params)` / `cloneParams(params)`
+### 2.6 `buildKeyCondition(input, params?)`
 
-`cleanParams` drops unused entries from `ExpressionAttributeNames` / `ExpressionAttributeValues` (anything no expression actually references). `cloneParams` shallow-clones params with deep-cloned attribute maps.
+Low-level primitive for `KeyConditionExpression`. Caller supplies a fully-prepared value string; for the ergonomic surface that builds the prefix from `keyFields` / `structuralKey` automatically, use `adapter.buildKey(values, options, params)` instead.
+
+```ts
+interface KeyConditionInput {
+  name: string;          // sort/structural key field name (e.g. '-sk')
+  value: string;         // fully-prepared value; caller joins keyFields components
+  kind: 'exact' | 'prefix';  // = or begins_with
+  pkName?: string;       // partition-key field (optional — omit for a bare sk-only clause)
+  pkValue?: unknown;     // partition-key value (required when pkName is set)
+}
+```
+
+### 2.7 `cleanParams(params)` / `cloneParams(params)`
+
+- `cleanParams(params)` drops unused entries from `ExpressionAttributeNames` / `ExpressionAttributeValues` (anything no expression actually references). Regex-based; relies on `\b` word boundaries + numeric-suffix naming convention.
+- `cloneParams(params)` shallow-clones `params` with deep-cloned attribute maps. Use before mutating when the caller may reuse `params`.
 
 ## 3. Batch (`dynamodb-toolkit/batch`)
 
-All accept `(client, ...descriptors)` where descriptors are `{action, params}` items or arrays of items.
+All accept `(client, ...descriptors)` where descriptors are `{action, params}` items or arrays of items (arrays are flattened; `null`/`undefined` entries skipped).
 
-- `applyBatch(client, ...descriptors)` → `Promise<number>` — chunked `BatchWriteItem` (limit 25 per call), `UnprocessedItems` retry with backoff.
-- `applyTransaction(client, ...descriptors)` → `Promise<number>` — single `TransactWriteItems` call. Throws if total > `TRANSACTION_LIMIT` (100). Accepts `{options: {clientRequestToken?, returnConsumedCapacity?, returnItemCollectionMetrics?}}` sentinel at any position in the variadic list for transaction-level knobs; multiple `{options}` entries merge, later fields winning.
+- `applyBatch(client, ...descriptors)` → `Promise<number>` — chunked `BatchWriteItem` (25 per call), `UnprocessedItems` retry with exponential jitter.
+- `applyTransaction(client, ...descriptors)` → `Promise<number>` — single `TransactWriteItems` call. Throws if total > `TRANSACTION_LIMIT` (100). Accepts `{options: {clientRequestToken?, returnConsumedCapacity?, returnItemCollectionMetrics?}}` sentinel at any position for transaction-level knobs; multiple `{options}` entries merge, later fields winning.
 - `explainTransactionCancellation(err, ...descriptors)` → `{failures, message} | null` — maps `TransactionCanceledException.CancellationReasons` back to input descriptors; returns `null` for non-cancellation errors so callers can early-exit in `catch`. `failures[i]` has `{index, descriptor, code, message?, item?}`; `item` is populated when the matching descriptor set `returnFailedItem: true`. Walks args identically to `applyTransaction` (null skipped, arrays flattened, `{options}` sentinels ignored).
-- `getBatch(client, ...descriptors)` → `Promise<{table, item}[]>` — chunked `BatchGetItem` (limit 100), `UnprocessedKeys` retry.
+- `getBatch(client, ...descriptors)` → `Promise<{table, item, adapter?}[]>` — chunked `BatchGetItem` (100 per call), `UnprocessedKeys` retry. `adapter` present when the descriptor came from `makeGet`.
 - `getTransaction(client, ...descriptors)` → `Promise<{table, item, adapter?}[]>` — single `TransactGetItems`.
-- `backoff(from?, to?, finite?)` — generator yielding exponential delays with full jitter (default base 50ms, cap 2s).
+- `backoff(from = 50, to = 20_000, finite?)` — generator yielding exponential delays with full jitter. Default AWS "stop around one minute" shape (8 attempts with `from: 50`, `to: 20_000`).
 - `TRANSACTION_LIMIT` — `100`.
 
 ## 4. Mass ops (`dynamodb-toolkit/mass`)
 
-- `paginateList(client, params, options?, needTotal?, minLimit?, maxLimit?)` → `{data, offset, limit, total?}`. Accumulates matches when `FilterExpression` is set. `minLimit`/`maxLimit` defaults `10` / `100`.
+Three categories:
+
+1. **Individual ops** on single items live on the Adapter (see §1.6).
+2. **Bulk-individual ops** take N caller-supplied items or keys and batch them. The caller defines the set; the helper returns a result aligned to that set: `readByKeys`, `writeItems`, `deleteByKeys`.
+3. **List ops** use `Query` / `Scan` — the database produces the set. Read-shaped: `readList`, `readListGetItems`, `iterateList`, `iterateItems`, `paginateList`, `getTotal`. Consume-shaped: `deleteList`, `copyList`, `moveList` — walk pages and apply per-item ops.
+
+Naming follows the categories: "List" in a helper name means DB-produces-set; bulk-individual helpers drop "List" because the caller supplies the items.
+
+### 4.1 Cursor + envelope
+
+```ts
+interface MassOpOptions {
+  ifNotExists?: boolean;         // per-item attribute_not_exists (routes to PutCommand path)
+  ifExists?: boolean;            // per-item attribute_exists
+  maxItems?: number;             // soft cap (page-boundary)
+  resumeToken?: string;          // from prior MassOpResult.cursor
+}
+
+interface MassOpFailure {
+  key: Record<string, unknown>;
+  reason: 'ConditionalCheckFailed' | 'ValidationException' | 'ProvisionedThroughputExceeded' | 'Unknown';
+  details?: string;
+  sdkError?: unknown;
+}
+
+interface MassOpConflict {
+  key: Record<string, unknown>;
+  reason: 'VersionConflict';
+  sdkError?: unknown;            // populated when versionField declared
+}
+
+interface MassOpResult {
+  processed: number;
+  skipped: number;
+  failed: MassOpFailure[];
+  conflicts: MassOpConflict[];
+  cursor?: string;               // present iff stopped early
+}
+```
+
+- `encodeCursor(payload)` / `decodeCursor(cursor)` — base64url JSON. `decodeCursor` is debug/test only; callers round-trip cursors opaquely.
+- `runPaged(client, params, onPage, options?)` — low-level paged runner underpinning `deleteListByParams` / `cloneListByParams` / `moveListByParams` / `editListByParams` / `cascadeAll*`.
+
+### 4.2 List primitives
+
+- `paginateList(client, params, options?, needTotal?, minLimit?, maxLimit?)` → `PaginatedResult`. Accumulates matches when `FilterExpression` is set. `minLimit`/`maxLimit` default `10` / `100`.
 - `iterateList(client, params)` — async generator yielding raw page objects.
 - `iterateItems(client, params)` — async generator yielding individual items.
-- `readList(client, params, fn)` — call `fn(page)` once and return `nextParams | null`.
+- `readList(client, params, fn)` — call `fn(page)` once, return `nextParams | null`.
 - `readListGetItems(client, params)` → `{nextParams, items}` — single page.
-- `readListByKeys(client, table, keys, params?)` → `Item[]` — `BatchGetItem` wrapper.
-- `readOrderedListByKeys(client, table, keys, params?)` → `(Item | undefined)[]` — preserves caller key order.
-- `writeList(client, table, items, mapFn?)` → `Promise<number>` — `BatchWriteItem` puts.
-- `deleteList(client, params, keyFn?)` → `Promise<number>` — read-then-batch-delete.
-- `deleteListByKeys(client, table, keys)` → `Promise<number>`.
-- `copyList(client, params, mapFn?)` → `Promise<number>`.
-- `moveList(client, params, mapFn?, keyFn?)` → `Promise<number>` — chunks into 12 puts + 12 deletes per batch (24 ≤ 25 batch-write limit).
 - `getTotal(client, params)` → `Promise<number>` — `Select: 'COUNT'` pagination.
+
+### 4.3 Bulk-individual primitives
+
+- `readByKeys(client, table, keys, params?)` → `(Item | undefined)[]` — length-preserving; `BatchGetItem` + `UnprocessedKeys` retry.
+- `writeItems(client, table, items, mapFn?)` → `Promise<number>` — `BatchWriteItem` puts, `UnprocessedItems` retry.
+- `deleteByKeys(client, table, keys)` → `Promise<number>` — `BatchWriteItem` deletes.
+
+### 4.4 Consume-shaped
+
+- `deleteList(client, params, keyFn?)` → `Promise<number>` — read-then-batch-delete.
+- `copyList(client, params, mapFn?)` → `Promise<number>`.
+- `moveList(client, params, mapFn?, keyFn?)` → `Promise<number>` — paired 12 puts + 12 deletes per `BatchWrite` chunk (24 ≤ 25 limit).
+
+### 4.5 Map-fn utilities
+
+- `mergeMapFn(...fns)` — left-to-right composition of per-item transforms. `mergeMapFn(a, b)(item)` returns `b(a(item))`. Falsy intermediate results short-circuit.
+
+### 4.6 Deprecated aliases
+
+Available with `warnOnce` deprecation — removed in a future minor.
+
+- `readListByKeys` / `readOrderedListByKeys` → `readByKeys`
+- `deleteListByKeys` → `deleteByKeys`
+- `writeList` → `writeItems`
 
 ## 5. Paths (`dynamodb-toolkit/paths`)
 
 Pure path utilities over plain JS objects — no SDK involved.
 
 - `getPath(obj, path, defaultValue?, separator?)`
-- `setPath(obj, path, value, separator?)` (mutates `obj`, returns it)
-- `deletePath(obj, path, separator?)`
-- `applyPatch(obj, patch, options?)` — applies a patch with `delete` / `separator` semantics in memory.
-- `normalizeFields(fields, projectionFieldMap?, separator?)` — accepts string, comma-separated string, array, or object; returns `string[] | null`.
+- `setPath(obj, path, value, separator?)` — mutates `obj`, returns it; safeguards against `__proto__` / prototype-chain writes.
+- `deletePath(obj, path, separator?)` — same prototype safety.
+- `applyPatch(obj, patch, options?)` — applies a patch with `delete` / `separator` / `arrayOps` semantics in memory.
+- `normalizeFields(fields, projectionFieldMap?, separator?)` — accepts string, comma-separated string, array, or object; returns `string[] | null`. `null` means "no projection constraint."
 - `subsetObject(obj, fields, separator?)` — picks fields at paths, returns a new object.
 
 Pure-digit segments are array indices.
@@ -251,13 +448,21 @@ Framework-agnostic helpers. Each parser accepts the raw query value (string or a
 
 ### 6.1 Parsers
 
-- `parseFields(input, {maxItems?})` → `string[] | null`. `maxItems` default `1000`; extra segments truncated (DoS guard).
-- `parseSort(input)` → `{field, direction: 'asc' | 'desc', chain: SortClause[]} | null`
-- `parseSearch(input, {mode?, caseSensitive?, maxLength?})` → `{query, mode?, caseSensitive?} | null`. `maxLength` default `1024`; longer queries truncated.
+- `parseFields(input, {maxItems?})` → `string[] | null`. `maxItems` default `1000`; extra segments truncated (DoS guard). `*keys` wildcard signals "just the key fields" and is recognised by `buildListOptions` → `keysOnly: true`.
+- `parseSort(input)` → `{field, direction: 'asc' | 'desc', chain?: SortClause[]} | null` — leading `-` flips direction.
+- `parseFilter(query)` → `FilterClause[]` — walks every `<op>-<field>=<value>` entry in the query map (op prefix in the allowed set: `eq ne lt le gt ge in btw beg ct ex nx`). Unrecognised op prefixes are skipped (treated as ordinary query params). Shape is polymorphic by op:
+  ```ts
+  type FilterClause =
+    | {field: string; op: 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'beg' | 'ct'; value: string}
+    | {field: string; op: 'in' | 'btw'; value: string[]}
+    | {field: string; op: 'ex' | 'nx'};
+  ```
+  Multi-value ops (`in` / `btw`) use **first-character delimiter**: `?in-status=,active,pending` splits on the leading `,` → `['active', 'pending']`. `?btw-year=-2020-2024` splits on `-` → `['2020', '2024']`. `btw` requires exactly two values.
+- `parseSearch(input, {mode?, caseSensitive?, maxLength?})` → `{query, mode?, caseSensitive?} | null`. `maxLength` default `1024`.
 - `parsePatch(body, {metaPrefix?})` → `{patch, options}` — splits wire body into raw patch + `{delete, separator, arrayOps}`. Patch accumulator is a null-prototype object (defends against `__proto__` in the request body).
 - `parseNames(input, {maxItems?})` → `string[]`. `maxItems` default `1000`.
 - `parsePaging(input, {defaultLimit?, maxLimit?, maxOffset?})` → `{offset, limit}` (clamped). `maxOffset` default `100_000` — caps `?offset=` to prevent DoS via `?offset=1e15` driving `paginateList` into astronomical skip-page SDK calls.
-- `parseFlag(input)` → `boolean` — accepts `yes` / `true` / `1` / `on` (case-insensitive)
+- `parseFlag(input)` → `boolean` — accepts `yes` / `true` / `1` / `on` (case-insensitive).
 - `coerceStringQuery(query)` → `Record<string, string>` — filters framework query bag to string values only (drops nested objects / numbers; picks first string from arrays). Null-prototype accumulator defends against `?constructor=…` / `?__proto__=…` shadowing.
 
 ### 6.2 Builders
@@ -265,20 +470,18 @@ Framework-agnostic helpers. Each parser accepts the raw query value (string or a
 - `buildEnvelope(result, {keys?, links?})` → wraps `{data, offset, limit, total?}` with configurable key names; optionally embeds `links`.
 - `buildErrorBody(err, {includeDebug?, errorId?})` → `{code, message, errorId?, stack?}`
 - `paginationLinks(offset, limit, total, urlBuilder?)` → `{prev: string | null, next: string | null}` — `urlBuilder` is `({offset, limit}) => string`.
-- `buildListOptions(query, policy)` → `ListOptionsBase` — composes `parseFields` / `parseSearch` / `parsePaging` / `parseFlag` under policy's pagination caps. Returns `{offset, limit, consistent, needTotal, fields?, filter?}` ready for `adapter.getList`.
-- `resolveSort(query, sortableIndices?)` → `{index, descending}` — resolves `?sort=-name` to `{index: 'name-gsi', descending: true}` via the passed GSI mapping. Unmapped / missing fields → `{index: undefined, descending: false}`.
-- `stripMount(pathname, mountPath?)` → `string | null` — returns the pathname tail when the request is under `mountPath`, else `null`. Normalizes trailing slash on `mountPath` so `'/planets/'` and `'/planets'` behave identically. Empty / missing `mountPath` means "mount at root."
+- `buildListOptions(query, policy)` → `ListOptionsBase` — composes `parseFields` / `parseSearch` / `parseFilter` / `parsePaging` / `parseFlag` under policy's pagination caps. Returns `{offset, limit, consistent, needTotal, fields?, filter?, search?}` ready for `adapter.getList`. Recognises `?fields=*keys` wildcard → `keysOnly: true`.
+- `resolveSort(query, sortableIndices?)` → `{index, descending}` — resolves `?sort=-name` to `{index: sortableIndices.name, descending: true}`. Unmapped / missing fields → `{index: undefined, descending: false}`.
+- `stripMount(pathname, mountPath?)` → `string | null` — returns the pathname tail when the request is under `mountPath`, else `null`. Normalizes trailing slash so `'/planets/'` and `'/planets'` behave identically. Empty / missing `mountPath` means "mount at root."
 - `validateWriteBody(body, {allowEmpty?, allowArray?}?)` → `body` — throws `{status: 400, code: 'BadBody'}` when `body` is non-object (or null/array without the matching option). Use on write-shaped routes where `{...body, ...key}` would silently accept `null` (writes key-only) or arrays (writes `{"0": …}`).
 
 ### 6.3 Policy
 
-`defaultPolicy`:
-
-```js
-{
-  metaPrefix: '_',
-  dbPrefix: '-',
-  methodPrefix: '-',
+```ts
+const defaultPolicy = {
+  metaPrefix: '_',                          // patch meta keys (_delete, _separator, _arrayOps)
+  dbPrefix: '-',                            // DB-internal field prefix (informational)
+  methodPrefix: '-',                        // URL method prefix (/-by-names, /-clone)
   envelope: {items: 'data', total: 'total', offset: 'offset', limit: 'limit', links: 'links'},
   statusCodes: {miss: 404, validation: 422, consistency: 409, throttle: 429, transient: 503, internal: 500},
   errorBody: buildErrorBody,
@@ -286,11 +489,51 @@ Framework-agnostic helpers. Each parser accepts the raw query value (string or a
   defaultLimit: 10,
   maxLimit: 100,
   maxOffset: 100_000
+};
+```
+
+- `mapErrorStatus(err, statusCodes?)` → `number`. Recognised SDK names: `ConditionalCheckFailedException` / `TransactionCanceledException` / `TransactionConflictException` → `consistency`; `ValidationException` / `ValidationError` → `validation`; `ProvisionedThroughputExceededException` / `RequestLimitExceeded` → `throttle`; 5xx SDK → `transient`; everything else → `internal`. Toolkit errors with a `.status` property short-circuit (used by `validateWriteBody`'s `{status: 400, code: 'BadBody'}`).
+- `mergePolicy(overrides)` → deep-merged `RestPolicy`. `envelope` and `statusCodes` merge key-by-key; everything else is shallow-merged.
+
+### 6.4 ListOptionsBase
+
+```ts
+interface ListOptionsBase {
+  offset: number;
+  limit: number;
+  consistent: boolean;
+  needTotal: boolean;
+  fields?: string | string[];
+  keysOnly?: boolean;
+  search?: string;
+  caseSensitive?: boolean;
+  filter?: FilterClause[];
 }
 ```
 
-- `mapErrorStatus(err, statusCodes?)` → number — maps SDK error names + `$metadata.httpStatusCode` to HTTP status per policy.
-- `mergePolicy(overrides)` → deep-merged `RestPolicy`.
+### 6.5 Filter URL grammar (Option W)
+
+Every query-param of shape `<op>-<field>=<value>` is a filter clause. `parseFilter` extracts them; `adapter.applyFilter` validates against `filterable` and emits expressions.
+
+| op | Meaning | Arity |
+| --- | --- | --- |
+| `eq` | `=` | scalar |
+| `ne` | `<>` | scalar |
+| `lt` / `le` / `gt` / `ge` | `<` / `<=` / `>` / `>=` | scalar |
+| `in` | `IN (...)` | array (first-char delimiter) |
+| `btw` | `BETWEEN a AND b` | 2-array (first-char delimiter) |
+| `beg` | `begins_with` | scalar |
+| `ct` | `contains` | scalar |
+| `ex` / `nx` | `attribute_exists` / `_not_exists` | none |
+
+**Examples:**
+- `?eq-status=active&eq-tier=gold`
+- `?in-state=,TX,CA,NY` — first char `,` delimits
+- `?btw-year=-2020-2024` — first char `-` delimits
+- `?ex-email=` — value ignored
+- Wire grammar doesn't need `?search=` — `?beg-name=A` / `?ct-name=sky` are fine too (but `?search=` runs over the pre-lowercased `searchable` mirrors which is cheaper for free-form text).
+
+Clauses that match an index pk/sk auto-promote to `KeyConditionExpression` (single-clause per key component). The rest compile into `FilterExpression`. `BadFilterField` / `BadFilterOp` are thrown when the field isn't in `filterable` or the op isn't allowlisted.
 
 ## 7. Handler (`dynamodb-toolkit/handler`)
 
@@ -300,22 +543,21 @@ import {createHandler} from 'dynamodb-toolkit/handler';
 
 const handler = createHandler(adapter, {
   policy: {/* override defaults */},
-  sortableIndices: {name: '-t-name-index'},
-  keyFromPath: (rawKey, adapter) => ({[adapter.keyFields[0]]: rawKey}),
+  sortableIndices: {name: 'by-name-index'},
+  keyFromPath: (rawKey, adapter) => ({[adapter.keyFields[0].name]: rawKey}),
   exampleFromContext: (query, body) => ({}),
-  maxBodyBytes: 1024 * 1024 // default 1 MB; bodies exceeding → 413 PayloadTooLarge
+  maxBodyBytes: 1024 * 1024
 });
 
 createServer(handler).listen(3000);
 ```
 
-**HEAD → GET auto-promote.** `matchRoute` treats `HEAD` as `GET` for dispatch, annotates the result with `head: true`, and the bundled handler returns headers + `Content-Length` with an empty body. Consumers get the expected REST semantics on every resource endpoint without extra configuration.
+**Key invariants:**
 
-**Body-always-parsed invariant.** For clone-all / move-all routes (`PUT /-clone`, `PUT /-move`), the parsed body flows into `exampleFromContext(query, body)` alongside the query — consumers can key their tenant/ownership scope on either. (Earlier versions passed `null` on these routes.)
-
-**Body cap measures bytes, not UTF-16 code units.** As of 3.1.2, the built-in body reader accumulates `Buffer` chunks and enforces `maxBodyBytes` in bytes. Multi-byte payloads (CJK, emoji) are now bounded by the advertised cap; earlier versions let ~2-4× through because `String.length` counts code units.
-
-**`readJsonBody(req, maxBodyBytes, {destroy?})`.** Exported helper for adapter-style code that needs the same Node-stream reader as the bundled handler. Pass `{destroy: false}` when the framework needs the socket alive to write the 413 response (Koa, Express — both hand body serialization to the framework response object).
+- **HEAD → GET auto-promote.** `matchRoute` treats `HEAD` as `GET` for dispatch, annotates the result with `head: true`, and the bundled handler returns headers + `Content-Length` with an empty body.
+- **Body-always-parsed.** For clone-all / move-all routes, the parsed body flows into `exampleFromContext(query, body)` alongside the query — consumers can key scope on either.
+- **Body cap in bytes.** The built-in body reader accumulates `Buffer` chunks and enforces `maxBodyBytes` in bytes. Multi-byte payloads (CJK, emoji) are bounded at the advertised cap.
+- **`readJsonBody(req, maxBodyBytes, {destroy?})`** — exported helper with streaming `TextDecoder` (~1× body size peak memory). `{destroy: false}` when the framework needs the socket alive to write the 413 response.
 
 ### 7.1 Standard route pack
 
@@ -323,55 +565,241 @@ createServer(handler).listen(3000);
 | --- | --- | --- |
 | `GET` | `/` | `getList` + envelope |
 | `POST` | `/` | `post` (204) |
-| `DELETE` | `/?filter=…` | `deleteAllByParams` (`{processed}`) |
-| `GET` | `/-by-names?names=…&fields=…` | `getByKeys` (plain array) |
+| `DELETE` | `/?<op>-f=…&search=…` | `deleteListByParams` (`MassOpResult`) |
+| `GET` | `/-by-names?names=…&fields=…` | `getByKeys` (length-preserving; `null` at misses) |
 | `DELETE` | `/-by-names?names=…` | `deleteByKeys` (`{processed}`) |
-| `PUT` | `/-load` | `putAll` (body: array; `{processed}`) |
-| `PUT` | `/-clone` / `/-move` | `cloneAllByParams` / `moveAllByParams` (body: overlay; `{processed}`) |
-| `PUT` | `/-clone-by-names?names=…` / `/-move-by-names?names=…` | `cloneByKeys` / `moveByKeys` (body: overlay) |
+| `PUT` | `/-load` | `putItems` (body: array; `{processed}`) |
+| `PUT` | `/-clone` / `/-move` | `cloneListByParams` / `moveListByParams` (body: overlay; `MassOpResult`) |
+| `PUT` | `/-clone-by-names?names=…` / `/-move-by-names?names=…` | `cloneByKeys` / `moveByKeys` |
 | `GET` | `/:key` | `getByKey` (404 on miss) |
 | `PUT` | `/:key?force=true` | `put` (204) |
 | `PATCH` | `/:key` | `patch` (body: `{field, _delete, _separator, _arrayOps}`) |
 | `DELETE` | `/:key` | `delete` (204, idempotent) |
 | `PUT` | `/:key/-clone` / `/:key/-move` | single-item `clone` / `move` |
 
-Method prefix `-` is configurable via `policy.methodPrefix`. `keyFromPath` lets you map composite keys; default uses `adapter.keyFields[0]`.
+Method prefix `-` is configurable via `policy.methodPrefix`. `keyFromPath` default uses `adapter.keyFields[0].name`.
 
 ### 7.2 Query parameters
 
-- `?fields=name,climate` — projection
-- `?filter=tooine` — `searchable` substring filter
-- `?sort=name` / `?sort=-name` — ascending / descending; resolved via `sortableIndices`
-- `?offset=N&limit=N` — pagination
-- `?consistent=yes|true|1|on` — strong consistency
-- `?force=yes|true|1|on` — overwrite without existence check on `put`/`clone`/`move`
+- `?fields=name,climate` — projection. `?fields=*keys` → `keysOnlyFields`.
+- `?search=tatooine` — free-form substring over `searchable` mirrors.
+- `?<op>-<field>=<value>` — structured filter grammar (§6.5).
+- `?sort=name` / `?sort=-name` — ascending / descending; resolved via `sortableIndices`.
+- `?offset=N&limit=N` — pagination (clamped by `policy.maxOffset` / `policy.maxLimit`).
+- `?consistent=yes|true|1|on` — strong consistency.
+- `?force=yes|true|1|on` — overwrite on `put`/`clone`/`move`.
 
 ### 7.3 Error mapping
 
-Per `policy.statusCodes`. Default: `ConditionalCheckFailedException` / `TransactionCanceledException` / `TransactionConflictException` → 409, `ValidationException` → 422, `ProvisionedThroughputExceededException` / `RequestLimitExceeded` → 429, 5xx SDK or `InternalServerError` → 503, anything else → 500.
+Per `policy.statusCodes`. Default: `ConditionalCheckFailedException` / `TransactionCanceledException` / `TransactionConflictException` → 409, `ValidationException` → 422, `ProvisionedThroughputExceededException` / `RequestLimitExceeded` → 429, 5xx SDK or `InternalServerError` → 503, anything else → 500. Toolkit errors carry `.status`; the handler respects that before running `mapErrorStatus`.
 
 `policy.errorBody` builds the response body. Default returns `{code, message}`.
 
 ### 7.4 Framework adapters (separate packages)
 
-The bundled handler in this package is `node:http`-only. Framework-specific bindings ship as separate unscoped npm packages so the core keeps zero runtime dependencies. Each adapter is a thin wrapper (~150–300 LoC) that translates its framework's request/response shape into calls through the same `rest-core` parsers/builders + `matchRoute` used by the bundled handler. The wire contract (routes from §7.1, query parameters from §7.2, error mapping from §7.3, envelope keys from `policy`) is identical across all four.
+The bundled handler is `node:http`-only. Framework bindings ship as separate unscoped npm packages so the core keeps zero runtime dependencies. Each is a thin wrapper (~150–300 LoC) that translates its framework's request/response shape into calls through the same `rest-core` parsers/builders + `matchRoute`. Wire contract is identical across all four.
 
-| Package | Runtime / framework | Peer deps | npm |
+| Package | Runtime / framework | Peer deps | Version |
 | --- | --- | --- | --- |
-| `dynamodb-toolkit-koa` | Koa 2.x | `koa` | https://www.npmjs.com/package/dynamodb-toolkit-koa |
-| `dynamodb-toolkit-express` | Express 4.x / 5.x | `express` | https://www.npmjs.com/package/dynamodb-toolkit-express |
-| `dynamodb-toolkit-fetch` | Fetch API — `(Request) => Promise<Response>`. Runs on Cloudflare Workers, Deno Deploy, Bun.serve, Hono, Node native fetch server | none | https://www.npmjs.com/package/dynamodb-toolkit-fetch |
-| `dynamodb-toolkit-lambda` | AWS Lambda — API Gateway REST (v1), API Gateway HTTP (v2), Function URL, ALB. Auto-detects event shape. Ships `createNodeListener` / `createFetchBridge` for local-debug without `sam local` | none | https://www.npmjs.com/package/dynamodb-toolkit-lambda |
+| `dynamodb-toolkit-koa` | Koa 2.x / 3.x | `koa` | 0.3.0 (peer `dynamodb-toolkit@^3.7.0`) |
+| `dynamodb-toolkit-express` | Express 4.x / 5.x | `express` | 0.3.0 |
+| `dynamodb-toolkit-fetch` | Fetch API — `(Request) => Promise<Response>`. Runs on Cloudflare Workers, Deno Deploy, Bun.serve, Hono, Node native fetch server | none | 0.3.0 |
+| `dynamodb-toolkit-lambda` | AWS Lambda — API Gateway REST (v1), HTTP (v2), Function URL, ALB. Auto-detects event shape. Ships `createNodeListener` / `createFetchBridge` for local-debug without `sam local` | none | 0.3.0 |
 
-Each adapter package ships its own wiki + `llms.txt` / `llms-full.txt` with framework-specific deployment patterns, body-reader behavior, and peer-dep notes.
+## 8. Provisioning (`dynamodb-toolkit/provisioning`)
 
-## 8. Bare files
+Separate submodule — not Adapter methods. IaC-managed deployments (Terraform / CDK / CloudFormation) pay no runtime cost on Adapter import.
 
-- `import {sleep} from 'dynamodb-toolkit'` — `sleep(ms): Promise<void>`
-- `import {seq} from 'dynamodb-toolkit'` — sequential async runner
-- `import {random} from 'dynamodb-toolkit'` — small random helpers
+### 8.1 API
 
-## 9. Testing recipes
+```js
+import {planTable, ensureTable, verifyTable, diffTable} from 'dynamodb-toolkit/provisioning';
+
+// Read-only: what would ensureTable do?
+const plan = await planTable(adapter);
+// → {tableName, steps: PlanStep[], summary: string[]}
+
+// Execute the plan.
+const {plan, executed, descriptorWritten} = await ensureTable(adapter);
+// → descriptorWritten: true when descriptorKey is declared and the snapshot was written
+
+// Verify declaration matches live.
+const {ok, diffs} = await verifyTable(adapter, {throwOnMismatch: true, requireDescriptor: false});
+// → ok: false if any error-severity diff; diffs: TableDiff[]
+
+// Pure diff — no I/O.
+const diffs = diffTable(extractDeclaration(adapter), liveDescribeTableOutput);
+```
+
+**`PlanStep`:**
+
+```ts
+type PlanStep =
+  | {action: 'create'; params: Record<string, unknown>}
+  | {action: 'add-gsi'; name: string; params: Record<string, unknown>}
+  | {action: 'skip-extra-gsi'; name: string}
+  | {action: 'skip-extra-lsi'; name: string}
+  | {action: 'skip-missing-lsi'; name: string};
+```
+
+**`TableDiff`:**
+
+```ts
+interface TableDiff {
+  path: string;        // e.g. 'table.KeySchema', 'gsi.by-foo', 'descriptor.indices'
+  severity: 'error' | 'warn';   // error: declared-vs-actual mismatch; warn: extras or descriptor drift
+  expected: unknown;
+  actual: unknown;
+}
+```
+
+**Policy:** toolkit owns the plan (ADD-only, never destructive); DynamoDB owns legality (LSI-on-existing-table attempts, key-schema changes, etc.) — those surface as SDK rejections unchanged. No pre-checks that could drift from AWS's evolving rules.
+
+### 8.2 Descriptor record
+
+Opt-in via `descriptorKey` on the Adapter (e.g., `'__adapter__'`). The provisioning helpers write a JSON snapshot of the Adapter's declaration at `{[keyFields[0]]: descriptorKey}` — captures what `DescribeTable` can't see:
+
+- Marshalling-field names + types
+- `searchable` map + `searchablePrefix`
+- `filterable` allowlist + types
+- `versionField` / `createdAtField` names
+- `typeField` / `typeDiscriminator` / `typeLabels`
+
+Absence is **neutral by default** (IaC-managed tables don't need the descriptor). `{requireDescriptor: true}` on `verifyTable` opts into strict "toolkit-managed" assertion.
+
+Helpers: `buildDescriptorSnapshot(declaration)` → snapshot object; `compareDescriptor(expected, actual)` → diffs; `readDescriptor(client, table, descriptorKey)` / `writeDescriptor(client, table, descriptorKey, snapshot)` — direct access. `DESCRIPTOR_VERSION` — current snapshot schema version.
+
+### 8.3 CLI
+
+```sh
+npx dynamodb-toolkit plan-table ./adapter.js
+npx dynamodb-toolkit ensure-table ./adapter.js [--json]
+npx dynamodb-toolkit verify-table ./adapter.js [--strict] [--require-descriptor] [--json]
+```
+
+The `<module>` is ESM-dynamic-imported. Exports one of:
+- `export default adapter;`
+- `export const adapter = new Adapter(...);`
+- `export async function buildAdapter() { ... }` (CLI will await it)
+
+Flags:
+- `--strict` on `verify-table` — exit 1 on any error-severity diff.
+- `--require-descriptor` on `verify-table` — exit 1 when `descriptorKey` is declared but the row is missing.
+- `--json` on any — machine-readable output (the result object) instead of human summary.
+
+Exit codes: `0` clean, `1` diffs or error.
+
+## 9. Marshalling (`dynamodb-toolkit/marshalling`)
+
+Symmetric marshaller pairs. Packaging both directions in a single object nudges callers to keep write + read paths in sync.
+
+```ts
+interface Marshaller<TRuntime, TStored> {
+  marshall: (value: TRuntime) => TStored;
+  unmarshall: (stored: TStored) => TRuntime;
+}
+```
+
+- `marshallDateISO(date)` / `unmarshallDateISO(iso)` — `Date` ⇔ `string` (ISO 8601). `undefined` / `null` pass through.
+- `marshallDateEpoch(date)` / `unmarshallDateEpoch(ms)` — `Date` ⇔ `number` (epoch ms). Pass-through nulls.
+- `dateISO`, `dateEpoch` — `Marshaller<Date, string>` / `Marshaller<Date, number>` convenience pairs.
+- `marshallMap(map, valueTransform?)` / `unmarshallMap(obj)` — `Map<string, V>` ⇔ plain object. Optional per-value transform.
+- `marshallURL(url)` / `unmarshallURL(str)` — `URL` ⇔ `string`.
+- `url` — `Marshaller<URL, string>`.
+
+Typical usage in hooks:
+
+```js
+import {dateISO, marshallMap, unmarshallMap} from 'dynamodb-toolkit/marshalling';
+
+hooks: {
+  prepare(item) {
+    return {
+      ...item,
+      createdAt: dateISO.marshall(item.createdAt),
+      tags: marshallMap(item.tags)
+    };
+  },
+  revive(raw) {
+    return {
+      ...raw,
+      createdAt: dateISO.unmarshall(raw.createdAt),
+      tags: unmarshallMap(raw.tags)
+    };
+  }
+}
+```
+
+## 10. Hook builders (`dynamodb-toolkit/hooks`)
+
+Re-exported from the root.
+
+- `stampCreatedAtISO(fieldName = '_createdAt')` → `prepare` hook that writes `new Date().toISOString()` on first insert only. Items carrying the field (round-tripped from reads) are untouched; patches are untouched.
+- `stampCreatedAtEpoch(fieldName = '_createdAt')` → same but writes `Date.now()`.
+
+Generic in item shape; compose via `stampCreatedAtISO<TItem>('-createdAt')` for typed adapters.
+
+## 11. Optimistic concurrency (`versionField`)
+
+```js
+new Adapter({
+  client, table, keyFields: ['id'],
+  technicalPrefix: '-',
+  versionField: '-version'
+});
+```
+
+**Write-path semantics:**
+
+- `post` — inits `versionField = 1`. Writes with `attribute_not_exists(<pk>)`.
+- `put(item)` — reads the field from the caller's item. Conditions on `attribute_not_exists(<pk>) OR <versionField> = :observed`. Writes `observed + 1` (or `1` if new). `{force: true}` bypasses the condition but still bumps the version.
+- `patch(key, patch, {expectedVersion?})` — conditions on `attribute_not_exists(<pk>) OR <versionField> = :expectedVersion` when supplied; falls through to `attribute_exists(<pk>)` otherwise. UpdateExpression always `ADD <versionField> :1` when declared.
+- `delete(key, {expectedVersion?})` — conditions on `<versionField> = :expectedVersion` when supplied; no increment (item is gone).
+- `edit(key, mapFn)` / `editListByParams(params, mapFn)` — read the observed version, condition on it, increment. Mass-op results bucket CCF-on-version-mismatch into `conflicts: [{key, reason: 'VersionConflict', sdkError}]`.
+
+Round-trips: `revive` preserves `versionField` + `createdAtField` (unlike other `technicalPrefix`-stripped fields) so read-modify-write cycles work without explicit handling.
+
+## 12. Scope-freeze (`createdAtField` + `asOf`)
+
+```js
+new Adapter({client, table, keyFields: ['id'], technicalPrefix: '-', createdAtField: '-createdAt'});
+
+// Replay scope — only items that existed at or before the cutoff
+await adapter.deleteListByParams(params, {asOf: '2026-04-01T00:00:00Z'});
+```
+
+`options.asOf` AND-merges `<createdAtField> <= :asOf` into the `Query`/`Scan` `FilterExpression`. Throws `CreatedAtFieldNotDeclared` when `createdAtField` isn't set.
+
+The toolkit does NOT auto-write `createdAtField`. Use `stampCreatedAtISO` / `stampCreatedAtEpoch` in the user's `prepare` hook. The stored format dictates what `asOf` values to pass. `Date` is auto-converted to ISO 8601; other types pass through untouched.
+
+## 13. Error classes
+
+All extend `ToolkitError` (which extends `Error`). `err.name` matches the class name for `name`-based discrimination. Toolkit errors with `.status` short-circuit the handler's default error mapping.
+
+```ts
+class ConsistentReadOnGSIRejected extends ToolkitError { indexName: string; }
+class NoIndexForSortField extends ToolkitError { sortField: string; }
+class BadFilterField extends ToolkitError { field: string; }
+class BadFilterOp extends ToolkitError { field: string; op: string; }
+class KeyFieldChanged extends ToolkitError { fields: string[]; }
+class CreatedAtFieldNotDeclared extends ToolkitError { }
+class CascadeNotDeclared extends ToolkitError { operation: string; }
+class TableVerificationFailed extends ToolkitError {
+  tableName: string;
+  diffs: Array<{path, severity, expected, actual}>;
+}
+class TransactionLimitExceededError extends ToolkitError { count: number; limit: number; }
+```
+
+## 14. Bare helpers
+
+- `import {sleep} from 'dynamodb-toolkit'` — `sleep(ms): Promise<void>`.
+- `import {seq} from 'dynamodb-toolkit'` — sequential async runner: `seq([fn1, fn2, ...])` awaits each in order.
+- `import {random} from 'dynamodb-toolkit'` — `random(length = 8)`. Crypto-random lowercase alphanumeric string. Not cryptographically strong for secrets — unique-enough tag (test table names, scratch keys, idempotency tokens).
+
+## 15. Testing recipes
+
+**Unit tests against a mocked client:**
 
 ```js
 import {mock} from 'node:test';
@@ -384,9 +812,11 @@ const send = mock.fn(async cmd => {
 const adapter = new Adapter({client: {send}, table: 'T', keyFields: ['name']});
 ```
 
-For end-to-end against DynamoDB Local, see `tests/helpers/dynamodb-local.js` — it spawns `amazon/dynamodb-local` via Docker on a random port and skips with a clear message when Docker is unavailable.
+**End-to-end against DynamoDB Local:**
 
-## 10. Migration from v2
+See `tests/helpers/dynamodb-local.js` — spawns `amazon/dynamodb-local` via Docker on a random port, skips with a clear message when Docker is unavailable.
+
+## 16. Migration v2 → v3
 
 - AWS SDK v3 peer-deps replace `aws-sdk` v2.
 - One data format (plain JS via `lib-dynamodb`); `Raw` / `DbRaw` collapsed to `Raw<T>`.
@@ -397,4 +827,22 @@ For end-to-end against DynamoDB Local, see `tests/helpers/dynamodb-local.js` —
 - Dropped: `makeClient`, `getProfileName`, `specialTypes`, `converter`, `converterOptions`. Use `@aws-sdk/credential-providers` (`fromIni`, `fromNodeProviderChain`) directly.
 - `generic*` mass methods folded into `options.strategy: 'native' | 'sequential'`.
 - Transaction limit raised 25 → 100.
-- v2 documentation snapshot lives in the wiki repo at the `v2.3-docs` git tag. v2 source remains available on npm as `dynamodb-toolkit@2.3.0`.
+- v2 documentation snapshot lives in the wiki at the `v2.3-docs` git tag. v2 source remains available on npm as `dynamodb-toolkit@2.3.0`.
+
+## 17. Major 3.x milestones
+
+- **3.1.1** — Pre-adapter security audit (prototype pollution closed in `paths/`, `parse-patch`, `read-ordered-list-by-keys`; DoS-on-self closed in batch retry loop, handler unbounded body, `?offset=`; silent-data-loss fixed in `moveList`, `moveByKeys`).
+- **3.1.2** — Tier-A rest-core extractions (`buildListOptions`, `resolveSort`, `stripMount`, `coerceStringQuery`, `validateWriteBody`, `readJsonBody`). Byte-accurate body cap (was UTF-16 code units).
+- **3.2.0** — Declarative schema (`structuralKey`, `indices`, `typeLabels`, `typeDiscriminator`, `filterable`, `technicalPrefix`), filter URL grammar (`f-<field>-<op>=` at the time), `readByKeys` / `writeItems` / `deleteByKeys` / `deleteListByParams` / `cloneListByParams` / `moveListByParams` renames, D2 length-preserving `getByKeys`.
+- **3.3.0** — Resumable mass ops (cursor + `MassOpOptions` / `MassOpResult`), `edit(key, mapFn)`, `editListByParams`, `rename`, `cloneWithOverwrite`, GIGO cleanup (no runtime type-checking of TS-typed args).
+- **3.4.0** — `versionField` (optimistic concurrency), `createdAtField` + `asOf` (scope-freeze), `/marshalling` subpath.
+- **3.5.0** — Cascade (`relationships.structural` + `deleteAllUnder` / `cloneAllUnder{,By}` / `moveAllUnder{,By}`).
+- **3.6.0** — `/provisioning` subpath (`planTable` / `ensureTable` / `verifyTable`, descriptor record, CLI).
+- **3.6.1** — Ergonomics-review bug-fix patch (`buildKey` composite pk, `patch` + `versionField` conditions, `getListByParams` honours options).
+- **3.7.0** — Filter URL grammar flipped to **Option W** (`?<op>-<field>=<value>`; the 3.2-era `?f-<field>-<op>=` form is removed), `options.filter` / `options.search` split, `planTable` / `ensureTable` split (no more `{yes}` / `{dryRun}`), `buildKey` simplification (children default, `{self: true}`, `{partial: 'abc'}`, `kind: 'exact'` dropped), `typeField` auto-populate, `stampCreatedAtISO` / `stampCreatedAtEpoch` hook builders, `getListUnder` sugar, `filterable: {ops, type}` form, descriptor-hidden-from-scans default. Break-in-minor with no compat shims except the soft-warned method aliases (`getAll`, `putAll`, …).
+
+## Links
+
+- Wiki: https://github.com/uhop/dynamodb-toolkit/wiki
+- npm: https://www.npmjs.com/package/dynamodb-toolkit
+- Short reference: https://github.com/uhop/dynamodb-toolkit/blob/master/llms.txt

@@ -28,8 +28,8 @@ export interface HandlerOptions {
    * a property of the returned object. The returned value becomes the
    * `key` passed to `adapter.getByKey` / `put` / `patch` / `delete`.
    *
-   * Default: `(raw, adapter) => ({[adapter.keyFields[0]]: raw})` — takes
-   * the raw string as the partition key. Override for composite keys
+   * Default: `(raw, adapter) => ({[adapter.keyFields[0].name]: raw})` —
+   * takes the raw string as the partition key. Override for composite keys
    * (e.g. `${partition}:${sort}` → `{part, sort}`), or to coerce types
    * (numeric partition keys, UUID validation).
    */
