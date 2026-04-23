@@ -3207,3 +3207,149 @@ test('applyFilter: multiple clauses AND-combined', t => {
   ]);
   t.matchString(p.FilterExpression, /#ff0 = :ffv0 AND #ff1 <> :ffv1/);
 });
+
+// --- E6: filterable {ops, type?} shape ---
+
+test('Adapter: filterable {ops, type} shape accepted alongside [ops]', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    filterable: {
+      year: {ops: ['eq', 'ge', 'le', 'btw'], type: 'number'},
+      status: ['eq', 'ne']
+    }
+  });
+  t.deepEqual(adapter.filterable.year, ['eq', 'ge', 'le', 'btw']);
+  t.deepEqual(adapter.filterable.status, ['eq', 'ne']);
+  t.equal(adapter.filterableTypes.year, 'number');
+  t.equal(adapter.filterableTypes.status, undefined);
+});
+
+test('Adapter: filterable {ops, type} coerces filter values to the declared type', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    filterable: {year: {ops: ['eq'], type: 'number'}}
+  });
+  const p = adapter.applyFilter({}, [{field: 'year', op: 'eq', value: '2024'}]);
+  t.equal(p.ExpressionAttributeValues[':ffv0'], 2024, 'string "2024" coerced to number via filterable.type');
+});
+
+test('Adapter: filterable rejects invalid {ops, type} shapes', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(
+    () => new Adapter({client, table: 'T', keyFields: ['name'], filterable: {year: {ops: ['eq'], type: 'date'}}}),
+    'bad type'
+  );
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['name'], filterable: {year: {ops: 'eq'}}}), 'ops must be array');
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['name'], filterable: {year: {type: 'number'}}}), 'ops required');
+});
+
+// --- E5: adapter.getListUnder sugar ---
+
+test('adapter.getListUnder: equivalent to getListByParams(buildKey(key))', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    if (cmd.input?.Select === 'COUNT') return {Count: 0};
+    return {Items: [], Count: 0};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName'],
+    structuralKey: '-sk'
+  });
+  await adapter.getListUnder({state: 'TX'});
+  const queryCmd = sent.find(c => c.constructor.name === 'QueryCommand' && c.input?.Select !== 'COUNT');
+  t.ok(queryCmd, 'dispatched a Query');
+  // Children-default: begins_with on base + trailing separator.
+  t.matchString(queryCmd.input.KeyConditionExpression, /begins_with/);
+  t.equal(
+    queryCmd.input.ExpressionAttributeValues[Object.keys(queryCmd.input.ExpressionAttributeValues).find(k => queryCmd.input.ExpressionAttributeValues[k] === 'TX|')],
+    'TX|'
+  );
+});
+
+// --- E2: hide descriptor record from list ops ---
+
+test('Adapter: descriptorKey injects NOT (<pk> = :descriptorKey) on list ops', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    if (cmd.input?.Select === 'COUNT') return {Count: 0};
+    return {Items: [], Count: 0};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    descriptorKey: '__adapter__'
+  });
+  await adapter.getListByParams({TableName: 'T'});
+  const scanCmd = sent.find(c => c.constructor.name === 'ScanCommand' && c.input?.Select !== 'COUNT');
+  t.matchString(scanCmd.input.FilterExpression, /<>/, 'emits a <> clause');
+  const descriptorValue = Object.values(scanCmd.input.ExpressionAttributeValues || {}).find(v => v === '__adapter__');
+  t.equal(descriptorValue, '__adapter__', 'descriptor value in placeholders');
+});
+
+test('Adapter: descriptorKey honors {includeDescriptor: true} escape hatch', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    if (cmd.input?.Select === 'COUNT') return {Count: 0};
+    return {Items: [], Count: 0};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    descriptorKey: '__adapter__'
+  });
+  await adapter.getListByParams({TableName: 'T'}, {includeDescriptor: true});
+  const scanCmd = sent.find(c => c.constructor.name === 'ScanCommand' && c.input?.Select !== 'COUNT');
+  t.notOk(scanCmd.input.FilterExpression, 'no injected filter when includeDescriptor is true');
+});
+
+test('Adapter: no descriptor filter when descriptorKey is absent', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    if (cmd.input?.Select === 'COUNT') return {Count: 0};
+    return {Items: [], Count: 0};
+  });
+  const adapter = new Adapter({client, table: 'T', keyFields: ['name']});
+  await adapter.getListByParams({TableName: 'T'});
+  const scanCmd = sent.find(c => c.constructor.name === 'ScanCommand' && c.input?.Select !== 'COUNT');
+  t.notOk(scanCmd.input.FilterExpression, 'no injected filter when descriptorKey unset');
+});
+
+// --- E3: stamp hook builders ---
+
+test('stampCreatedAtISO: stamps on first insert, leaves patches and round-trips alone', async t => {
+  const {stampCreatedAtISO} = await import('dynamodb-toolkit');
+  const prepare = stampCreatedAtISO();
+  const now = new Date();
+  const stamped = prepare({name: 'A'}, false);
+  t.ok(stamped._createdAt, 'first insert gets _createdAt');
+  t.ok(new Date(stamped._createdAt).getTime() >= now.getTime() - 5, 'ISO-8601 string parseable and recent');
+  const patched = prepare({name: 'A', foo: 'bar'}, true);
+  t.equal(patched._createdAt, undefined, 'isPatch leaves field alone');
+  const roundtripped = prepare({name: 'A', _createdAt: '2024-01-01T00:00:00.000Z'}, false);
+  t.equal(roundtripped._createdAt, '2024-01-01T00:00:00.000Z', 'existing value preserved');
+});
+
+test('stampCreatedAtEpoch: stamps with Date.now(); honors custom field name', async t => {
+  const {stampCreatedAtEpoch} = await import('dynamodb-toolkit');
+  const prepare = stampCreatedAtEpoch('createdAtMs');
+  const before = Date.now();
+  const stamped = prepare({name: 'A'}, false);
+  const after = Date.now();
+  t.ok(typeof stamped.createdAtMs === 'number', 'epoch ms is a number');
+  t.ok(stamped.createdAtMs >= before && stamped.createdAtMs <= after, 'timestamp in range');
+  t.equal(stamped._createdAt, undefined, 'default field name not used');
+});

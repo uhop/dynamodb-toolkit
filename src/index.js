@@ -6,6 +6,7 @@ export {seq} from './seq.js';
 export {random} from './random.js';
 export {Adapter} from './adapter/adapter.js';
 export {TransactionLimitExceededError} from './adapter/transaction-upgrade.js';
+export {stampCreatedAtISO, stampCreatedAtEpoch} from './hooks/stamp.js';
 export {
   ToolkitError,
   ConsistentReadOnGSIRejected,

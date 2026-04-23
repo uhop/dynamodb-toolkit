@@ -25,6 +25,7 @@ export {
 } from './adapter/adapter.js';
 export {type AdapterHooks, type OpName} from './adapter/hooks.js';
 export {TransactionLimitExceededError} from './adapter/transaction-upgrade.js';
+export {stampCreatedAtISO, stampCreatedAtEpoch} from './hooks/stamp.js';
 export {
   ToolkitError,
   ConsistentReadOnGSIRejected,

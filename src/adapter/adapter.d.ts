@@ -136,13 +136,27 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
   /** Alias map for projections — rewrites the first segment of each requested field. */
   projectionFieldMap?: Record<string, string>;
   /**
-   * Allowlist for the `<op>-<field>=<value>` filter grammar. Shape
-   * `{<fieldName>: [ops]}`. Requests that name an unlisted field or use
-   * an op not in the allowlist are rejected with `BadFilterField` /
-   * `BadFilterOp`. Type coercion for filter values comes from
-   * `keyFields` / `indices` declarations (default `'string'`).
+   * Allowlist for the `<op>-<field>=<value>` filter grammar. Two shapes
+   * per field are accepted:
+   *
+   * - `[ops]` — ops only. Value coercion type is inferred by walking
+   *   `keyFields` → `indices` (pk then sk), falling back to `'string'`.
+   * - `{ops, type?}` — explicit type for fields that aren't reachable
+   *   from `keyFields` / `indices` (e.g., plain data fields like `year`
+   *   on a record that's keyed by VIN). `type` is one of the DynamoDB
+   *   scalar types: `'string'` (default), `'number'`, `'binary'`.
+   *
+   * Requests that name an unlisted field or use an op not in the
+   * allowlist are rejected with `BadFilterField` / `BadFilterOp`.
    */
-  filterable?: Record<string, Array<'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'in' | 'btw' | 'beg' | 'ct' | 'ex' | 'nx'>>;
+  filterable?: Record<
+    string,
+    | Array<'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'in' | 'btw' | 'beg' | 'ct' | 'ex' | 'nx'>
+    | {
+        ops: Array<'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'in' | 'btw' | 'beg' | 'ct' | 'ex' | 'nx'>;
+        type?: 'string' | 'number' | 'binary';
+      }
+  >;
   /** Fields that get a `searchablePrefix + field` lowercase mirror for substring filtering. */
   searchable?: Record<string, 1 | true>;
   /** Mirror-column prefix. Default `'-search-'`. */
@@ -419,6 +433,14 @@ export interface MassOptions {
    * `createdAtField`).
    */
   asOf?: Date | string | number;
+  /**
+   * Include the reserved descriptor record in list-op results. By
+   * default the toolkit injects `<pk> <> :descriptorKey` when
+   * `descriptorKey` is declared on the adapter, hiding the descriptor
+   * row from every list operation. Set `true` for introspection /
+   * verification tooling that needs to see the descriptor.
+   */
+  includeDescriptor?: boolean;
 }
 
 /** Options for list reads (`getList` / `getListByParams`). */
@@ -476,6 +498,14 @@ export interface ListOptions {
   reviveItems?: boolean;
   /** Skip the indirect-index second-hop. */
   ignoreIndirection?: boolean;
+  /**
+   * Include the reserved descriptor record in list-op results. By
+   * default the toolkit injects `<pk> <> :descriptorKey` when
+   * `descriptorKey` is declared on the adapter, hiding the descriptor
+   * row from every list operation. Set `true` for introspection /
+   * verification tooling that needs to see the descriptor.
+   */
+  includeDescriptor?: boolean;
 }
 
 /**
@@ -721,6 +751,19 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    *   `offset`/`limit`/optional `total`.
    */
   getListByParams(params: Record<string, unknown>, options?: ListOptions): Promise<PaginatedResult<TItem>>;
+
+  /**
+   * Sugar for the common "list descendants under a partial key" pattern —
+   * equivalent to `getListByParams(buildKey(partialKey), options)`. For
+   * `{self: true}` or `{partial}` shapes, compose {@link Adapter.buildKey}
+   * with {@link Adapter.getListByParams} directly.
+   *
+   * @param partialKey Contiguous-from-start map of keyFields values.
+   * @param options Paging / sorting / projection / filter / revive options.
+   * @returns One page: `data` has up to `limit` items (descendants of
+   *   `partialKey`), with the same envelope as `getList`.
+   */
+  getListUnder(partialKey: Partial<TItem>, options?: ListOptions): Promise<PaginatedResult<TItem>>;
 
   /** @deprecated Use {@link Adapter.getList}. Removed in a future minor. */
   getAll(options?: ListOptions, example?: Partial<TItem>, index?: string): Promise<PaginatedResult<TItem>>;

@@ -304,16 +304,34 @@ export class Adapter {
     this.indirectIndices = options.indirectIndices || {};
 
     // `filterable` — allowlist for the `<op>-<field>=<value>` filter
-    // grammar. Shape `{<fieldName>: ['eq', 'beg', ...]}`. Validated at
-    // construction: every op string must be from the closed vocabulary.
+    // grammar. Two shapes accepted per field:
+    //   `['eq', 'beg', ...]`          — ops only; type inferred from
+    //                                   keyFields / indices (fallback 'string')
+    //   `{ops: [...], type?: 'string' | 'number' | 'binary'}`
+    //                                 — ops + explicit type coercion for
+    //                                   fields not reachable from keyFields
+    //                                   / indices (e.g. plain data fields)
+    // Validated at construction: every op from the closed vocabulary;
+    // type (when present) one of the DynamoDB scalar types.
     this.filterable = {};
+    this.filterableTypes = {};
     if (options.filterable !== undefined) {
       if (typeof options.filterable !== 'object' || options.filterable === null) {
         throw new Error('options.filterable must be a plain object');
       }
       for (const field of Object.keys(options.filterable)) {
-        const ops = options.filterable[field];
-        if (!Array.isArray(ops) || ops.length === 0) {
+        const entry = options.filterable[field];
+        let ops;
+        let type;
+        if (Array.isArray(entry)) {
+          ops = entry;
+        } else if (entry && typeof entry === 'object' && Array.isArray(entry.ops)) {
+          ops = entry.ops;
+          type = entry.type;
+        } else {
+          throw new Error(`options.filterable['${field}'] must be an array of ops or {ops: [...], type?}`);
+        }
+        if (ops.length === 0) {
           throw new Error(`options.filterable['${field}'] must be a non-empty array of ops`);
         }
         for (const op of ops) {
@@ -323,7 +341,11 @@ export class Adapter {
             );
           }
         }
+        if (type !== undefined && type !== 'string' && type !== 'number' && type !== 'binary') {
+          throw new Error(`options.filterable['${field}'].type must be 'string' | 'number' | 'binary'`);
+        }
         this.filterable[field] = ops.slice();
+        if (type) this.filterableTypes[field] = type;
       }
     }
 
@@ -871,6 +893,31 @@ export class Adapter {
     return params;
   }
 
+  // AND-merge `<pk> <> :descriptorKey` into FilterExpression so the
+  // reserved descriptor record (at pk = descriptorKey) never leaks into
+  // list-op results. No-op when the adapter has no `descriptorKey` set
+  // or the caller passes `{includeDescriptor: true}` (escape hatch for
+  // toolkit introspection tools).
+  //
+  // Safe to apply to Queries as well as Scans — the filter is a no-op
+  // when the Query's pk condition already excludes the descriptor row.
+  _hideDescriptor(params, options) {
+    if (!this.descriptorKey) return params;
+    if (options?.includeDescriptor) return params;
+    const pkName = this.keyFields[0].name;
+    const names = params.ExpressionAttributeNames || {};
+    const values = params.ExpressionAttributeValues || {};
+    const nameAlias = '#dn' + Object.keys(names).length;
+    const valueAlias = ':dv' + Object.keys(values).length;
+    names[nameAlias] = pkName;
+    values[valueAlias] = this.descriptorKey;
+    params.ExpressionAttributeNames = names;
+    params.ExpressionAttributeValues = values;
+    const clause = `${nameAlias} <> ${valueAlias}`;
+    params.FilterExpression = params.FilterExpression ? `(${clause}) AND (${params.FilterExpression})` : clause;
+    return params;
+  }
+
   // AND-merge `<createdAtField> <= :asOf` into FilterExpression for a
   // mass-op scope-freeze. `asOf` accepts Date (auto-converted to ISO
   // 8601), string, or number — toolkit passes scalar through, so the
@@ -954,10 +1001,12 @@ export class Adapter {
 
   /**
    * Resolve the declared type of a field for filter value coercion.
-   * Walks keyFields → indices (pk then sk). Fields not declared anywhere
-   * fall back to `'string'` (DynamoDB's default attribute shape).
+   * Precedence: `filterable[field].type` (explicit E6 shape) → keyFields
+   * → indices (pk then sk). Fields not declared anywhere fall back to
+   * `'string'` (DynamoDB's default attribute shape).
    */
   _typeOfField(name) {
+    if (this.filterableTypes[name]) return this.filterableTypes[name];
     for (const f of this.keyFields) if (f.name === name) return f.type;
     for (const spec of Object.values(this.indices)) {
       if (spec.pk && spec.pk.name === name) return spec.pk.type;
@@ -1369,6 +1418,7 @@ export class Adapter {
   async editListByParams(params, mapFn, options) {
     let p = this._cloneParams(params);
     p = this._applyAsOf(p, options?.asOf);
+    p = this._hideDescriptor(p, options);
     p = cleanParams(p);
 
     return runPaged(this.client, p, options, async items => {
@@ -1845,6 +1895,18 @@ export class Adapter {
     return this.getListByParams(params, options);
   }
 
+  /**
+   * Sugar for the common "list descendants under a partial key" pattern.
+   * Equivalent to `getListByParams(buildKey(partialKey), options)`.
+   * For `{self: true}` or `{partial}` shapes, compose `buildKey` +
+   * `getListByParams` directly.
+   */
+  async getListUnder(partialKey, options) {
+    const params = this.buildKey(partialKey);
+    params.TableName = this.table;
+    return this.getListByParams(params, options);
+  }
+
   async getListByParams(params, options) {
     this._checkConsistentRead(params);
     const isIndirect = this._isIndirect(params, options);
@@ -1871,6 +1933,7 @@ export class Adapter {
       );
     }
     activeParams = this._applyAsOf(activeParams, options?.asOf);
+    activeParams = this._hideDescriptor(activeParams, options);
     activeParams = cleanParams(activeParams);
 
     const needTotal = options?.needTotal !== false;
@@ -1929,6 +1992,7 @@ export class Adapter {
     let p = this._cloneParams(params);
     p = addProjection(p, this.primaryKeyAttrs.join(','), null, true);
     p = this._applyAsOf(p, options?.asOf);
+    p = this._hideDescriptor(p, options);
     p = cleanParams(p);
 
     return runPaged(this.client, p, options, async items => {
@@ -1967,6 +2031,7 @@ export class Adapter {
   async cloneListByParams(params, mapFn, options) {
     let p = this._cloneParams(params);
     p = this._applyAsOf(p, options?.asOf);
+    p = this._hideDescriptor(p, options);
     p = cleanParams(p);
 
     const useConditionPath = options?.ifNotExists || options?.ifExists;
@@ -2061,6 +2126,7 @@ export class Adapter {
   async moveListByParams(params, mapFn, options) {
     let p = this._cloneParams(params);
     p = this._applyAsOf(p, options?.asOf);
+    p = this._hideDescriptor(p, options);
     p = cleanParams(p);
 
     return runPaged(this.client, p, options, async items => {
