@@ -698,7 +698,7 @@ No parallel `docs/` tree in the main repo. Wiki is the single user-facing home.
 
 ### 10.3 Migration guide
 
-Ship `wiki/Migration:-v2-to-v3.md` covering:
+Ship `wiki/Migration：-v2-to-v3.md` covering:
 
 - Client construction: v2 `makeClient` → v3 `DynamoDBDocumentClient.from(new DynamoDBClient({region}), {marshallOptions: {removeUndefinedValues: true}})`.
 - Adapter constructor shape: old positional → new options bag.

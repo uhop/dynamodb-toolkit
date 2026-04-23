@@ -112,7 +112,7 @@ export interface AdapterHooks<TItem extends Record<string, unknown>> {
   /**
    * Return extra `make*` descriptors to bundle in the same
    * `TransactWriteItems` as the main op. Triggers the Adapter's
-   * transaction auto-upgrade path — see `Adapter:-Transaction-auto-upgrade`
+   * transaction auto-upgrade path — see `Adapter：-Transaction-auto-upgrade`
    * in the wiki.
    *
    * Called on every single write (`post`, `put`, `patch`, `delete`) after
