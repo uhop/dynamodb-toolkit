@@ -25,6 +25,36 @@ _Why the principle matters._ Complex APIs with cross-field validation inflate th
 
 **Split methods when complex interactions are unavoidable.** After trying the additive-presence shape first — if options still carry genuinely different semantics that require runtime parsing to disambiguate — prefer splitting into separate entry points rather than one method that inspects args to decide what to do. Different calls signal different intent at the call site; the implementation stops branching on arg shape.
 
+The canonical anti-pattern and its fix:
+
+```js
+// Anti-pattern: internal branch on a mode flag.
+const fn = flag => {
+  if (flag) {
+    /* do A */
+  } else {
+    /* do B */
+  }
+};
+
+// Fix: two entry points, no internal branch.
+const fnA = () => {
+  /* do A */
+};
+const fnB = () => {
+  /* do B */
+};
+
+// Caller does dynamic dispatch at the boundary, if they need it.
+const result = flag ? fnA() : fnB();
+```
+
+The split is justified when these conditions hold:
+
+- **Substantially different implementations.** The two branches share only a handful of lines; a split cleanly separates them with no duplication.
+- **Shared code is encapsulated, not duplicated.** Common algorithm becomes an internal function both entry points call. One literally reuses the other when there's a natural composition.
+- **One naturally depends on the other.** e.g., `planTable()` returns a plan object; `ensureTable()` = `planTable()` + apply.
+
 Smells that mean "split me":
 
 - Mode discriminators (`{mode: 'plan' | 'execute'}`): split into `planX()` and `doX()`.
@@ -63,26 +93,24 @@ This matches the Terraform/kubectl convention (programmatic = imperative; CLI = 
 
 **Blast-radius note.** `ensureTable` is ADD-only (create table, add GSI). It can't destroy data — the worst case is an unintended table/GSI create, which is recoverable. That lowers the bar for a "default executes" decision. `verifyTable` is pure-read; no dry-run axis at all.
 
-### Decision (2026-04-22)
+### Decision (2026-04-22, final)
 
-**Approved.** Flip the default in 3.7.0 as a clean break — no `{yes}` deprecation.
+**Split methods — no `{dryRun}` option.** Applying the split-methods addendum; F1 meets all three criteria:
 
-- Module: `ensureTable(adapter)` executes; `{dryRun: true}` returns the plan without writing.
-- CLI: default to `--dry-run`; `--yes` (or `--execute`) writes.
-- `{yes}` option removed; callers update at the import site.
+- **Substantially different implementations.** Plan-only is pure read (DescribeTable + diff + return plan). Execute adds a sequence of CreateTable / UpdateTable calls + descriptor write. Not a thin tweak — different side-effect class.
+- **Shared code encapsulated.** Plan computation lives in one internal function that both entry points call.
+- **Natural composition.** `ensureTable()` = `planTable()` + apply.
 
-**Q2 (open).** Should `{dryRun: true}` on a no-op plan still print the summary, or stay silent? _Holding — low-stakes; defaults can be picked at implementation time._
+Concrete surface:
 
-### Addendum reconsideration (2026-04-22)
+- `planTable(adapter)` → read-only. Returns `{tableName, steps, summary}`. Never writes.
+- `ensureTable(adapter)` → calls `planTable()` internally, applies the steps, returns `{plan, executed}`.
+- Both drop every `{yes}` / `{dryRun}` option. Caller picks the method; no flag parsing.
+- CLI mirrors the split: `dynamodb-toolkit plan-table <module>` (read-only) and `dynamodb-toolkit ensure-table <module>` (mutating). No `--dry-run` / `--yes` flags.
 
-Under the **split-methods-when-interactions-are-unavoidable** addendum, `{dryRun: true}` is a mode flag flipping pure-read vs. mutating — two substantially different behaviors on one method. Candidate split:
+This also closes **Q2** by construction — a `planTable()` on a no-op table just returns `{steps: [], summary: ['Table <T> matches declaration — nothing to do']}`; the CLI prints the summary unconditionally. No silent / verbose branching.
 
-- `planTable(adapter)` — read-only; returns `{tableName, steps, summary}`. Never writes.
-- `ensureTable(adapter)` — mutating; runs the plan and returns `{plan, executed}`.
-
-CLI mirrors the split: `dynamodb-toolkit plan-table <module>` and `dynamodb-toolkit ensure-table <module>`. No `--dry-run` / `--yes` flag gymnastics; the subcommand name declares intent.
-
-**Pending Eugene's confirmation.** If approved, F1 decision flips from "flip default + `{dryRun}` option" to "split into two methods"; Phase 2 implementation plan rewrites accordingly.
+**Phase 2 impact.** Plan-3.7.0 Phase 2 rewrites to "split `ensureTable`" instead of "flip default".
 
 ---
 
@@ -618,7 +646,7 @@ typeDiscriminator: 'kind',  // same field name — reads what the built-in wrote
 | `stampCreatedAtISO` / `stampCreatedAtEpoch` hook builders                                                                                                 | E3           | decided — revisit when registry lands |
 | `adapter.getListUnder(partialKey, options)` sugar                                                                                                         | E5           | decided                               |
 | `filterable` optional `type:` for coercion                                                                                                                | E6           | decided                               |
-| Flip `ensureTable` default (execute; `{dryRun: true}` opt-in; `{yes}` removed)                                                                            | F1           | **decided**                           |
+| Split `ensureTable` into `planTable()` (read-only) + `ensureTable()` (mutating); drop `{yes}` / `{dryRun}` options; CLI mirrors                           | F1           | **decided**                           |
 | Shorthand `typeDiscriminator: 'kind'` / `structuralKey: '_sk'`                                                                                            | F2           | decided                               |
 | Car-rental example: tier-1/tier-2 records (states + facilities)                                                                                           | F3           | decided (example only)                |
 | Car-rental example: bulk-load section via `putItems`                                                                                                      | F4           | decided (example only)                |
@@ -645,7 +673,8 @@ typeDiscriminator: 'kind',  // same field name — reads what the built-in wrote
 
 **Resolved (2026-04-22).**
 
-- `Q1` ensureTable default flip — **decided**: flip, no deprecation.
+- `Q1` ensureTable default flip — **superseded by F1 split**: `planTable()` + `ensureTable()`; no flag at all.
+- `Q2` dry-run no-op output — **closed by F1 split**: `planTable()` on a no-op returns steps=[] with a human-readable summary; CLI prints unconditionally.
 - `Q8` fFilter rename — **Option B decided**: `fFilter` → `filter`, current `filter` → `search`.
 - `Q9` clause shape — **Option D decided**: single `value` knob, polymorphic by op; TS discriminated union narrows per op.
 - `Q10` REST URL prefix — **Option W decided**: `?<op>-<field>=<value>` (verb-first). Parser rewrite: left-anchored regex. Reserved-name rule + CI test gate future param additions.
@@ -655,7 +684,6 @@ typeDiscriminator: 'kind',  // same field name — reads what the built-in wrote
 
 **Holding (low stakes; defer to implementation time).**
 
-- `Q2` dry-run no-op output
 - `Q3` default separator for `structuralKey` shorthand (lean `|`)
 - `Q4` `structuralKey: true` fully-auto form
 - `Q5` typed validation hooks in the example

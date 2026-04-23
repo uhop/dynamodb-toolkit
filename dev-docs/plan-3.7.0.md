@@ -40,17 +40,25 @@ Land first because every downstream phase references the renamed symbols. Single
 
 **Phase 1 done when:** all checks green + URL grammar test fixtures reflect Option W + clause shapes polymorphic per Option D.
 
-## Phase 2 — `ensureTable` default flip (F1) + shorthand knobs (F2)
+## Phase 2 — `ensureTable` → `planTable()` + `ensureTable()` split (F1) + shorthand knobs (F2)
 
 Independent small breaking changes.
 
-**F1:**
+**F1 — split methods, no flags.**
 
-- `src/provisioning/ensure-table.js`: default branch flips. Absence of `options` (or any options object without `dryRun: true`) now executes. `{dryRun: true}` returns plan without writing. Drop `{yes}` handling entirely.
-- `bin/dynamodb-toolkit.js`: CLI `ensure-table` defaults to `--dry-run`; `--yes` / `--execute` flips to write. Translate to the module's `{dryRun: true}` or no-options call.
-- Tests + CLI integration tests.
+- `src/provisioning/ensure-table.js`:
+  - Extract the existing plan-computation into a local function (`computePlan(adapter)`) that reads `DescribeTable`, diffs against the declaration, returns `{tableName, steps, summary}`. No writes.
+  - New public `planTable(adapter)` = thin wrapper around `computePlan()` — read-only entry point.
+  - Rewrite `ensureTable(adapter)` to call `computePlan()` internally, then execute the steps, return `{plan, executed}`.
+  - Drop `{yes}` and `{dryRun}` options entirely. No options object at all (pure `(adapter)` signature) unless / until a real option surfaces.
+- `src/provisioning/index.js`: export `planTable` alongside `ensureTable` and `verifyTable`.
+- `bin/dynamodb-toolkit.js`: CLI gets two subcommands:
+  - `dynamodb-toolkit plan-table <module>` — calls `planTable`, prints the summary, exits 0.
+  - `dynamodb-toolkit ensure-table <module>` — calls `ensureTable`, prints executed steps, exits 0.
+  - No `--yes` / `--dry-run` flags. Subcommand name declares intent.
+- Tests + CLI integration tests cover both entry points; assert that `planTable` never writes (mock client verifies no CreateTable / UpdateTable calls).
 
-**F2:**
+**F2 — shorthand knobs.**
 
 - `src/adapter/adapter.js` option normalization: `structuralKey: '_sk'` string shorthand → `{name: '_sk', separator: '|'}`. `|` as default separator.
 - `typeDiscriminator` string shorthand is already supported (adapter.js:228) — verify.
