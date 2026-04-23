@@ -3,11 +3,11 @@
 export {parseFields} from './parsers/parse-fields.js';
 export {parseSort} from './parsers/parse-sort.js';
 export {parseFilter} from './parsers/parse-filter.js';
+export {parseSearch} from './parsers/parse-search.js';
 export {parsePatch} from './parsers/parse-patch.js';
 export {parseNames} from './parsers/parse-names.js';
 export {parsePaging} from './parsers/parse-paging.js';
 export {parseFlag} from './parsers/parse-flag.js';
-export {parseFFilter} from './parsers/parse-f-filter.js';
 export {coerceStringQuery} from './parsers/coerce-string-query.js';
 
 export {buildEnvelope} from './builders/build-envelope.js';

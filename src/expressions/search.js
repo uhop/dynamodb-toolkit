@@ -2,7 +2,7 @@
 
 import {normalizeFields} from '../paths/normalize-fields.js';
 
-export const buildFilter = (searchable, query, options, params = {}) => {
+export const buildSearch = (searchable, query, options, params = {}) => {
   if (!query) return params;
 
   const fields = options?.fields;

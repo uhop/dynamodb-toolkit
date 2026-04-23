@@ -1,6 +1,6 @@
 export {buildUpdate} from './update.js';
 export {addProjection} from './projection.js';
-export {buildFilter, buildFilterByExample} from './filter.js';
+export {buildSearch, buildFilterByExample} from './search.js';
 export {buildCondition} from './condition.js';
 export {buildKeyCondition} from './key-condition.js';
 export {cleanParams} from './clean-params.js';

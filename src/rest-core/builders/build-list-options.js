@@ -7,12 +7,14 @@
 
 import {parseFields} from '../parsers/parse-fields.js';
 import {parseFilter} from '../parsers/parse-filter.js';
+import {parseSearch} from '../parsers/parse-search.js';
 import {parsePaging} from '../parsers/parse-paging.js';
 import {parseFlag} from '../parsers/parse-flag.js';
 
 export const buildListOptions = (query, policy) => {
   const fields = parseFields(query.fields);
-  const filter = parseFilter(query.filter);
+  const search = parseSearch(query.search);
+  const filter = parseFilter(query);
   const paging = parsePaging(query, {
     defaultLimit: policy.defaultLimit,
     maxLimit: policy.maxLimit,
@@ -26,6 +28,7 @@ export const buildListOptions = (query, policy) => {
     needTotal: policy.needTotal
   };
   if (fields) out.fields = fields;
-  if (filter) out.filter = filter.query;
+  if (search) out.search = search.query;
+  if (filter.length) out.filter = filter;
   return out;
 };

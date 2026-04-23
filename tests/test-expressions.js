@@ -2,7 +2,7 @@ import test from 'tape-six';
 import {
   buildUpdate,
   addProjection,
-  buildFilter,
+  buildSearch,
   buildFilterByExample,
   buildCondition,
   buildKeyCondition,
@@ -147,38 +147,38 @@ test('addProjection: projectionFieldMap', t => {
   t.equal(result.ExpressionAttributeNames['#pj0'], 'realName');
 });
 
-// buildFilter
+// buildSearch
 
-test('buildFilter: substring search across searchable fields', t => {
-  const result = buildFilter({name: 1, climate: 1}, 'temp');
+test('buildSearch: substring search across searchable fields', t => {
+  const result = buildSearch({name: 1, climate: 1}, 'temp');
   t.matchString(result.FilterExpression, /contains\(#sr0, :flt0\) OR contains\(#sr1, :flt0\)/);
   t.equal(result.ExpressionAttributeNames['#sr0'], '-search-name');
   t.equal(result.ExpressionAttributeValues[':flt0'], 'temp');
 });
 
-test('buildFilter: case-insensitive by default', t => {
-  const result = buildFilter({name: 1}, 'ABC');
+test('buildSearch: case-insensitive by default', t => {
+  const result = buildSearch({name: 1}, 'ABC');
   t.equal(result.ExpressionAttributeValues[':flt0'], 'abc');
 });
 
-test('buildFilter: case-sensitive option', t => {
-  const result = buildFilter({name: 1}, 'ABC', {caseSensitive: true});
+test('buildSearch: case-sensitive option', t => {
+  const result = buildSearch({name: 1}, 'ABC', {caseSensitive: true});
   t.equal(result.ExpressionAttributeValues[':flt0'], 'ABC');
 });
 
-test('buildFilter: null query returns params unchanged', t => {
+test('buildSearch: null query returns params unchanged', t => {
   const params = {};
-  t.equal(buildFilter({name: 1}, null, undefined, params), params);
+  t.equal(buildSearch({name: 1}, null, undefined, params), params);
 });
 
-test('buildFilter: field restriction', t => {
-  const result = buildFilter({name: 1, climate: 1, terrain: 1}, 'test', {fields: ['name']});
+test('buildSearch: field restriction', t => {
+  const result = buildSearch({name: 1, climate: 1, terrain: 1}, 'test', {fields: ['name']});
   t.matchString(result.FilterExpression, /contains\(#sr0, :flt0\)/);
   t.notOk(result.FilterExpression.includes('OR'));
 });
 
-test('buildFilter: merges with existing FilterExpression', t => {
-  const result = buildFilter({name: 1}, 'test', undefined, {FilterExpression: '#x = :x'});
+test('buildSearch: merges with existing FilterExpression', t => {
+  const result = buildSearch({name: 1}, 'test', undefined, {FilterExpression: '#x = :x'});
   t.matchString(result.FilterExpression, /^\(#x = :x\) AND \(/);
 });
 

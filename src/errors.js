@@ -47,7 +47,7 @@ export class NoIndexForSortField extends ToolkitError {
 }
 
 /**
- * The `f-<field>-<op>=<value>` filter grammar rejected a field that isn't
+ * The `<op>-<field>=<value>` filter grammar rejected a field that isn't
  * present in the adapter's `filterable` allowlist.
  */
 export class BadFilterField extends ToolkitError {
@@ -58,7 +58,7 @@ export class BadFilterField extends ToolkitError {
 }
 
 /**
- * The `f-<field>-<op>=<value>` filter grammar accepted the field but
+ * The `<op>-<field>=<value>` filter grammar accepted the field but
  * rejected the op — the op isn't in the field's allowlist entry.
  */
 export class BadFilterOp extends ToolkitError {

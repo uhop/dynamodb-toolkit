@@ -3,11 +3,11 @@ import {
   parseFields,
   parseSort,
   parseFilter,
+  parseSearch,
   parsePatch,
   parseNames,
   parsePaging,
   parseFlag,
-  parseFFilter,
   coerceStringQuery,
   buildEnvelope,
   buildErrorBody,
@@ -74,20 +74,20 @@ test('parseSort: empty returns null', t => {
   t.equal(parseSort(''), null);
 });
 
-// --- parseFilter ---
+// --- parseSearch ---
 
-test('parseFilter: returns query', t => {
-  t.deepEqual(parseFilter('foo'), {query: 'foo'});
+test('parseSearch: returns query', t => {
+  t.deepEqual(parseSearch('foo'), {query: 'foo'});
 });
 
-test('parseFilter: empty returns null', t => {
-  t.equal(parseFilter(null), null);
-  t.equal(parseFilter(''), null);
-  t.equal(parseFilter('   '), null);
+test('parseSearch: empty returns null', t => {
+  t.equal(parseSearch(null), null);
+  t.equal(parseSearch(''), null);
+  t.equal(parseSearch('   '), null);
 });
 
-test('parseFilter: passes through mode + caseSensitive options', t => {
-  const f = parseFilter('foo', {mode: 'prefix', caseSensitive: true});
+test('parseSearch: passes through mode + caseSensitive options', t => {
+  const f = parseSearch('foo', {mode: 'prefix', caseSensitive: true});
   t.equal(f.mode, 'prefix');
   t.equal(f.caseSensitive, true);
 });
@@ -197,14 +197,14 @@ test('parseNames: truncates to maxItems default 1000', t => {
   t.equal(r.length, 1000);
 });
 
-test('parseFilter: truncates to maxLength default 1024', t => {
+test('parseSearch: truncates to maxLength default 1024', t => {
   const input = 'a'.repeat(2000);
-  const r = parseFilter(input);
+  const r = parseSearch(input);
   t.equal(r.query.length, 1024, 'capped at default');
 });
 
-test('parseFilter: maxLength override', t => {
-  const r = parseFilter('abcdefgh', {maxLength: 4});
+test('parseSearch: maxLength override', t => {
+  const r = parseSearch('abcdefgh', {maxLength: 4});
   t.equal(r.query, 'abcd');
 });
 
@@ -582,11 +582,12 @@ test('validateWriteBody: allowArray lets arrays through', t => {
 
 test('buildListOptions: composes parsers with policy caps', t => {
   const policy = mergePolicy({defaultLimit: 5, maxLimit: 50, maxOffset: 1000});
-  const out = buildListOptions({offset: '20', limit: '30', fields: 'a,b', filter: 'x'}, policy);
+  const out = buildListOptions({offset: '20', limit: '30', fields: 'a,b', search: 'x', 'eq-status': 'active'}, policy);
   t.equal(out.offset, 20);
   t.equal(out.limit, 30);
   t.deepEqual(out.fields, ['a', 'b']);
-  t.equal(out.filter, 'x');
+  t.equal(out.search, 'x');
+  t.deepEqual(out.filter, [{field: 'status', op: 'eq', value: 'active'}]);
 });
 
 test('buildListOptions: missing values fall back to policy', t => {
@@ -825,61 +826,60 @@ test('createHandler: no wildcard → fields pass through', async t => {
   t.deepEqual(capturedOpts.fields, ['a', 'b']);
 });
 
-// --- parseFFilter ---
+// --- parseFilter (structured clauses from `<op>-<field>=<value>` URL grammar) ---
 
-test('parseFFilter: empty / missing query returns empty list', t => {
-  t.deepEqual(parseFFilter({}), []);
-  t.deepEqual(parseFFilter(null), []);
+test('parseFilter: empty / missing query returns empty list', t => {
+  t.deepEqual(parseFilter({}), []);
+  t.deepEqual(parseFilter(null), []);
 });
 
-test('parseFFilter: basic single-value op', t => {
-  const out = parseFFilter({'f-status-eq': 'active'});
-  t.deepEqual(out, [{field: 'status', op: 'eq', values: ['active']}]);
+test('parseFilter: basic single-value op', t => {
+  const out = parseFilter({'eq-status': 'active'});
+  t.deepEqual(out, [{field: 'status', op: 'eq', value: 'active'}]);
 });
 
-test('parseFFilter: field name with dash (parse from right)', t => {
-  const out = parseFFilter({'f-rental-name-eq': 'Dallas'});
-  t.deepEqual(out, [{field: 'rental-name', op: 'eq', values: ['Dallas']}]);
+test('parseFilter: field name with dash (left-anchored split after op prefix)', t => {
+  const out = parseFilter({'eq-rental-name': 'Dallas'});
+  t.deepEqual(out, [{field: 'rental-name', op: 'eq', value: 'Dallas'}]);
 });
 
-test('parseFFilter: unknown op silently skipped (no `f-X-op` match)', t => {
-  // f-X-zz isn't a known op — treat as ordinary query param, skip.
-  const out = parseFFilter({'f-x-zz': 'v', 'f-y-eq': 'w'});
-  t.deepEqual(out, [{field: 'y', op: 'eq', values: ['w']}]);
+test('parseFilter: keys without an op prefix are silently skipped', t => {
+  // `zz-x` doesn't start with a known op token — treat as ordinary param.
+  const out = parseFilter({'zz-x': 'v', 'eq-y': 'w'});
+  t.deepEqual(out, [{field: 'y', op: 'eq', value: 'w'}]);
 });
 
-test('parseFFilter: multi-value `in` with default comma delimiter', t => {
-  const out = parseFFilter({'f-cost-in': '1,3,5'});
-  t.deepEqual(out[0].values, ['1', '3', '5']);
+test('parseFilter: multi-value `in` with default comma delimiter', t => {
+  const out = parseFilter({'in-cost': '1,3,5'});
+  t.deepEqual(out[0].value, ['1', '3', '5']);
 });
 
-test('parseFFilter: multi-value `in` with first-char delimiter', t => {
-  const out = parseFFilter({'f-name-in': '|a,b|c,d'});
-  t.deepEqual(out[0].values, ['a,b', 'c,d']);
+test('parseFilter: multi-value `in` with first-char delimiter', t => {
+  const out = parseFilter({'in-name': '|a,b|c,d'});
+  t.deepEqual(out[0].value, ['a,b', 'c,d']);
 });
 
-test('parseFFilter: multi-value `btw` with caret delimiter', t => {
-  const out = parseFFilter({'f-cost-btw': '^1^10'});
-  t.deepEqual(out[0].values, ['1', '10']);
+test('parseFilter: multi-value `btw` with caret delimiter', t => {
+  const out = parseFilter({'btw-cost': '^1^10'});
+  t.deepEqual(out[0].value, ['1', '10']);
 });
 
-test('parseFFilter: no-value ops carry empty values array', t => {
-  const outEx = parseFFilter({'f-status-ex': ''});
-  t.deepEqual(outEx[0].values, []);
+test('parseFilter: no-value ops omit `value` entirely', t => {
+  const outEx = parseFilter({'ex-status': ''});
   t.equal(outEx[0].op, 'ex');
-  const outNx = parseFFilter({'f-status-nx': '1'});
-  t.deepEqual(outNx[0].values, []);
+  t.equal('value' in outEx[0], false, 'ex clause has no value field');
+  const outNx = parseFilter({'nx-status': '1'});
   t.equal(outNx[0].op, 'nx');
+  t.equal('value' in outNx[0], false, 'nx clause has no value field');
 });
 
-test('parseFFilter: drops leading/trailing empties in multi-value', t => {
-  // Leading delim produces leading empty → drop; same for trailing.
-  const out = parseFFilter({'f-cost-in': ',1,2,'});
-  t.deepEqual(out[0].values, ['1', '2']);
+test('parseFilter: drops leading/trailing empties in multi-value', t => {
+  const out = parseFilter({'in-cost': ',1,2,'});
+  t.deepEqual(out[0].value, ['1', '2']);
 });
 
-test('parseFFilter: leaves non-f query keys alone', t => {
-  const out = parseFFilter({offset: '0', limit: '10', 'f-status-eq': 'active'});
+test('parseFilter: leaves non-op query keys alone', t => {
+  const out = parseFilter({offset: '0', limit: '10', 'eq-status': 'active'});
   t.equal(out.length, 1);
   t.equal(out[0].field, 'status');
 });

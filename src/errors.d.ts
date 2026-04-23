@@ -20,13 +20,13 @@ export class NoIndexForSortField extends ToolkitError {
   constructor(sortField: string);
 }
 
-/** The `f-<field>-<op>=<value>` filter grammar rejected a field not in `filterable`. */
+/** The `<op>-<field>=<value>` filter grammar rejected a field not in `filterable`. */
 export class BadFilterField extends ToolkitError {
   field: string;
   constructor(field: string);
 }
 
-/** The `f-<field>-<op>=<value>` filter grammar rejected an op not allowed for this field. */
+/** The `<op>-<field>=<value>` filter grammar rejected an op not allowed for this field. */
 export class BadFilterOp extends ToolkitError {
   field: string;
   op: string;

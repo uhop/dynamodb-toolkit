@@ -136,7 +136,7 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
   /** Alias map for projections — rewrites the first segment of each requested field. */
   projectionFieldMap?: Record<string, string>;
   /**
-   * Allowlist for the `f-<field>-<op>=<value>` filter grammar. Shape
+   * Allowlist for the `<op>-<field>=<value>` filter grammar. Shape
    * `{<fieldName>: [ops]}`. Requests that name an unlisted field or use
    * an op not in the allowlist are rejected with `BadFilterField` /
    * `BadFilterOp`. Type coercion for filter values comes from
@@ -450,17 +450,25 @@ export interface ListOptions {
   consistent?: boolean;
   /** Field spec for projection. */
   fields?: string | string[] | null;
-  /** Substring filter over `searchable` fields. */
-  filter?: string;
+  /** Free-form substring search over `searchable` fields. */
+  search?: string;
   /**
-   * Parsed `f-<field>-<op>=<value>` clauses (from the REST layer's
-   * `parseFFilter`). Compiled by `adapter.applyFFilter` into
-   * `FilterExpression` / `KeyConditionExpression`.
+   * Structured filter clauses from the `<op>-<field>=<value>` URL grammar
+   * (parsed by the REST layer's `parseFilter`). Compiled by
+   * `adapter.applyFilter` into `FilterExpression` / `KeyConditionExpression`.
+   *
+   * Shape is polymorphic by `op`: no-value ops (`ex`, `nx`) omit `value`;
+   * multi-value ops (`in`, `btw`) carry `value` as an array; single-value
+   * ops carry `value` as a scalar string.
    */
-  fFilter?: Array<{field: string; op: string; values: string[]}>;
-  /** Mirror-column prefix override for the filter. Default `'-search-'`. */
+  filter?: Array<
+    | {field: string; op: 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'beg' | 'ct'; value: string}
+    | {field: string; op: 'in' | 'btw'; value: string[]}
+    | {field: string; op: 'ex' | 'nx'}
+  >;
+  /** Mirror-column prefix override for `search`. Default `'-search-'`. */
   prefix?: string;
-  /** When `true`, the filter query is not lowercased. */
+  /** When `true`, the search query is not lowercased. */
   caseSensitive?: boolean;
   /** When `false`, skip the `Select: 'COUNT'` pass and omit `total`. Default `true`. */
   needTotal?: boolean;
@@ -524,7 +532,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   projectionFieldMap: Record<string, string>;
   /** Searchable-field map for substring filtering. */
   searchable: Record<string, 1 | true>;
-  /** Allowlist for the `f-<field>-<op>=<value>` filter grammar. */
+  /** Allowlist for the `<op>-<field>=<value>` filter grammar. */
   filterable: Record<string, string[]>;
   /** Mirror-column prefix. Default `'-search-'`. */
   searchablePrefix: string;
@@ -565,15 +573,26 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   findIndexForSort(field: string): string;
 
   /**
-   * Compile parsed `f-<field>-<op>=<value>` clauses into `params`.
+   * Compile parsed `<op>-<field>=<value>` clauses into `params`.
    * Validates against `filterable`, coerces values to declared types,
    * auto-promotes index-compatible clauses to `KeyConditionExpression`;
    * rest land in `FilterExpression`. Mutates and returns `params`.
    *
+   * Clause shape is polymorphic by op: no-value ops (`ex`, `nx`) omit
+   * `value`; multi-value ops (`in`, `btw`) carry `value` as array;
+   * single-value ops carry `value` as scalar.
+   *
    * @throws BadFilterField when a clause names a field not in `filterable`.
    * @throws BadFilterOp when the op isn't allowlisted for that field.
    */
-  applyFFilter(params: Record<string, unknown>, clauses: Array<{field: string; op: string; values: string[]}>): Record<string, unknown>;
+  applyFilter(
+    params: Record<string, unknown>,
+    clauses: Array<
+      | {field: string; op: 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'beg' | 'ct'; value: string}
+      | {field: string; op: 'in' | 'btw'; value: string[]}
+      | {field: string; op: 'ex' | 'nx'}
+    >
+  ): Record<string, unknown>;
 
   /**
    * Build a `KeyConditionExpression` for a Query against this Adapter's main

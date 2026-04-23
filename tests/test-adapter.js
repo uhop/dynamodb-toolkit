@@ -3036,7 +3036,7 @@ test('getList: keysOnly takes precedence over fields', async t => {
   t.ok(names.includes('rentalName'));
 });
 
-// --- filterable declaration + applyFFilter ---
+// --- filterable declaration + applyFilter ---
 
 test('Adapter: filterable — validates shape + ops', t => {
   const client = makeMockClient(async () => ({}));
@@ -3057,12 +3057,12 @@ test('Adapter: filterable stored normalized', t => {
   t.deepEqual(adapter.filterable.cost, ['gt', 'lt']);
 });
 
-test('applyFFilter: throws BadFilterField for unlisted field', t => {
+test('applyFilter: throws BadFilterField for unlisted field', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({client, table: 'T', keyFields: ['name'], filterable: {status: ['eq']}});
   let threw;
   try {
-    adapter.applyFFilter({}, [{field: 'unknown', op: 'eq', values: ['x']}]);
+    adapter.applyFilter({}, [{field: 'unknown', op: 'eq', value: 'x'}]);
   } catch (err) {
     threw = err;
   }
@@ -3070,12 +3070,12 @@ test('applyFFilter: throws BadFilterField for unlisted field', t => {
   t.equal(threw.name, 'BadFilterField');
 });
 
-test('applyFFilter: throws BadFilterOp when op not in allowlist', t => {
+test('applyFilter: throws BadFilterOp when op not in allowlist', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({client, table: 'T', keyFields: ['name'], filterable: {status: ['eq']}});
   let threw;
   try {
-    adapter.applyFFilter({}, [{field: 'status', op: 'ne', values: ['x']}]);
+    adapter.applyFilter({}, [{field: 'status', op: 'ne', value: 'x'}]);
   } catch (err) {
     threw = err;
   }
@@ -3083,16 +3083,16 @@ test('applyFFilter: throws BadFilterOp when op not in allowlist', t => {
   t.equal(threw.name, 'BadFilterOp');
 });
 
-test('applyFFilter: comparison op → FilterExpression', t => {
+test('applyFilter: comparison op → FilterExpression', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({client, table: 'T', keyFields: ['name'], filterable: {status: ['eq']}});
-  const p = adapter.applyFFilter({}, [{field: 'status', op: 'eq', values: ['active']}]);
+  const p = adapter.applyFilter({}, [{field: 'status', op: 'eq', value: 'active'}]);
   t.matchString(p.FilterExpression, /#ff0 = :ffv0/);
   t.equal(p.ExpressionAttributeNames['#ff0'], 'status');
   t.equal(p.ExpressionAttributeValues[':ffv0'], 'active');
 });
 
-test('applyFFilter: eq on partition key auto-promotes to KeyConditionExpression', t => {
+test('applyFilter: eq on partition key auto-promotes to KeyConditionExpression', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
@@ -3100,12 +3100,12 @@ test('applyFFilter: eq on partition key auto-promotes to KeyConditionExpression'
     keyFields: ['state'],
     filterable: {state: ['eq']}
   });
-  const p = adapter.applyFFilter({}, [{field: 'state', op: 'eq', values: ['TX']}]);
+  const p = adapter.applyFilter({}, [{field: 'state', op: 'eq', value: 'TX'}]);
   t.matchString(p.KeyConditionExpression, /#ff0 = :ffv0/);
   t.equal(p.FilterExpression, undefined, 'pk goes to KC, not FE');
 });
 
-test('applyFFilter: beg on structural-key sort-key auto-promotes', t => {
+test('applyFilter: beg on structural-key sort-key auto-promotes', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
@@ -3114,48 +3114,48 @@ test('applyFFilter: beg on structural-key sort-key auto-promotes', t => {
     structuralKey: '-sk',
     filterable: {'-sk': ['beg']}
   });
-  const p = adapter.applyFFilter({}, [{field: '-sk', op: 'beg', values: ['TX|Dallas|']}]);
+  const p = adapter.applyFilter({}, [{field: '-sk', op: 'beg', value: 'TX|Dallas|'}]);
   t.matchString(p.KeyConditionExpression, /begins_with\(#ff0, :ffv0\)/);
 });
 
-test('applyFFilter: btw requires exactly 2 values', t => {
+test('applyFilter: btw requires exactly 2 values', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({client, table: 'T', keyFields: ['name'], filterable: {cost: ['btw']}});
-  t.throws(() => adapter.applyFFilter({}, [{field: 'cost', op: 'btw', values: ['1']}]));
-  t.throws(() => adapter.applyFFilter({}, [{field: 'cost', op: 'btw', values: ['1', '2', '3']}]));
+  t.throws(() => adapter.applyFilter({}, [{field: 'cost', op: 'btw', value: ['1']}]));
+  t.throws(() => adapter.applyFilter({}, [{field: 'cost', op: 'btw', value: ['1', '2', '3']}]));
 });
 
-test('applyFFilter: btw with 2 values emits BETWEEN', t => {
+test('applyFilter: btw with 2 values emits BETWEEN', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({client, table: 'T', keyFields: ['name'], filterable: {cost: ['btw']}});
-  const p = adapter.applyFFilter({}, [{field: 'cost', op: 'btw', values: ['10', '20']}]);
+  const p = adapter.applyFilter({}, [{field: 'cost', op: 'btw', value: ['10', '20']}]);
   t.matchString(p.FilterExpression, /#ff0 BETWEEN :ffv0 AND :ffv1/);
 });
 
-test('applyFFilter: in op emits IN with N placeholders', t => {
+test('applyFilter: in op emits IN with N placeholders', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({client, table: 'T', keyFields: ['name'], filterable: {tag: ['in']}});
-  const p = adapter.applyFFilter({}, [{field: 'tag', op: 'in', values: ['a', 'b', 'c']}]);
+  const p = adapter.applyFilter({}, [{field: 'tag', op: 'in', value: ['a', 'b', 'c']}]);
   t.matchString(p.FilterExpression, /#ff0 IN \(:ffv0, :ffv1, :ffv2\)/);
 });
 
-test('applyFFilter: ex / nx emit attribute_exists / attribute_not_exists', t => {
+test('applyFilter: ex / nx emit attribute_exists / attribute_not_exists (no `value` in clause)', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({client, table: 'T', keyFields: ['name'], filterable: {status: ['ex', 'nx']}});
-  const pEx = adapter.applyFFilter({}, [{field: 'status', op: 'ex', values: []}]);
+  const pEx = adapter.applyFilter({}, [{field: 'status', op: 'ex'}]);
   t.matchString(pEx.FilterExpression, /attribute_exists\(#ff0\)/);
-  const pNx = adapter.applyFFilter({}, [{field: 'status', op: 'nx', values: []}]);
+  const pNx = adapter.applyFilter({}, [{field: 'status', op: 'nx'}]);
   t.matchString(pNx.FilterExpression, /attribute_not_exists\(#ff0\)/);
 });
 
-test('applyFFilter: ct emits contains()', t => {
+test('applyFilter: ct emits contains()', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({client, table: 'T', keyFields: ['name'], filterable: {tags: ['ct']}});
-  const p = adapter.applyFFilter({}, [{field: 'tags', op: 'ct', values: ['vip']}]);
+  const p = adapter.applyFilter({}, [{field: 'tags', op: 'ct', value: 'vip'}]);
   t.matchString(p.FilterExpression, /contains\(#ff0, :ffv0\)/);
 });
 
-test('applyFFilter: number-type fields coerced', t => {
+test('applyFilter: number-type fields coerced', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
@@ -3163,11 +3163,11 @@ test('applyFFilter: number-type fields coerced', t => {
     keyFields: [{name: 'id', type: 'number'}],
     filterable: {id: ['eq']}
   });
-  const p = adapter.applyFFilter({}, [{field: 'id', op: 'eq', values: ['42']}]);
+  const p = adapter.applyFilter({}, [{field: 'id', op: 'eq', value: '42'}]);
   t.equal(p.ExpressionAttributeValues[':ffv0'], 42, 'string "42" coerced to 42');
 });
 
-test('applyFFilter: bad number coercion throws', t => {
+test('applyFilter: bad number coercion throws', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
@@ -3175,10 +3175,10 @@ test('applyFFilter: bad number coercion throws', t => {
     keyFields: [{name: 'id', type: 'number'}],
     filterable: {id: ['eq']}
   });
-  t.throws(() => adapter.applyFFilter({}, [{field: 'id', op: 'eq', values: ['abc']}]));
+  t.throws(() => adapter.applyFilter({}, [{field: 'id', op: 'eq', value: 'abc'}]));
 });
 
-test('applyFFilter: multiple clauses AND-combined', t => {
+test('applyFilter: multiple clauses AND-combined', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
@@ -3186,9 +3186,9 @@ test('applyFFilter: multiple clauses AND-combined', t => {
     keyFields: ['name'],
     filterable: {status: ['eq'], climate: ['ne']}
   });
-  const p = adapter.applyFFilter({}, [
-    {field: 'status', op: 'eq', values: ['active']},
-    {field: 'climate', op: 'ne', values: ['hot']}
+  const p = adapter.applyFilter({}, [
+    {field: 'status', op: 'eq', value: 'active'},
+    {field: 'climate', op: 'ne', value: 'hot'}
   ]);
   t.matchString(p.FilterExpression, /#ff0 = :ffv0 AND #ff1 <> :ffv1/);
 });

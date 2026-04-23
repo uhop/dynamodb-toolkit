@@ -1,5 +1,5 @@
-/** Options for {@link buildFilter}. */
-export interface FilterOptions {
+/** Options for {@link buildSearch}. */
+export interface SearchOptions {
   /** Restrict search to a subset of the `searchable` fields. */
   fields?: string | string[] | null;
   /** Mirror-column prefix. Default `'-search-'`. */
@@ -20,10 +20,10 @@ export interface FilterOptions {
  * @returns The same `params` (fresh when omitted), now carrying a `FilterExpression`
  *   plus placeholders — unchanged when `query` was empty.
  */
-export function buildFilter<T extends Record<string, unknown>>(
+export function buildSearch<T extends Record<string, unknown>>(
   searchable: Record<string, 1 | true>,
   query: string | null | undefined,
-  options?: FilterOptions,
+  options?: SearchOptions,
   params?: T
 ): T;
 

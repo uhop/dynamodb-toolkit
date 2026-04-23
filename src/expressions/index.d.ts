@@ -6,7 +6,7 @@
 
 export {buildUpdate, type UpdateOptions, type ArrayOp} from './update.js';
 export {addProjection} from './projection.js';
-export {buildFilter, buildFilterByExample, type FilterOptions} from './filter.js';
+export {buildSearch, buildFilterByExample, type SearchOptions} from './search.js';
 export {buildCondition, type ConditionClause} from './condition.js';
 export {buildKeyCondition, type KeyConditionInput} from './key-condition.js';
 export {cleanParams} from './clean-params.js';

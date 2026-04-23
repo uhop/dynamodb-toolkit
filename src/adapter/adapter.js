@@ -7,7 +7,7 @@ import {addProjection} from '../expressions/projection.js';
 import {buildUpdate} from '../expressions/update.js';
 import {buildCondition} from '../expressions/condition.js';
 import {buildKeyCondition} from '../expressions/key-condition.js';
-import {buildFilter} from '../expressions/filter.js';
+import {buildSearch} from '../expressions/search.js';
 import {cleanParams} from '../expressions/clean-params.js';
 import {cloneParams} from '../expressions/clone-params.js';
 
@@ -62,11 +62,11 @@ const deepEqual = (a, b) => {
   return ak.every(k => Object.prototype.hasOwnProperty.call(b, k) && deepEqual(a[k], b[k]));
 };
 
-// Closed op vocabulary for the `f-<field>-<op>=<value>` filter grammar.
-// Kept in sync with the rest-core `parseFFilter` parser's op set.
-const ALL_F_OPS = new Set(['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'in', 'btw', 'beg', 'ct', 'ex', 'nx']);
-const F_OP_COMPARISON = {eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>='};
-const F_OP_NO_VALUE = new Set(['ex', 'nx']);
+// Closed op vocabulary for the `<op>-<field>=<value>` filter grammar.
+// Kept in sync with the rest-core `parseFilter` parser's op set.
+const ALL_FILTER_OPS = new Set(['eq', 'ne', 'lt', 'le', 'gt', 'ge', 'in', 'btw', 'beg', 'ct', 'ex', 'nx']);
+const FILTER_OP_COMPARISON = {eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>='};
+const FILTER_OP_NO_VALUE = new Set(['ex', 'nx']);
 
 // Normalize an index-key entry (GSI/LSI pk or sk) — accepts a bare string or
 // a `{name, type?}` descriptor. Width is not applicable to index keys (no
@@ -303,7 +303,7 @@ export class Adapter {
     this.searchablePrefix = options.searchablePrefix || '-search-';
     this.indirectIndices = options.indirectIndices || {};
 
-    // `filterable` — allowlist for the `f-<field>-<op>=<value>` filter
+    // `filterable` — allowlist for the `<op>-<field>=<value>` filter
     // grammar. Shape `{<fieldName>: ['eq', 'beg', ...]}`. Validated at
     // construction: every op string must be from the closed vocabulary.
     this.filterable = {};
@@ -317,9 +317,9 @@ export class Adapter {
           throw new Error(`options.filterable['${field}'] must be a non-empty array of ops`);
         }
         for (const op of ops) {
-          if (typeof op !== 'string' || !ALL_F_OPS.has(op)) {
+          if (typeof op !== 'string' || !ALL_FILTER_OPS.has(op)) {
             throw new Error(
-              `options.filterable['${field}'] contains invalid op '${op}'. Allowed: ${[...ALL_F_OPS].join(', ')}`
+              `options.filterable['${field}'] contains invalid op '${op}'. Allowed: ${[...ALL_FILTER_OPS].join(', ')}`
             );
           }
         }
@@ -947,7 +947,7 @@ export class Adapter {
   }
 
   /**
-   * Resolve the declared type of a field for `f-filter` value coercion.
+   * Resolve the declared type of a field for filter value coercion.
    * Walks keyFields → indices (pk then sk). Fields not declared anywhere
    * fall back to `'string'` (DynamoDB's default attribute shape).
    */
@@ -964,7 +964,7 @@ export class Adapter {
     const type = this._typeOfField(name);
     if (type === 'number') {
       const n = Number(value);
-      if (Number.isNaN(n)) throw new Error(`f-filter value for '${name}' is not a valid number: '${value}'`);
+      if (Number.isNaN(n)) throw new Error(`filter value for '${name}' is not a valid number: '${value}'`);
       return n;
     }
     // 'string' and 'binary' both passed through as-is for now; binary
@@ -975,7 +975,7 @@ export class Adapter {
   }
 
   /**
-   * Compile parsed `f-<field>-<op>=<value>` clauses into `params`. Validates
+   * Compile parsed `<op>-<field>=<value>` clauses into `params`. Validates
    * each clause against the adapter's `filterable` allowlist; coerces
    * value(s) to the declared field type; auto-promotes index-compatible
    * clauses to `KeyConditionExpression` when the target (base table or
@@ -983,10 +983,15 @@ export class Adapter {
    * `FilterExpression`. Counter-based placeholders live alongside any
    * existing aliases so merging with other builders is safe.
    *
+   * Clause shape (polymorphic by op):
+   *   - no-value ops (`ex`, `nx`): `{field, op}` — no `value`
+   *   - multi-value ops (`in`, `btw`): `{field, op, value: [...]}`
+   *   - single-value ops: `{field, op, value: scalar}`
+   *
    * @throws `BadFilterField` when a clause names a field not in `filterable`.
    * @throws `BadFilterOp` when the op isn't allowlisted for that field.
    */
-  applyFFilter(params, clauses) {
+  applyFilter(params, clauses) {
     if (!clauses || clauses.length === 0) return params;
     // Validate allowlist first — fail fast on the whole request.
     for (const c of clauses) {
@@ -1032,36 +1037,38 @@ export class Adapter {
       const target = canPromote ? kcParts : feParts;
       const nameAlias = allocName(c.field);
 
-      if (F_OP_NO_VALUE.has(c.op)) {
+      if (FILTER_OP_NO_VALUE.has(c.op)) {
         target.push(c.op === 'ex' ? 'attribute_exists(' + nameAlias + ')' : 'attribute_not_exists(' + nameAlias + ')');
         continue;
       }
       if (c.op === 'in') {
-        if (c.values.length === 0) throw new Error(`f-filter 'in' on '${c.field}' requires at least one value`);
-        const aliases = c.values.map(v => allocValue(this._coerceFilterValue(c.field, v)));
+        const vs = c.value;
+        if (!Array.isArray(vs) || vs.length === 0) throw new Error(`filter 'in' on '${c.field}' requires at least one value`);
+        const aliases = vs.map(v => allocValue(this._coerceFilterValue(c.field, v)));
         target.push(nameAlias + ' IN (' + aliases.join(', ') + ')');
         continue;
       }
       if (c.op === 'btw') {
-        if (c.values.length !== 2) throw new Error(`f-filter 'btw' on '${c.field}' requires exactly 2 values`);
-        const lo = allocValue(this._coerceFilterValue(c.field, c.values[0]));
-        const hi = allocValue(this._coerceFilterValue(c.field, c.values[1]));
+        const vs = c.value;
+        if (!Array.isArray(vs) || vs.length !== 2) throw new Error(`filter 'btw' on '${c.field}' requires exactly 2 values`);
+        const lo = allocValue(this._coerceFilterValue(c.field, vs[0]));
+        const hi = allocValue(this._coerceFilterValue(c.field, vs[1]));
         target.push(nameAlias + ' BETWEEN ' + lo + ' AND ' + hi);
         continue;
       }
       if (c.op === 'beg') {
-        const v = allocValue(this._coerceFilterValue(c.field, c.values[0]));
+        const v = allocValue(this._coerceFilterValue(c.field, c.value));
         target.push('begins_with(' + nameAlias + ', ' + v + ')');
         continue;
       }
       if (c.op === 'ct') {
-        const v = allocValue(this._coerceFilterValue(c.field, c.values[0]));
+        const v = allocValue(this._coerceFilterValue(c.field, c.value));
         target.push('contains(' + nameAlias + ', ' + v + ')');
         continue;
       }
       // Comparison ops: eq ne lt le gt ge.
-      const op = F_OP_COMPARISON[c.op];
-      const v = allocValue(this._coerceFilterValue(c.field, c.values[0]));
+      const op = FILTER_OP_COMPARISON[c.op];
+      const v = allocValue(this._coerceFilterValue(c.field, c.value));
       target.push(nameAlias + ' ' + op + ' ' + v);
     }
 
@@ -1840,19 +1847,19 @@ export class Adapter {
       delete activeParams.ProjectionExpression;
       activeParams = addProjection(activeParams, this.primaryKeyAttrs, null, true);
     }
-    // Honor options.fFilter / options.filter / options.asOf the same
+    // Honor options.filter / options.search / options.asOf the same
     // way the mass-op list methods (`deleteListByParams` etc.) do —
     // otherwise passing these through a hand-built-params path would
     // silently ignore them. Both entry points (getList via
     // `_buildListParams`, and getListByParams via hand-built params)
     // funnel through here.
-    if (options?.fFilter && options.fFilter.length) {
-      activeParams = this.applyFFilter(activeParams, options.fFilter);
+    if (options?.filter && options.filter.length) {
+      activeParams = this.applyFilter(activeParams, options.filter);
     }
-    if (options?.filter) {
-      activeParams = buildFilter(
+    if (options?.search) {
+      activeParams = buildSearch(
         this.searchable,
-        options.filter,
+        options.search,
         {fields: options.fields, prefix: this.searchablePrefix, caseSensitive: options.caseSensitive},
         activeParams
       );
@@ -2142,7 +2149,7 @@ export class Adapter {
         p = addProjection(p, options.fields, this.projectionFieldMap);
       }
     }
-    // `f-<field>-<op>=<value>` and `?search=<text>` translations have
+    // `<op>-<field>=<value>` and `?search=<text>` translations have
     // moved to `getListByParams` so both entry points (`getList` via
     // example + options, and `getListByParams` via hand-built params)
     // apply filters consistently. `_buildListParams` stops at
