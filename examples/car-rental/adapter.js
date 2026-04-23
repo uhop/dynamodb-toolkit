@@ -46,16 +46,18 @@ export const createAdapter = client =>
     indices: {
       // Sparse GSI — only records that carry `status` (i.e. vehicles)
       // appear in the index. Demonstrates "rented fleet across every
-      // state, oldest-first" via a single cross-partition Query.
+      // state, oldest-first" via a single cross-partition Query. String
+      // pk/sk are the shorthand for `{name, type: 'string'}`.
       'by-status-createdAt': {
         type: 'gsi',
-        pk: {name: 'status', type: 'string'},
-        sk: {name: '_createdAt', type: 'string'},
+        pk: 'status',
+        sk: '_createdAt',
         projection: 'all'
       },
       // LSI: "vehicles by daily price within a state". Shares the base
       // partition (state); sk auto-promoted when the caller passes
-      // `{sort: 'dailyPriceCents'}`.
+      // `{sort: 'dailyPriceCents'}`. The sk is numeric, so full
+      // descriptor form is needed for the type.
       'by-price': {
         type: 'lsi',
         sk: {name: 'dailyPriceCents', type: 'number'},

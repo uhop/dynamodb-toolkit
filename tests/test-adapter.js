@@ -2511,6 +2511,22 @@ test('Adapter: indices — lsi with sk only', t => {
   t.equal(adapter.indices['by-alt'].pk, undefined);
 });
 
+test('Adapter: indices — string pk/sk shorthand expands to {name, type: "string"}', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      'by-status-createdAt': {type: 'gsi', pk: 'status', sk: '_createdAt'},
+      'by-sort': {type: 'lsi', sk: 'altField'}
+    }
+  });
+  t.deepEqual(adapter.indices['by-status-createdAt'].pk, {name: 'status', type: 'string'});
+  t.deepEqual(adapter.indices['by-status-createdAt'].sk, {name: '_createdAt', type: 'string'});
+  t.deepEqual(adapter.indices['by-sort'].sk, {name: 'altField', type: 'string'});
+});
+
 test('Adapter: indices — rejects unknown type', t => {
   const client = makeMockClient(async () => ({}));
   t.throws(

@@ -70,10 +70,18 @@ export interface IndexKeySpec {
 export interface IndexSpec {
   /** Discriminator — `'gsi'` or `'lsi'`. */
   type: 'gsi' | 'lsi';
-  /** Partition key — required on GSI, must be omitted on LSI. */
-  pk?: IndexKeySpec;
-  /** Sort key — optional on GSI, required on LSI. */
-  sk?: IndexKeySpec;
+  /**
+   * Partition key — required on GSI, must be omitted on LSI. Accepts a
+   * bare string (shorthand for `{name, type: 'string'}`) or a full
+   * {@link IndexKeySpec} descriptor.
+   */
+  pk?: string | IndexKeySpec;
+  /**
+   * Sort key — optional on GSI, required on LSI. Accepts a bare string
+   * (shorthand for `{name, type: 'string'}`) or a full {@link IndexKeySpec}
+   * descriptor.
+   */
+  sk?: string | IndexKeySpec;
   /** Attribute projection — default `'all'`. */
   projection?: 'all' | 'keys-only' | string[];
   /** Sparse-index-by-absence; default `false`. */

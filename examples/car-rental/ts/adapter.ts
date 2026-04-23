@@ -87,10 +87,12 @@ export const createAdapter = (client: DynamoDBDocumentClient): Adapter<AnyRecord
     typeField: 'kind',
     typeDiscriminator: 'kind',
     indices: {
+      // String pk/sk are the shorthand for `{name, type: 'string'}`.
+      // Numeric sk on by-price needs the full descriptor.
       'by-status-createdAt': {
         type: 'gsi',
-        pk: {name: 'status', type: 'string'},
-        sk: {name: '_createdAt', type: 'string'},
+        pk: 'status',
+        sk: '_createdAt',
         projection: 'all'
       },
       'by-price': {
