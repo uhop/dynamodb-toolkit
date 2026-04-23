@@ -242,6 +242,18 @@ export class Adapter {
       this.typeDiscriminator = {name: discName};
     }
 
+    // Optional typeField — when set, the built-in prepare step writes
+    // `typeOf(item)` to this field on every full-write insert (patches
+    // skip, and items that already carry the field are left alone).
+    // Enables the Pattern 1 sparse-GSI recipe (`pk=kind`) without
+    // requiring the user to write a prepare hook for the common case.
+    if (options.typeField !== undefined) {
+      if (typeof options.typeField !== 'string' || options.typeField.length === 0) {
+        throw new Error('options.typeField must be a non-empty string');
+      }
+      this.typeField = options.typeField;
+    }
+
     // Optional technicalPrefix — when declared, marks fields that are
     // adapter-managed (structural key, search mirrors, sparse markers,
     // future versionField / createdAtField). Incoming user items are
@@ -486,7 +498,7 @@ export class Adapter {
     // Fast path: nothing declared, nothing to do — byte-for-byte identical
     // behaviour to v3.1.2.
     const hasSearchable = Object.keys(this.searchable).length > 0;
-    if (!this.technicalPrefix && !this.structuralKey && !hasSearchable) return item;
+    if (!this.technicalPrefix && !this.structuralKey && !hasSearchable && !this.typeField) return item;
 
     // 1. Reject incoming user fields that start with technicalPrefix.
     //    Exceptions: `versionField` and `createdAtField` are allowed —
@@ -528,6 +540,18 @@ export class Adapter {
       if (v !== undefined && v !== null) {
         out[this.searchablePrefix + searchField] = String(v).toLowerCase();
       }
+    }
+
+    // 4. typeField auto-write — full writes only; user-written value wins.
+    //    Stamps `typeOf(item)` so Pattern-1 sparse GSIs (pk = typeField)
+    //    can classify every record without the user maintaining the field
+    //    manually. Patches skip (the value persists from the original put).
+    if (!isPatch && this.typeField && (out[this.typeField] === undefined || out[this.typeField] === null)) {
+      // Compute typeOf against `out` (has structuralKey set) — irrelevant
+      // to typeOf, which only inspects keyFields + discriminator, but
+      // keeps the input stable in case future typeOf logic depends on it.
+      const label = this.typeOf(out);
+      if (label !== undefined) out[this.typeField] = label;
     }
 
     return out;

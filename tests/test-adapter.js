@@ -3353,3 +3353,60 @@ test('stampCreatedAtEpoch: stamps with Date.now(); honors custom field name', as
   t.ok(stamped.createdAtMs >= before && stamped.createdAtMs <= after, 'timestamp in range');
   t.equal(stamped._createdAt, undefined, 'default field name not used');
 });
+
+// --- Phase 5: typeField auto-populate (F10 core) ---
+
+test('typeField: built-in prepare stamps typeOf on full writes', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'facility', 'vehicle'],
+    structuralKey: '_sk',
+    typeLabels: ['state', 'facility', 'vehicle'],
+    typeField: 'kind'
+  });
+  const stateItem = adapter._builtInPrepare({state: 'TX'}, false);
+  t.equal(stateItem.kind, 'state');
+  const facilityItem = adapter._builtInPrepare({state: 'TX', facility: 'Dallas'}, false);
+  t.equal(facilityItem.kind, 'facility');
+  const leafItem = adapter._builtInPrepare({state: 'TX', facility: 'Dallas', vehicle: 'VIN-1'}, false);
+  t.equal(leafItem.kind, 'vehicle');
+});
+
+test('typeField: user-written value wins over auto-populate', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'facility', 'vehicle'],
+    structuralKey: '_sk',
+    typeLabels: ['state', 'facility', 'vehicle'],
+    typeField: 'kind',
+    typeDiscriminator: 'kind'
+  });
+  // Leaf with explicit `kind: 'car'` (discriminator override) → preserved.
+  const car = adapter._builtInPrepare({state: 'TX', facility: 'Dallas', vehicle: 'VIN-1', kind: 'car'}, false);
+  t.equal(car.kind, 'car');
+  // typeOf now reads the discriminator, returns the user's value.
+  t.equal(adapter.typeOf(car), 'car');
+});
+
+test('typeField: patches skip auto-populate', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state'],
+    typeLabels: ['state'],
+    typeField: 'kind'
+  });
+  const patched = adapter._builtInPrepare({state: 'TX', foo: 'bar'}, true);
+  t.equal(patched.kind, undefined, 'patch leaves kind unset');
+});
+
+test('typeField: rejects non-string', t => {
+  const client = makeMockClient(async () => ({}));
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['name'], typeField: ''}), 'empty string');
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['name'], typeField: 42}), 'number');
+});

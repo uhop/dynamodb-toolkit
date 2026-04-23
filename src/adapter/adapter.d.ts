@@ -133,6 +133,16 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
    * string (shorthand for `{name}`) or a `{name}` descriptor.
    */
   typeDiscriminator?: string | {name: string};
+  /**
+   * Optional auto-populated type field. When set, the built-in prepare
+   * step writes `adapter.typeOf(item)` to this field on every full write
+   * unless the item already carries a value. Patches skip. Enables the
+   * Pattern 1 sparse-GSI recipe (`indices: {'by-kind': {type: 'gsi',
+   * pk: {name: typeField}, ...}}`) without requiring a custom prepare
+   * hook. Typically set to the same name as `typeDiscriminator` so
+   * `typeOf` reads back what the built-in wrote.
+   */
+  typeField?: string;
   /** Alias map for projections — rewrites the first segment of each requested field. */
   projectionFieldMap?: Record<string, string>;
   /**
@@ -558,12 +568,18 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   typeLabels?: string[];
   /** Type-discriminator field config, when declared. */
   typeDiscriminator?: {name: string};
+  /** Auto-populated type field, when declared. */
+  typeField?: string;
   /** Alias map for projections. */
   projectionFieldMap: Record<string, string>;
   /** Searchable-field map for substring filtering. */
   searchable: Record<string, 1 | true>;
   /** Allowlist for the `<op>-<field>=<value>` filter grammar. */
   filterable: Record<string, string[]>;
+  /** Per-field type overrides from the `filterable: {ops, type}` shape. Used
+   * by `_coerceFilterValue` when the field isn't reachable from `keyFields`
+   * / `indices`. Empty when every entry uses the array shape. */
+  filterableTypes: Record<string, 'string' | 'number' | 'binary'>;
   /** Mirror-column prefix. Default `'-search-'`. */
   searchablePrefix: string;
   /** Indirect-index map — reads against these GSIs do a second-hop BatchGet. */
