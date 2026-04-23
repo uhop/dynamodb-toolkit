@@ -8,15 +8,15 @@ export type PlanStep =
   | {action: 'skip-extra-lsi'; name: string}
   | {action: 'skip-missing-lsi'; name: string};
 
-/** Result of planning: steps the toolkit would take, plus plain-text summary. */
+/** Result of {@link planTable}: steps the toolkit would take, plus plain-text summary. */
 export interface EnsureTablePlan {
   tableName: string;
   steps: PlanStep[];
-  /** Human-readable lines — print for dry-run output. */
+  /** Human-readable lines — print for display or CLI output. */
   summary: string[];
 }
 
-/** Result of executing a plan. */
+/** Result of {@link ensureTable}: the computed plan plus execution state. */
 export interface EnsureTableResult {
   plan: EnsureTablePlan;
   /** Ordered list of `create:<table>` / `add-gsi:<name>` step IDs. */
@@ -25,20 +25,20 @@ export interface EnsureTableResult {
   descriptorWritten?: boolean;
 }
 
-/** Options for {@link ensureTable}. */
-export interface EnsureTableOptions {
-  /** Execute the plan. Without this flag, the function returns the plan and writes nothing. */
-  yes?: boolean;
-  /** Explicit plan-only (same behaviour as omitting `yes`; documented for clarity). */
-  dryRun?: boolean;
-}
+/**
+ * Read-only: compute the ADD-only plan for this adapter's declaration
+ * vs. the live table. Never writes. Returns `{tableName, steps, summary}`.
+ * For the execute-plus-apply path, call {@link ensureTable} instead.
+ */
+export function planTable(adapterOrDeclaration: unknown): Promise<EnsureTablePlan>;
 
 /**
- * Ensure the DynamoDB table exists and matches the declared index shape.
- * ADD-only — never drops tables or indices. Default returns the plan;
- * pass `{yes: true}` to execute.
+ * Compute the plan (via {@link planTable}) and execute it. ADD-only —
+ * never drops tables or indices. Writes the descriptor record when
+ * `descriptorKey` is declared. Returns `{plan, executed, descriptorWritten?}`.
+ * For the read-only view, call {@link planTable}.
  */
-export function ensureTable(adapterOrDeclaration: unknown, options?: EnsureTableOptions): Promise<EnsureTablePlan | EnsureTableResult>;
+export function ensureTable(adapterOrDeclaration: unknown): Promise<EnsureTableResult>;
 
 export function buildCreateTableInput(decl: ProvisioningDeclaration): Record<string, unknown>;
 export function buildAddGsiInput(

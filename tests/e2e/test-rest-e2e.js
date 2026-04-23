@@ -128,9 +128,9 @@ test('REST: GET / paginates with envelope', t =>
     t.equal(body.data[0].name, 'Alderaan');
   }));
 
-test('REST: GET / desc sort + filter', t =>
+test('REST: GET / desc sort + search', t =>
   run(t, async base => {
-    const res = await fetch(`${base}/?sort=-name&fields=name&filter=tooine&limit=10`);
+    const res = await fetch(`${base}/?sort=-name&fields=name&search=tooine&limit=10`);
     t.equal(res.status, 200);
     const body = await json(res);
     t.ok(body.data.length >= 2);

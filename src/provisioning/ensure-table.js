@@ -1,11 +1,12 @@
-// ensureTable: ADD-only table provisioning from an adapter declaration.
+// planTable / ensureTable: ADD-only table provisioning from an adapter declaration.
 //
-// Emits a plan by diffing the declaration against DescribeTable output.
-// Executes only when `{yes: true}` is passed; default returns the plan
-// without writing. Never emits destructive operations — extra GSIs in
-// the live table are reported ("skipped") but never dropped. Declaration
-// legality (e.g., adding an LSI post-creation) is delegated to DynamoDB
-// — the SDK rejects at execution and the error surfaces unchanged.
+// `planTable` is read-only — diffs the declaration against DescribeTable
+// output and returns a plan (or a "nothing to do" summary). `ensureTable`
+// calls `planTable` internally and then executes the plan. Never emits
+// destructive operations — extra GSIs in the live table are reported
+// ("skipped") but never dropped. Declaration legality (e.g., adding an
+// LSI post-creation) is delegated to DynamoDB — the SDK rejects at
+// execution and the error surfaces unchanged.
 
 import {CreateTableCommand, DescribeTableCommand, UpdateTableCommand} from '@aws-sdk/client-dynamodb';
 
@@ -173,26 +174,33 @@ export const executePlan = async (client, plan) => {
 };
 
 /**
- * ensureTable(adapterOrDeclaration, options?)
+ * planTable(adapterOrDeclaration)
  *
- * Default (no `{yes: true}`): computes and returns the plan. No writes.
- * `{yes: true}`: executes the plan. Returns `{plan, executed}`.
- * `{dryRun: true}`: explicit plan-only (default behaviour, documented).
- *
- * When `descriptorKey` is set on the declaration AND the plan executes
- * (either a fresh create or add-GSI), the descriptor record is written
- * after the table is ACTIVE. On a no-op plan with `yes: true`, the
- * descriptor is still written if missing so existing IaC-managed tables
- * can opt into toolkit management without a fresh create.
+ * Read-only entry point. Fetches `DescribeTable`, diffs against the
+ * declaration, and returns the plan `{tableName, steps, summary}`. Never
+ * writes. Use this to preview or display what `ensureTable` would do.
  */
-export const ensureTable = async (adapterOrDeclaration, options = {}) => {
+export const planTable = async adapterOrDeclaration => {
+  const decl = extractDeclaration(adapterOrDeclaration);
+  const live = await describeTable(decl.client, decl.table);
+  return planAddOnly(decl, live);
+};
+
+/**
+ * ensureTable(adapterOrDeclaration)
+ *
+ * Compose `planTable` with `executePlan`: computes the plan, runs it, and
+ * returns `{plan, executed, descriptorWritten?}`. Writes the descriptor
+ * record after execution when `descriptorKey` is declared — including on
+ * a no-op plan, so existing IaC-managed tables can opt into toolkit
+ * management without a fresh create.
+ *
+ * For the read-only view, call `planTable` instead.
+ */
+export const ensureTable = async adapterOrDeclaration => {
   const decl = extractDeclaration(adapterOrDeclaration);
   const live = await describeTable(decl.client, decl.table);
   const plan = planAddOnly(decl, live);
-
-  if (!options.yes || options.dryRun) {
-    return plan;
-  }
 
   const result = await executePlan(decl.client, plan);
 

@@ -1,15 +1,18 @@
 /**
  * dynamodb-toolkit/provisioning — table-lifecycle support.
  *
- * `ensureTable` is ADD-only (never drops tables/indices; never emits
- * destructive operations). `verifyTable` returns a structured diff by
- * default, or throws `TableVerificationFailed` on `{throwOnMismatch}`.
- * The optional descriptor record (opt-in via `descriptorKey` on the
- * adapter) lets verify catch drift that `DescribeTable` can't see —
- * marshalling helpers, search mirrors, `filterable` allowlist, etc.
+ * Two entry points for the ADD-only provisioning flow: `planTable`
+ * (read-only; returns the plan) and `ensureTable` (computes the plan and
+ * applies it). Neither drops tables/indices; neither emits destructive
+ * operations. `verifyTable` returns a structured diff by default, or
+ * throws `TableVerificationFailed` on `{throwOnMismatch}`. The optional
+ * descriptor record (opt-in via `descriptorKey` on the adapter) lets
+ * verify catch drift that `DescribeTable` can't see — marshalling
+ * helpers, search mirrors, `filterable` allowlist, etc.
  */
 
 export {
+  planTable,
   ensureTable,
   buildCreateTableInput,
   buildAddGsiInput,
@@ -18,8 +21,7 @@ export {
   executePlan,
   type PlanStep,
   type EnsureTablePlan,
-  type EnsureTableResult,
-  type EnsureTableOptions
+  type EnsureTableResult
 } from './ensure-table.js';
 
 export {verifyTable, diffTable, type TableDiff, type VerifyTableResult, type VerifyTableOptions} from './verify-table.js';

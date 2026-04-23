@@ -4,6 +4,7 @@ import {
   buildCreateTableInput,
   buildAddGsiInput,
   planAddOnly,
+  planTable,
   ensureTable,
   verifyTable,
   diffTable,
@@ -187,9 +188,26 @@ test('planAddOnly: declaration matches live → no-op plan', t => {
   t.matchString(plan.summary[0], /matches declaration/);
 });
 
-// --- ensureTable integration ---
+// --- planTable / ensureTable integration ---
 
-test('ensureTable: default returns plan, writes nothing', async t => {
+test('planTable: returns plan, writes nothing', async t => {
+  const sends = [];
+  const {adapter} = makeProvisioningAdapter(async cmd => {
+    sends.push(cmd);
+    if (cmd.constructor.name === 'DescribeTableCommand') {
+      const err = new Error('not found');
+      err.name = 'ResourceNotFoundException';
+      throw err;
+    }
+    return {};
+  });
+  const plan = await planTable(adapter);
+  t.ok(plan.steps, 'returns a plan');
+  t.equal(plan.steps[0].action, 'create');
+  t.equal(sends.filter(c => c.constructor.name !== 'DescribeTableCommand').length, 0, 'no writes');
+});
+
+test('ensureTable: executes the plan', async t => {
   const sends = [];
   const {adapter} = makeProvisioningAdapter(async cmd => {
     sends.push(cmd);
@@ -201,23 +219,6 @@ test('ensureTable: default returns plan, writes nothing', async t => {
     return {};
   });
   const result = await ensureTable(adapter);
-  t.ok(result.steps, 'returns a plan');
-  t.equal(result.steps[0].action, 'create');
-  t.equal(sends.filter(c => c.constructor.name !== 'DescribeTableCommand').length, 0, 'no writes');
-});
-
-test('ensureTable: {yes: true} executes the plan', async t => {
-  const sends = [];
-  const {adapter} = makeProvisioningAdapter(async cmd => {
-    sends.push(cmd);
-    if (cmd.constructor.name === 'DescribeTableCommand') {
-      const err = new Error('not found');
-      err.name = 'ResourceNotFoundException';
-      throw err;
-    }
-    return {};
-  });
-  const result = await ensureTable(adapter, {yes: true});
   t.equal(result.executed.length, 1);
   t.matchString(result.executed[0], /create:Rentals/);
   t.ok(
@@ -226,7 +227,7 @@ test('ensureTable: {yes: true} executes the plan', async t => {
   );
 });
 
-test('ensureTable: {yes: true} writes descriptor when declared', async t => {
+test('ensureTable: writes descriptor when declared', async t => {
   const {adapter} = makeProvisioningAdapter(
     async cmd => {
       if (cmd.constructor.name === 'DescribeTableCommand') {
@@ -238,7 +239,7 @@ test('ensureTable: {yes: true} writes descriptor when declared', async t => {
     },
     {descriptorKey: '__adapter__'}
   );
-  const result = await ensureTable(adapter, {yes: true});
+  const result = await ensureTable(adapter);
   t.equal(result.descriptorWritten, true);
 });
 

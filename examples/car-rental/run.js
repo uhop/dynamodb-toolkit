@@ -6,7 +6,7 @@
 import {DynamoDBClient, DeleteTableCommand} from '@aws-sdk/client-dynamodb';
 import {DynamoDBDocumentClient, QueryCommand, ScanCommand} from '@aws-sdk/lib-dynamodb';
 
-import {ensureTable, verifyTable} from 'dynamodb-toolkit/provisioning';
+import {planTable, ensureTable, verifyTable} from 'dynamodb-toolkit/provisioning';
 import {marshallDateISO, unmarshallDateISO} from 'dynamodb-toolkit/marshalling';
 
 import {createAdapter, TABLE} from './adapter.js';
@@ -58,14 +58,14 @@ const walkthrough = async client => {
   const adapter = createAdapter(client);
 
   // ─── §Setup ────────────────────────────────────────────────────
-  header('§Setup — ensureTable (ADD-only plan, executed on {yes: true})');
-  const dryPlan = await ensureTable(adapter);
+  header('§Setup — planTable (read-only) then ensureTable (executes)');
+  const plan = await planTable(adapter);
   info(
-    'Dry-run steps:',
-    dryPlan.steps.map(s => s.action)
+    'Plan steps:',
+    plan.steps.map(s => s.action)
   );
-  dryPlan.summary.forEach(l => info(`  ${l}`));
-  const created = await ensureTable(adapter, {yes: true});
+  plan.summary.forEach(l => info(`  ${l}`));
+  const created = await ensureTable(adapter);
   info('Executed:', created.executed.join(', '));
   info('Descriptor written:', Boolean(created.descriptorWritten));
 
