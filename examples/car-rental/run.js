@@ -81,28 +81,25 @@ const walkthrough = async client => {
   info(`  → adapter.typeOf = ${adapter.typeOf(camry)}`);
 
   // ─── §Subtree reads via buildKey ───────────────────────────────
-  header('§Subtree queries — adapter.buildKey({...}, {kind: "children"})');
-  const txAll = await client.send(new QueryCommand({TableName: TABLE, ...adapter.buildKey({state: 'TX'}, {kind: 'children'})}));
+  header('§Subtree queries — adapter.buildKey (children by default; {self} / {partial} as options)');
+  const txAll = await client.send(new QueryCommand({TableName: TABLE, ...adapter.buildKey({state: 'TX'})}));
   info(`All TX vehicles (children of {state: 'TX'}): ${txAll.Items.length}`);
-  const txDallasAll = await client.send(new QueryCommand({TableName: TABLE, ...adapter.buildKey({state: 'TX', facility: 'Dallas'}, {kind: 'children'})}));
+  const txDallasAll = await client.send(new QueryCommand({TableName: TABLE, ...adapter.buildKey({state: 'TX', facility: 'Dallas'})}));
   info(`TX/Dallas vehicles: ${txDallasAll.Items.length}`);
-  const exact = await client.send(
-    new QueryCommand({
-      TableName: TABLE,
-      ...adapter.buildKey({state: 'TX', facility: 'Dallas', vehicle: 'VIN-TX-001'}, {kind: 'exact'})
-    })
+  const selfPlusChildren = await client.send(
+    new QueryCommand({TableName: TABLE, ...adapter.buildKey({state: 'TX', facility: 'Dallas', vehicle: 'VIN-TX-001'}, {self: true})})
   );
-  info(`Exact-key query: ${exact.Items.length} hit`);
+  info(`{self: true} at leaf key: ${selfPlusChildren.Items.length} hit (the leaf row itself)`);
 
   // ─── §Filter grammar ───────────────────────────────────────────
   header('§Filter grammar — f-<field>-<op>=<value> parsed, allowlist-enforced');
   const listCars = await adapter.getListByParams(
-    {...adapter.buildKey({state: 'FL'}, {kind: 'children'}), TableName: TABLE},
+    {...adapter.buildKey({state: 'FL'}), TableName: TABLE},
     {fFilter: [{field: 'kind', op: 'eq', values: ['car']}], limit: 50}
   );
   info(`FL cars only: ${listCars.data.length} (of ${listCars.total} scanned)`);
   const budget = await adapter.getListByParams(
-    {...adapter.buildKey({state: 'FL'}, {kind: 'children'}), TableName: TABLE},
+    {...adapter.buildKey({state: 'FL'}), TableName: TABLE},
     {
       fFilter: [
         {field: 'kind', op: 'eq', values: ['boat']},
@@ -149,7 +146,7 @@ const walkthrough = async client => {
   let processed = 0;
   do {
     const params = {
-      ...adapter.buildKey({state: 'NV', facility: 'Vegas'}, {kind: 'children'}),
+      ...adapter.buildKey({state: 'NV', facility: 'Vegas'}),
       TableName: TABLE
     };
     const page = await adapter.deleteListByParams(params, {maxItems: 3, resumeToken: cursor});
@@ -168,7 +165,7 @@ const walkthrough = async client => {
 
   // ─── §editListByParams ─────────────────────────────────────────
   header('§editListByParams — in-place update of every Austin car');
-  const bulkEdit = await adapter.editListByParams({...adapter.buildKey({state: 'TX', facility: 'Austin'}, {kind: 'children'}), TableName: TABLE}, item => ({
+  const bulkEdit = await adapter.editListByParams({...adapter.buildKey({state: 'TX', facility: 'Austin'}), TableName: TABLE}, item => ({
     ...item,
     promotionTag: 'summer2026'
   }));
@@ -178,7 +175,7 @@ const walkthrough = async client => {
   header('§rename — subtree prefix-swap via put-ifNotExists + delete');
   const renameResult = await adapter.rename({state: 'TX', facility: 'Austin'}, {state: 'TX', facility: 'NewAustin'});
   info(`Renamed: processed=${renameResult.processed} skipped=${renameResult.skipped}`);
-  const newAustin = await client.send(new QueryCommand({TableName: TABLE, ...adapter.buildKey({state: 'TX', facility: 'NewAustin'}, {kind: 'children'})}));
+  const newAustin = await client.send(new QueryCommand({TableName: TABLE, ...adapter.buildKey({state: 'TX', facility: 'NewAustin'})}));
   info(`TX/NewAustin now holds ${newAustin.Items.length} vehicles.`);
 
   // ─── §Cascade primitives ───────────────────────────────────────
@@ -221,9 +218,9 @@ const walkthrough = async client => {
     model: 'Telluride',
     year: 2024
   });
-  const frozen = await adapter.getListByParams({...adapter.buildKey({state: 'CA'}, {kind: 'children'}), TableName: TABLE}, {asOf, limit: 50});
+  const frozen = await adapter.getListByParams({...adapter.buildKey({state: 'CA'}), TableName: TABLE}, {asOf, limit: 50});
   info(`CA vehicles at ${asOf}: ${frozen.data.length} (new post excluded)`);
-  const live = await adapter.getListByParams({...adapter.buildKey({state: 'CA'}, {kind: 'children'}), TableName: TABLE}, {limit: 50});
+  const live = await adapter.getListByParams({...adapter.buildKey({state: 'CA'}), TableName: TABLE}, {limit: 50});
   info(`CA vehicles live: ${live.data.length}`);
 
   // ─── §Marshalling helpers ──────────────────────────────────────

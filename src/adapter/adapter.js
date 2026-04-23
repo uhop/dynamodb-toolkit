@@ -692,15 +692,24 @@ export class Adapter {
 
   /**
    * Build a KeyConditionExpression for a Query against this Adapter's main
-   * table. Validates `values` contiguous-from-start against `keyFields`;
-   * joins with the declared `structuralKey.separator`; calls the
-   * `buildKeyCondition` primitive with the computed prefix.
+   * table. Always list-oriented — defaults to matching descendants under
+   * the supplied key values. For single-record reads, use `getByKey`.
    *
    * @param values Object keyed by `keyFields` names (contiguous-from-start).
-   * @param options `{kind?, partial?, indexName?}` — `kind` defaults to
-   *   `'exact'` when no `partial`, `'partial'` when `partial` is present.
-   *   `'children'` must be explicit. `indexName` currently reserved for
-   *   future declarative-GSI support (throws if set on this release).
+   * @param options
+   *   - `partial` (string) — narrow to items whose next tier starts with
+   *     this prefix. E.g., `buildKey({state: 'TX'}, {partial: 'Dal'})` →
+   *     items under TX at `_sk` beginning with `TX|Dal`.
+   *   - `self` (boolean) — additionally include the row AT the supplied
+   *     key (parent + descendants). Uses the separator character to
+   *     distinguish self vs. descendants; assumes sibling values at the
+   *     same tier are not prefixes of each other (always true for
+   *     zero-padded numeric keyFields; user's responsibility for string
+   *     values).
+   *   - `indexName` — reserved for a future declarative-GSI surface
+   *     (throws today).
+   *   - `partial` takes precedence over `self` when both are set;
+   *     combining them would require two Queries.
    * @param params Optional existing params to merge into.
    * @returns The same `params` with `KeyConditionExpression` set.
    */
@@ -709,22 +718,10 @@ export class Adapter {
       throw new Error('buildKey(values): values must be an object keyed by keyFields names');
     }
     if (options.indexName !== undefined) {
-      // Declarative-GSI surface for buildKey lands with the `indices` config
-      // in a follow-up chunk. For now, users targeting GSIs with their own
-      // structural keys invoke the buildKeyCondition primitive directly.
       throw new Error('buildKey({indexName}) is not yet supported — use buildKeyCondition primitive for GSI targets');
     }
 
-    const {kind: kindOpt, partial} = options;
-    const kind =
-      kindOpt === undefined
-        ? partial !== undefined
-          ? 'partial'
-          : 'exact'
-        : kindOpt;
-    if (kind !== 'exact' && kind !== 'children' && kind !== 'partial') {
-      throw new Error(`buildKey: unknown kind '${kind}' — expected 'exact' | 'children' | 'partial'`);
-    }
+    const {self, partial} = options;
 
     // Walk keyFields, collect contiguous-from-start defined values.
     const components = [];
@@ -746,15 +743,16 @@ export class Adapter {
       throw new Error('buildKey: at least the partition keyField must be present in values');
     }
 
-    // Single-field keyFields: direct equality on the lone key.
+    // Single-field keyFields: equality on the lone key. No descendants to
+    // match; `self` / `partial` aren't meaningful without a structural key.
     if (this.keyFields.length === 1 || !this.structuralKey) {
-      if (kind === 'children' || kind === 'partial') {
-        throw new Error(`buildKey: kind '${kind}' requires a structuralKey declaration (composite keyFields)`);
+      if (self || partial !== undefined) {
+        throw new Error('buildKey: {self} / {partial} require a structuralKey declaration (composite keyFields)');
       }
       return buildKeyCondition({name: this.keyFields[0].name, value: components[0], kind: 'exact'}, params);
     }
 
-    // Composite keyFields → join into structuralKey.name.
+    // Composite keyFields → structuralKey.
     //
     // DynamoDB's Query requires BOTH the partition-key equality AND the
     // optional sort-key condition in the same KeyConditionExpression —
@@ -765,24 +763,32 @@ export class Adapter {
     const base = components.join(sep);
     const pkName = this.keyFields[0].name;
     const pkValue = components[0];
-    if (kind === 'exact') {
+
+    if (partial !== undefined) {
+      if (typeof partial !== 'string' || partial.length === 0) {
+        throw new Error('buildKey: options.partial must be a non-empty string');
+      }
+      // Partial prefix match at the next tier: `base | partial`.
       return buildKeyCondition(
-        {name: this.structuralKey.name, value: base, kind: 'exact', pkName, pkValue},
+        {name: this.structuralKey.name, value: base + sep + partial, kind: 'prefix', pkName, pkValue},
         params
       );
     }
-    if (kind === 'children') {
+
+    if (self) {
+      // Self + descendants via a single begins_with at `base` (no trailing
+      // separator). Matches the row at `_sk = base` AND every `_sk`
+      // starting with `base|`. Correct iff sibling values at the last
+      // supplied tier are not prefixes of each other.
       return buildKeyCondition(
-        {name: this.structuralKey.name, value: base + sep, kind: 'prefix', pkName, pkValue},
+        {name: this.structuralKey.name, value: base, kind: 'prefix', pkName, pkValue},
         params
       );
     }
-    // kind === 'partial'
-    if (typeof partial !== 'string' || partial.length === 0) {
-      throw new Error("buildKey: kind 'partial' requires options.partial to be a non-empty string");
-    }
+
+    // Default: children only. begins_with on `base|` (trailing separator).
     return buildKeyCondition(
-      {name: this.structuralKey.name, value: base + sep + partial, kind: 'prefix', pkName, pkValue},
+      {name: this.structuralKey.name, value: base + sep, kind: 'prefix', pkName, pkValue},
       params
     );
   }
@@ -1431,10 +1437,10 @@ export class Adapter {
   // --- subtree macros: rename / cloneWithOverwrite ---
   //
   // Scope macros for hierarchical keys. Both query the `fromExample`
-  // subtree via `buildKey({kind: 'children'})` by default (override with
-  // `options.kind: 'exact'` for leaf operations), run each item through
+  // subtree via `buildKey` (children semantics), run each item through
   // `swapPrefix(fromExample, toExample)` to derive the destination, and
   // apply an idempotent two-phase write so resumes don't corrupt state.
+  // For single-record moves, use `adapter.move()`.
   //
   // rename:             put-if-not-exists (dst) → delete (src)
   //                     constructive before destructive; re-runs are
@@ -1451,7 +1457,7 @@ export class Adapter {
   // `move` (TransactWriteCommand).
 
   async rename(fromExample, toExample, options) {
-    let queryParams = this.buildKey(fromExample, {kind: options?.kind || 'children'});
+    let queryParams = this.buildKey(fromExample);
     queryParams.TableName = this.table;
     queryParams = this._applyAsOf(queryParams, options?.asOf);
 
@@ -1462,7 +1468,7 @@ export class Adapter {
   }
 
   async cloneWithOverwrite(fromExample, toExample, options) {
-    let queryParams = this.buildKey(fromExample, {kind: options?.kind || 'children'});
+    let queryParams = this.buildKey(fromExample);
     queryParams.TableName = this.table;
     queryParams = this._applyAsOf(queryParams, options?.asOf);
 
@@ -1647,7 +1653,7 @@ export class Adapter {
     this._requireStructuralCascade('deleteAllUnder');
     // Leaf-first: delete descendants before self. Self-delete deferred
     // until pagination of descendants completes.
-    const queryParams = this.buildKey(srcKey, {kind: 'children'});
+    const queryParams = this.buildKey(srcKey);
     queryParams.TableName = this.table;
     const childrenResult = await this.deleteListByParams(queryParams, options);
     if (childrenResult.cursor) return childrenResult;
@@ -1682,7 +1688,7 @@ export class Adapter {
       selfResult = await this._cascadeSelfClone(srcKey, mapFn, options);
     }
 
-    const queryParams = this.buildKey(srcKey, {kind: 'children'});
+    const queryParams = this.buildKey(srcKey);
     queryParams.TableName = this.table;
     const childrenResult = await this.cloneListByParams(queryParams, mapFn, options);
 
@@ -1712,7 +1718,7 @@ export class Adapter {
     // Leaf-first for the delete phase: process descendants first, then
     // self. Per-item copy+delete is interleaved inside `_subtreeRename`,
     // so children migrate fully before self.
-    let queryParams = this.buildKey(srcKey, {kind: 'children'});
+    let queryParams = this.buildKey(srcKey);
     queryParams.TableName = this.table;
     queryParams = this._applyAsOf(queryParams, options?.asOf);
     const childrenResult = await this._subtreeRename(queryParams, mapFn, options);

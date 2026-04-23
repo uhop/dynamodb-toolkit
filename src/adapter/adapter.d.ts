@@ -596,38 +596,36 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
 
   /**
    * Build a `KeyConditionExpression` for a Query against this Adapter's main
-   * table. Ergonomic surface over {@link buildKeyCondition} — the Adapter
-   * uses its declared `keyFields` / `structuralKey` to validate `values` and
-   * join them into the right prefix.
+   * table. Always list-oriented — defaults to matching descendants under
+   * the supplied key values. For single-record reads, use `getByKey`.
    *
    * `values` is keyed by `keyFields` names and must be
    * **contiguous-from-start** (no gaps — if `rentalName` is missing, `carVin`
    * must also be missing). At least the partition keyField is required.
    *
-   * `options.kind` controls the match shape:
-   * - `'exact'` (default) — equality match: `structuralKey = "TX|Dallas"`.
-   * - `'children'` — `begins_with(structuralKey, "TX|Dallas|")`, trailing
-   *   separator included so the parent record isn't matched.
-   * - `'partial'` — `begins_with(structuralKey, "TX|Dallas|Bui")`; requires
-   *   `options.partial` as the suffix after the separator.
+   * Behaviour on composite `keyFields` (requires `structuralKey`):
+   * - Default — `begins_with(structuralKey, "TX|Dallas|")`, children only.
+   * - `{partial: 'Bui'}` — `begins_with(structuralKey, "TX|Dallas|Bui")`,
+   *   narrowed to items whose next tier starts with `Bui`.
+   * - `{self: true}` — `begins_with(structuralKey, "TX|Dallas")`, no
+   *   trailing separator: includes the row at the supplied key plus all
+   *   descendants. Assumes sibling values at the last supplied tier are
+   *   not prefixes of each other (true by construction for zero-padded
+   *   numeric keyFields; caller's responsibility for string values).
+   * - `partial` takes precedence over `self` when both are set (they
+   *   target different key ranges and can't be combined into a single
+   *   `begins_with`).
    *
-   * Inference: `'exact'` when no `partial`; `'partial'` when `partial`
-   * is present; `'children'` must be explicit.
-   *
-   * Composite `keyFields` require a `structuralKey` declaration.
-   * Single-field `keyFields` only support `kind: 'exact'`.
+   * Single-field `keyFields` (no `structuralKey`): emits pk equality.
+   * `self` / `partial` are rejected — nothing to partial-match against.
    *
    * @param values Object keyed by `keyFields` names; contiguous-from-start.
-   * @param options `{kind?, partial?, indexName?}`.
+   * @param options `{self?, partial?, indexName?}`.
    * @param params Optional existing params to merge into.
    * @returns The same `params` with `KeyConditionExpression` set and
    *   `ExpressionAttributeNames` / `ExpressionAttributeValues` extended.
    */
-  buildKey(
-    values: Partial<TItem>,
-    options?: {kind?: 'exact' | 'children' | 'partial'; partial?: string; indexName?: string},
-    params?: Record<string, unknown>
-  ): Record<string, unknown>;
+  buildKey(values: Partial<TItem>, options?: {self?: boolean; partial?: string; indexName?: string}, params?: Record<string, unknown>): Record<string, unknown>;
 
   /**
    * Build a mapFn that swaps a leading `keyFields` prefix. Given
@@ -950,7 +948,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   /**
    * Cascade subtree delete: delete the self node at `srcKey` and every
    * descendant declared to hang off it. Leaf-first — descendants are
-   * removed via `deleteListByParams(buildKey(srcKey, {kind: 'children'}))`
+   * removed via `deleteListByParams(buildKey(srcKey))`
    * before the self node is deleted.
    *
    * Requires `options.relationships.structural` on the adapter; throws

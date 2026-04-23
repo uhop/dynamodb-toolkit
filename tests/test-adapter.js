@@ -1962,23 +1962,7 @@ test('adapter.buildKey: single-field keyFields → equality', t => {
   t.equal(p.ExpressionAttributeValues[':kcv0'], 'Hoth');
 });
 
-test('adapter.buildKey: composite kind=exact emits pk equality AND structuralKey equality', t => {
-  const client = makeMockClient(async () => ({}));
-  const adapter = new Adapter({
-    client,
-    table: 'T',
-    keyFields: ['state', 'rentalName'],
-    structuralKey: {name: '-sk'}
-  });
-  const p = adapter.buildKey({state: 'TX', rentalName: 'Dallas'});
-  t.equal(p.KeyConditionExpression, '#kc0 = :kcv0 AND #kc1 = :kcv1');
-  t.equal(p.ExpressionAttributeNames['#kc0'], 'state');
-  t.equal(p.ExpressionAttributeNames['#kc1'], '-sk');
-  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX');
-  t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX|Dallas');
-});
-
-test('adapter.buildKey: kind=children emits pk equality AND begins_with on structuralKey', t => {
+test('adapter.buildKey: composite default emits pk equality AND begins_with (children)', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
@@ -1986,13 +1970,29 @@ test('adapter.buildKey: kind=children emits pk equality AND begins_with on struc
     keyFields: ['state', 'rentalName', 'carVin'],
     structuralKey: {name: '-sk'}
   });
-  const p = adapter.buildKey({state: 'TX', rentalName: 'Dallas'}, {kind: 'children'});
+  const p = adapter.buildKey({state: 'TX', rentalName: 'Dallas'});
   t.equal(p.KeyConditionExpression, '#kc0 = :kcv0 AND begins_with(#kc1, :kcv1)');
+  t.equal(p.ExpressionAttributeNames['#kc0'], 'state');
+  t.equal(p.ExpressionAttributeNames['#kc1'], '-sk');
   t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX');
   t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX|Dallas|');
 });
 
-test('adapter.buildKey: partial emits pk equality AND begins_with on structuralKey', t => {
+test('adapter.buildKey: {self: true} emits begins_with on base without trailing separator', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName', 'carVin'],
+    structuralKey: {name: '-sk'}
+  });
+  const p = adapter.buildKey({state: 'TX', rentalName: 'Dallas'}, {self: true});
+  t.equal(p.KeyConditionExpression, '#kc0 = :kcv0 AND begins_with(#kc1, :kcv1)');
+  t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX');
+  t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX|Dallas');
+});
+
+test('adapter.buildKey: {partial} emits begins_with on base + sep + partial', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
@@ -2006,7 +2006,7 @@ test('adapter.buildKey: partial emits pk equality AND begins_with on structuralK
   t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX|Dal');
 });
 
-test('adapter.buildKey: kind=partial requires non-empty partial string', t => {
+test('adapter.buildKey: {partial} takes precedence over {self} when both are set', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
@@ -2014,8 +2014,19 @@ test('adapter.buildKey: kind=partial requires non-empty partial string', t => {
     keyFields: ['state', 'rentalName'],
     structuralKey: {name: '-sk'}
   });
-  t.throws(() => adapter.buildKey({state: 'TX'}, {kind: 'partial'}), 'partial missing');
-  t.throws(() => adapter.buildKey({state: 'TX'}, {kind: 'partial', partial: ''}), 'partial empty');
+  const p = adapter.buildKey({state: 'TX'}, {self: true, partial: 'Dal'});
+  t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX|Dal', 'partial wins: no self-row begins_with');
+});
+
+test('adapter.buildKey: {partial} requires non-empty string', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['state', 'rentalName'],
+    structuralKey: {name: '-sk'}
+  });
+  t.throws(() => adapter.buildKey({state: 'TX'}, {partial: ''}), 'partial empty');
 });
 
 test('adapter.buildKey: non-contiguous values throw', t => {
@@ -2049,7 +2060,9 @@ test('adapter.buildKey: number keyFields zero-padded per width', t => {
     keyFields: ['state', {name: 'rentalId', type: 'number', width: 5}, 'carVin'],
     structuralKey: {name: '-sk'}
   });
-  const p = adapter.buildKey({state: 'TX', rentalId: 42, carVin: 'V1'});
+  // {self: true} omits the trailing separator so we can assert the
+  // zero-padded base value directly.
+  const p = adapter.buildKey({state: 'TX', rentalId: 42, carVin: 'V1'}, {self: true});
   t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX');
   t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX|00042|V1');
 });
@@ -2062,7 +2075,8 @@ test('adapter.buildKey: custom separator applied', t => {
     keyFields: ['state', 'carVin'],
     structuralKey: {name: '-sk', separator: '::'}
   });
-  const p = adapter.buildKey({state: 'TX', carVin: 'V1'});
+  // {self: true} omits the trailing separator for a clean join assertion.
+  const p = adapter.buildKey({state: 'TX', carVin: 'V1'}, {self: true});
   t.equal(p.ExpressionAttributeValues[':kcv0'], 'TX');
   t.equal(p.ExpressionAttributeValues[':kcv1'], 'TX::V1');
 });
@@ -2072,9 +2086,10 @@ test('adapter.buildKey: indexName option throws until declarative GSI surface la
   t.throws(() => adapter.buildKey({name: 'x'}, {indexName: 'by-name'}), 'indexName not supported yet');
 });
 
-test('adapter.buildKey: single-field keyFields + kind=children throws', t => {
+test('adapter.buildKey: single-field keyFields + {self} or {partial} throws', t => {
   const {adapter} = makeAdapter(async () => ({}));
-  t.throws(() => adapter.buildKey({name: 'x'}, {kind: 'children'}), 'needs structuralKey');
+  t.throws(() => adapter.buildKey({name: 'x'}, {self: true}), '{self} needs structuralKey');
+  t.throws(() => adapter.buildKey({name: 'x'}, {partial: 'abc'}), '{partial} needs structuralKey');
 });
 
 // --- canned mapFn builders ---
