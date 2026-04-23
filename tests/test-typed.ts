@@ -35,7 +35,9 @@ test('typed: Adapter constructs with typed item + key', t => {
     keyFields: ['name'] // (keyof Planet & string)[] — compile-time checked
   });
   t.equal(adapter.table, 'Planets');
-  t.deepEqual(adapter.keyFields, ['name']);
+  // keyFields normalize to KeyFieldSpec objects on construction. The string
+  // shorthand `'name'` is equivalent to `{name: 'name', type: 'string'}`.
+  t.deepEqual(adapter.keyFields, [{name: 'name', type: 'string'}]);
 });
 
 test('typed: raw() preserves the inner type through the wrapper', t => {

@@ -84,8 +84,8 @@ Each returns a discriminated descriptor `{action, params}` (or `{action, adapter
 
 - `await adapter.getByKey(key, fields?, options?)` — options: `{consistent?, reviveItems?, ignoreIndirection?, params?}`. Returns `TItem | undefined`.
 - `await adapter.getByKeys(keys, fields?, options?)` — returns `TItem[]`. Missing keys silently dropped. Uses `BatchGetItem` with `UnprocessedKeys` retry.
-- `await adapter.getAll(options?, example?, index?)` — example is fed to `prepareListInput`. Returns `{data, offset, limit, total?}`.
-- `await adapter.getAllByParams(params, options?)` — params is the prepared input (KeyCondition, IndexName, etc.); options drives offset/limit/fields/filter/needTotal/reviveItems.
+- `await adapter.getList(options?, example?, index?)` — example is fed to `prepareListInput`. Returns `{data, offset, limit, total?}`.
+- `await adapter.getListByParams(params, options?)` — params is the prepared input (KeyCondition, IndexName, etc.); options drives offset/limit/fields/filter/needTotal/reviveItems.
 - `await adapter.post(item, {returnFailedItem?}?)` — fails if key exists (`ConditionalCheckFailedException`).
 - `await adapter.put(item, {force?, conditions?, params?, returnFailedItem?}?)` — `force=true` skips the existence check.
 - `await adapter.patch(key, patch, {delete?, separator?, arrayOps?, conditions?, params?, returnFailedItem?}?)` — applies `UpdateExpression`. Key fields are stripped from `patch` automatically.
@@ -135,11 +135,11 @@ new Adapter({
 1. `GetItem` against the GSI to extract the base table key.
 2. `GetItem` against the base table for the full record.
 
-`getByKeys`/`getAll`/`getAllByParams` also second-hop via `readListByKeys` / `readOrderedListByKeys`. Pass `{ignoreIndirection: true}` to skip.
+`getByKeys`/`getList`/`getListByParams` also second-hop via `readListByKeys` / `readOrderedListByKeys`. Pass `{ignoreIndirection: true}` to skip.
 
 ### 1.9 List options shape
 
-`getAll` / `getAllByParams` accept:
+`getList` / `getListByParams` accept:
 
 ```ts
 interface ListOptions {
@@ -178,7 +178,7 @@ Builds `UpdateExpression`. `options.delete: string[]` → `REMOVE` clause. `opti
 
 Builds `ProjectionExpression`. De-duplicates and applies `projectionFieldMap` aliases. Sets `Select: 'SPECIFIC_ATTRIBUTES'` unless `skipSelect`.
 
-### 2.3 `buildFilter(searchable, query, options?, params?)`
+### 2.3 `buildSearch(searchable, query, options?, params?)`
 
 Builds `FilterExpression` over `searchablePrefix + field` mirror columns. Default mode: substring + case-insensitive. Options: `{fields?, prefix?, caseSensitive?}`.
 
@@ -253,7 +253,7 @@ Framework-agnostic helpers. Each parser accepts the raw query value (string or a
 
 - `parseFields(input, {maxItems?})` → `string[] | null`. `maxItems` default `1000`; extra segments truncated (DoS guard).
 - `parseSort(input)` → `{field, direction: 'asc' | 'desc', chain: SortClause[]} | null`
-- `parseFilter(input, {mode?, caseSensitive?, maxLength?})` → `{query, mode?, caseSensitive?} | null`. `maxLength` default `1024`; longer queries truncated.
+- `parseSearch(input, {mode?, caseSensitive?, maxLength?})` → `{query, mode?, caseSensitive?} | null`. `maxLength` default `1024`; longer queries truncated.
 - `parsePatch(body, {metaPrefix?})` → `{patch, options}` — splits wire body into raw patch + `{delete, separator, arrayOps}`. Patch accumulator is a null-prototype object (defends against `__proto__` in the request body).
 - `parseNames(input, {maxItems?})` → `string[]`. `maxItems` default `1000`.
 - `parsePaging(input, {defaultLimit?, maxLimit?, maxOffset?})` → `{offset, limit}` (clamped). `maxOffset` default `100_000` — caps `?offset=` to prevent DoS via `?offset=1e15` driving `paginateList` into astronomical skip-page SDK calls.
@@ -265,7 +265,7 @@ Framework-agnostic helpers. Each parser accepts the raw query value (string or a
 - `buildEnvelope(result, {keys?, links?})` → wraps `{data, offset, limit, total?}` with configurable key names; optionally embeds `links`.
 - `buildErrorBody(err, {includeDebug?, errorId?})` → `{code, message, errorId?, stack?}`
 - `paginationLinks(offset, limit, total, urlBuilder?)` → `{prev: string | null, next: string | null}` — `urlBuilder` is `({offset, limit}) => string`.
-- `buildListOptions(query, policy)` → `ListOptionsBase` — composes `parseFields` / `parseFilter` / `parsePaging` / `parseFlag` under policy's pagination caps. Returns `{offset, limit, consistent, needTotal, fields?, filter?}` ready for `adapter.getAll`.
+- `buildListOptions(query, policy)` → `ListOptionsBase` — composes `parseFields` / `parseSearch` / `parsePaging` / `parseFlag` under policy's pagination caps. Returns `{offset, limit, consistent, needTotal, fields?, filter?}` ready for `adapter.getList`.
 - `resolveSort(query, sortableIndices?)` → `{index, descending}` — resolves `?sort=-name` to `{index: 'name-gsi', descending: true}` via the passed GSI mapping. Unmapped / missing fields → `{index: undefined, descending: false}`.
 - `stripMount(pathname, mountPath?)` → `string | null` — returns the pathname tail when the request is under `mountPath`, else `null`. Normalizes trailing slash on `mountPath` so `'/planets/'` and `'/planets'` behave identically. Empty / missing `mountPath` means "mount at root."
 - `validateWriteBody(body, {allowEmpty?, allowArray?}?)` → `body` — throws `{status: 400, code: 'BadBody'}` when `body` is non-object (or null/array without the matching option). Use on write-shaped routes where `{...body, ...key}` would silently accept `null` (writes key-only) or arrays (writes `{"0": …}`).
@@ -321,7 +321,7 @@ createServer(handler).listen(3000);
 
 | Method | URL | Adapter call |
 | --- | --- | --- |
-| `GET` | `/` | `getAll` + envelope |
+| `GET` | `/` | `getList` + envelope |
 | `POST` | `/` | `post` (204) |
 | `DELETE` | `/?filter=…` | `deleteAllByParams` (`{processed}`) |
 | `GET` | `/-by-names?names=…&fields=…` | `getByKeys` (plain array) |

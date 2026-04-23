@@ -12,17 +12,17 @@ Opinionated zero-runtime-dependency micro-library for [AWS DynamoDB](https://aws
 - **Zero runtime dependencies.** AWS SDK v3 modules are peer dependencies (`@aws-sdk/client-dynamodb`, `@aws-sdk/lib-dynamodb`).
 - **ESM-only.** Native `import` / `export`, hand-written `.d.ts` sidecars next to every `.js` file. No build step.
 - **TypeScript, CommonJS, Node/Deno/Bun** — first-class TS typings via sidecars, CJS consumers can `require()` on current Node 20+, and the test suite runs on all three runtimes (see [Compatibility](#compatibility)).
-- **Declarative schema** — typed `keyFields` with composite structural keys, an `indices` map for GSIs/LSIs (with `sparse`, `indirect`, and projection controls), opt-in `technicalPrefix` for adapter-managed namespaces, `typeLabels` / `typeDiscriminator` for type detection via `adapter.typeOf(item)`, and a `filterable` allowlist for the `f-` filter grammar.
-- **Adapter with hooks** — `prepare` / `revive` / `prepareKey` / `validateItem` / `checkConsistency` / `updateInput` / `prepareListInput`, single-op → `transactWriteItems` auto-upgrade, `Raw<T>` bypass marker, indirect-index second-hop for keys-only GSIs.
-- **Expression builders** for `UpdateExpression`, `ProjectionExpression`, `FilterExpression`, `ConditionExpression`, and **`buildKeyCondition`** / **`adapter.buildKey`** for hierarchical Query key conditions (exact / children / partial prefix).
+- **Declarative schema** — typed `keyFields` with composite structural keys, an `indices` map for GSIs/LSIs (with `sparse`, `indirect`, and projection controls), opt-in `technicalPrefix` for adapter-managed namespaces, `typeLabels` / `typeDiscriminator` / `typeField` for type detection via `adapter.typeOf(item)` (with auto-populated type tags on write), and a `filterable` allowlist for the filter URL grammar.
+- **Adapter with hooks** — `prepare` / `revive` / `prepareKey` / `validateItem` / `checkConsistency` / `updateInput` / `prepareListInput`, single-op → `transactWriteItems` auto-upgrade, `Raw<T>` bypass marker, indirect-index second-hop for keys-only GSIs. Canned `stampCreatedAtISO()` / `stampCreatedAtEpoch()` prepare-hook builders.
+- **Expression builders** for `UpdateExpression`, `ProjectionExpression`, `FilterExpression`, `ConditionExpression`, and **`buildKeyCondition`** / **`adapter.buildKey`** for hierarchical Query key conditions (children by default; `{self: true}` to include the parent row; `{partial}` for prefix narrowing).
 - **Batch + transaction chunking** — `applyBatch` / `applyTransaction` with `UnprocessedItems` / `UnprocessedKeys` retry, exponential backoff, `{options}` sentinel for transaction-level knobs (`clientRequestToken`, `returnConsumedCapacity`), and `explainTransactionCancellation` to map cancellation reasons back to input descriptors.
 - **Resumable mass operations** — cursor-based `{maxItems, resumeToken}` across `deleteListByParams` / `cloneListByParams` / `moveListByParams` / `editListByParams`, opaque `encodeCursor` / `decodeCursor`, `MassOpResult` with `{processed, skipped, failed, conflicts, cursor?}` buckets, per-item `ifNotExists` / `ifExists` conditionals. `adapter.edit` for read-diff-update, `rename` + `cloneWithOverwrite` subtree macros.
 - **Cascade primitives** — `deleteAllUnder` / `cloneAllUnder{,By}` / `moveAllUnder{,By}` rooted at a partial key; gated by an explicit `relationships` declaration (no cascade inference from composite keys).
 - **Optimistic concurrency + scope-freeze** — opt-in `versionField` auto-conditions writes on `attribute_not_exists(<pk>) OR <versionField> = :observed` and bumps on success; opt-in `createdAtField` + `{asOf}` mass-op option AND-merges `<createdAtField> <= :asOf` for replay-safe scans.
 - **Marshalling helpers** — `dynamodb-toolkit/marshalling`: `marshallDateISO`, `marshallDateEpoch`, `marshallMap(m, valueTransform?)`, `marshallURL` with symmetric `unmarshall*` pairs.
-- **Filter grammar** — `f-<field>-<op>=<value>` with `eq` / `ne` / `lt` / `le` / `gt` / `ge` / `in` / `btw` / `beg` / `ct` / `ex` / `nx`. First-character-delimited multi-values.
+- **Filter + search URL grammar** — structured filter clauses via `?<op>-<field>=<value>` (`eq` / `ne` / `lt` / `le` / `gt` / `ge` / `in` / `btw` / `beg` / `ct` / `ex` / `nx`, first-character-delimited multi-values); free-form text search via `?search=<query>` over the adapter's `searchable` mirror columns.
 - **Framework-agnostic REST core + `node:http` handler** — pure parsers/builders/policy plus a standard route pack ready to drop into `createServer`. Koa / Express / Fetch / Lambda adapters in sibling packages.
-- **Table provisioning + CLI** — `dynamodb-toolkit/provisioning` ships `ensureTable` (ADD-only plan + execute) and `verifyTable` (structured diff, `{throwOnMismatch}` optional) driven by the same Adapter declaration. Opt-in descriptor record detects drift `DescribeTable` can't see. `dynamodb-toolkit` CLI loads an ESM adapter module and runs either command.
+- **Table provisioning + CLI** — `dynamodb-toolkit/provisioning` ships `planTable` (read-only plan) and `ensureTable` (plan + apply) plus `verifyTable` (structured diff, `{throwOnMismatch}` optional) driven by the same Adapter declaration. Opt-in descriptor record detects drift `DescribeTable` can't see. `dynamodb-toolkit` CLI loads an ESM adapter module and runs `plan-table` / `ensure-table` / `verify-table`.
 
 ## "Toolkit", not "framework"
 
@@ -80,18 +80,16 @@ const adapter = new Adapter({
   client: docClient,
   table: 'rentals',
   technicalPrefix: '_',
-  keyFields: [
-    {name: 'state', type: 'string'},
-    {name: 'city', type: 'string'},
-    {name: 'rentalName', type: 'string'}
-  ],
-  structuralKey: {name: '_sk', separator: '|'},
+  keyFields: ['state', 'city', 'rentalName'], // string shorthand — each ≡ {name, type: 'string'}
+  structuralKey: '_sk', // shorthand for {name: '_sk', separator: '|'}
   typeLabels: ['state', 'city', 'rental'],
+  typeField: 'kind', // auto-populated on write ('state' / 'city' / 'rental')
+  typeDiscriminator: 'kind', // read back what the built-in wrote
   indices: {
     'by-status-date': {
       type: 'gsi',
-      pk: {name: 'status', type: 'string'},
-      sk: {name: 'createdAt', type: 'string'},
+      pk: 'status', // string shorthand for {name, type: 'string'}
+      sk: {name: 'createdAt', type: 'string'}, // full descriptor when you need a non-string type
       projection: 'all'
     }
   },
@@ -99,11 +97,14 @@ const adapter = new Adapter({
   relationships: {structural: true}
 });
 
-// Query the subtree "all rentals in Austin, TX":
-const kc = adapter.buildKey({state: 'TX', city: 'Austin'}, {kind: 'children'});
-const {Items} = await docClient.send(new QueryCommand({TableName: 'rentals', ...kc}));
+// Query the subtree "all rentals in Austin, TX" — children default:
+const page = await adapter.getListUnder({state: 'TX', city: 'Austin'}, {limit: 50});
 
-// Or use the typeOf helper to dispatch by hierarchy level:
+// Or build the Query params yourself and use with the raw SDK:
+const kc = adapter.buildKey({state: 'TX', city: 'Austin'}); // children only
+const kcWithSelf = adapter.buildKey({state: 'TX', city: 'Austin'}, {self: true}); // + parent row
+
+// Dispatch by hierarchy level (depth fallback + discriminator override):
 adapter.typeOf({state: 'TX', city: 'Austin'}); // → 'city'
 
 // Subtree rename with resumable two-phase idempotent writes:
@@ -113,11 +114,13 @@ await adapter.moveAllUnder({state: 'TX', city: 'Austin'}, {state: 'TX', city: 'D
 Provision the table from the same declaration, either programmatically or via the bundled CLI:
 
 ```sh
-# Plan the CreateTable / UpdateTable steps from the Adapter declaration:
-npx dynamodb-toolkit ensure-table ./my-adapter.js
+# Preview the CreateTable / UpdateTable plan (read-only, no writes):
+npx dynamodb-toolkit plan-table ./my-adapter.js
 # → Would CREATE table rentals
 # →  + GSI by-status-date (status:HASH, createdAt:RANGE)
-# Re-run with --yes to apply.
+
+# Apply it:
+npx dynamodb-toolkit ensure-table ./my-adapter.js
 
 # Drift check:
 npx dynamodb-toolkit verify-table ./my-adapter.js --strict
@@ -153,17 +156,17 @@ The bundled `dynamodb-toolkit/handler` is a pure `node:http` handler. Framework-
 
 The package ships discrete, tree-shakable sub-exports for callers who want only the lower-level surface:
 
-| Sub-export                      | What's inside                                                                                                                                                                                                                                                                                                           |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dynamodb-toolkit`              | `Adapter`, `Raw`, `raw()`, `ToolkitError` + subclasses (`CascadeNotDeclared`, `KeyFieldChanged`, `NoIndexForSortField`, `BadFilterField`, `BadFilterOp`, `CreatedAtFieldNotDeclared`, `ConsistentReadOnGSIRejected`, `TableVerificationFailed`), `TransactionLimitExceededError`, type re-exports                       |
-| `dynamodb-toolkit/expressions`  | `buildUpdate`, `addProjection`, `buildFilter`, `buildFilterByExample`, `buildCondition`, `buildKeyCondition`, `cleanParams`, `cloneParams`                                                                                                                                                                              |
-| `dynamodb-toolkit/batch`        | `applyBatch`, `applyTransaction`, `explainTransactionCancellation`, `getBatch`, `getTransaction`, `backoff`, `TRANSACTION_LIMIT`                                                                                                                                                                                        |
-| `dynamodb-toolkit/mass`         | `paginateList`, `iterateList`, `iterateItems`, `readList`, `readByKeys`, `writeItems`, `deleteList`, `deleteByKeys`, `copyList`, `moveList`, `getTotal`, `encodeCursor`, `decodeCursor`, `mergeMapFn`, `runPaged` (plus deprecated aliases: `readListByKeys`, `readOrderedListByKeys`, `deleteListByKeys`, `writeList`) |
-| `dynamodb-toolkit/marshalling`  | `marshallDateISO`, `marshallDateEpoch`, `marshallMap`, `marshallURL`, `unmarshall*` pairs, `Marshaller<TRuntime, TStored>` type                                                                                                                                                                                         |
-| `dynamodb-toolkit/paths`        | `getPath`, `setPath`, `deletePath`, `applyPatch`, `normalizeFields`, `subsetObject`                                                                                                                                                                                                                                     |
-| `dynamodb-toolkit/rest-core`    | `parseFields`, `parseSort`, `parseFilter`, `parseFFilter`, `parsePatch`, `parseNames`, `parsePaging`, `parseFlag`, `buildEnvelope`, `buildErrorBody`, `paginationLinks`, `defaultPolicy`, `mapErrorStatus`, `mergePolicy`, `buildListOptions`, `resolveSort`, `stripMount`, `coerceStringQuery`, `validateWriteBody`    |
-| `dynamodb-toolkit/handler`      | `createHandler`, `matchRoute`, `readJsonBody`                                                                                                                                                                                                                                                                           |
-| `dynamodb-toolkit/provisioning` | `ensureTable`, `verifyTable`, `diffTable`, `planAddOnly`, `describeTable`, `executePlan`, `buildCreateTableInput`, `buildAddGsiInput`, `readDescriptor`, `writeDescriptor`, `compareDescriptor`, `extractDeclaration`                                                                                                   |
+| Sub-export                      | What's inside                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dynamodb-toolkit`              | `Adapter`, `Raw`, `raw()`, `stampCreatedAtISO`, `stampCreatedAtEpoch`, `ToolkitError` + subclasses (`CascadeNotDeclared`, `KeyFieldChanged`, `NoIndexForSortField`, `BadFilterField`, `BadFilterOp`, `CreatedAtFieldNotDeclared`, `ConsistentReadOnGSIRejected`, `TableVerificationFailed`), `TransactionLimitExceededError`, type re-exports             |
+| `dynamodb-toolkit/expressions`  | `buildUpdate`, `addProjection`, `buildSearch`, `buildFilterByExample`, `buildCondition`, `buildKeyCondition`, `cleanParams`, `cloneParams`                                                                                                                                                                                                                |
+| `dynamodb-toolkit/batch`        | `applyBatch`, `applyTransaction`, `explainTransactionCancellation`, `getBatch`, `getTransaction`, `backoff`, `TRANSACTION_LIMIT`                                                                                                                                                                                                                          |
+| `dynamodb-toolkit/mass`         | `paginateList`, `iterateList`, `iterateItems`, `readList`, `readByKeys`, `writeItems`, `deleteList`, `deleteByKeys`, `copyList`, `moveList`, `getTotal`, `encodeCursor`, `decodeCursor`, `mergeMapFn`, `runPaged` (plus deprecated aliases: `readListByKeys`, `readOrderedListByKeys`, `deleteListByKeys`, `writeList`)                                   |
+| `dynamodb-toolkit/marshalling`  | `marshallDateISO`, `marshallDateEpoch`, `marshallMap`, `marshallURL`, `unmarshall*` pairs, `Marshaller<TRuntime, TStored>` type                                                                                                                                                                                                                           |
+| `dynamodb-toolkit/paths`        | `getPath`, `setPath`, `deletePath`, `applyPatch`, `normalizeFields`, `subsetObject`                                                                                                                                                                                                                                                                       |
+| `dynamodb-toolkit/rest-core`    | `parseFields`, `parseSort`, `parseFilter` (structured clauses), `parseSearch` (free-form text), `parsePatch`, `parseNames`, `parsePaging`, `parseFlag`, `buildEnvelope`, `buildErrorBody`, `paginationLinks`, `defaultPolicy`, `mapErrorStatus`, `mergePolicy`, `buildListOptions`, `resolveSort`, `stripMount`, `coerceStringQuery`, `validateWriteBody` |
+| `dynamodb-toolkit/handler`      | `createHandler`, `matchRoute`, `readJsonBody`                                                                                                                                                                                                                                                                                                             |
+| `dynamodb-toolkit/provisioning` | `planTable`, `ensureTable`, `verifyTable`, `diffTable`, `planAddOnly`, `describeTable`, `executePlan`, `buildCreateTableInput`, `buildAddGsiInput`, `readDescriptor`, `writeDescriptor`, `compareDescriptor`, `extractDeclaration`                                                                                                                        |
 
 A bundled CLI (`dynamodb-toolkit`) wraps the provisioning helpers for scripted use — see [Table provisioning](https://github.com/uhop/dynamodb-toolkit/wiki/Table-provisioning) in the wiki.
 

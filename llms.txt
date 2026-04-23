@@ -34,13 +34,15 @@ await adapter.delete({name: 'Alderaan'});
 
 ## Sub-exports
 
-- `dynamodb-toolkit` — `Adapter`, `Raw`, `raw()`, `TransactionLimitExceededError`, type re-exports
-- `dynamodb-toolkit/expressions` — `buildUpdate`, `addProjection`, `buildFilter`, `buildFilterByExample`, `buildCondition`, `cleanParams`, `cloneParams`
+- `dynamodb-toolkit` — `Adapter`, `Raw`, `raw()`, `stampCreatedAtISO`, `stampCreatedAtEpoch`, `TransactionLimitExceededError`, type re-exports
+- `dynamodb-toolkit/expressions` — `buildUpdate`, `addProjection`, `buildSearch`, `buildFilterByExample`, `buildCondition`, `buildKeyCondition`, `cleanParams`, `cloneParams`
 - `dynamodb-toolkit/batch` — `applyBatch`, `applyTransaction`, `explainTransactionCancellation`, `getBatch`, `getTransaction`, `backoff`, `TRANSACTION_LIMIT`
-- `dynamodb-toolkit/mass` — `paginateList`, `iterateList`, `iterateItems`, `readList`, `readListByKeys`, `readOrderedListByKeys`, `writeList`, `deleteList`, `deleteListByKeys`, `copyList`, `moveList`, `getTotal`
+- `dynamodb-toolkit/mass` — `paginateList`, `iterateList`, `iterateItems`, `readList`, `readByKeys`, `writeItems`, `deleteList`, `deleteByKeys`, `copyList`, `moveList`, `getTotal`, `encodeCursor`, `decodeCursor`, `mergeMapFn`, `runPaged`
+- `dynamodb-toolkit/marshalling` — `marshallDateISO`, `marshallDateEpoch`, `marshallMap`, `marshallURL` with `unmarshall*` pairs
 - `dynamodb-toolkit/paths` — `getPath`, `setPath`, `deletePath`, `applyPatch`, `normalizeFields`, `subsetObject`
-- `dynamodb-toolkit/rest-core` — `parseFields`, `parseSort`, `parseFilter`, `parsePatch`, `parseNames`, `parsePaging`, `parseFlag`, `coerceStringQuery`, `buildEnvelope`, `buildErrorBody`, `paginationLinks`, `buildListOptions`, `resolveSort`, `stripMount`, `validateWriteBody`, `defaultPolicy`, `mapErrorStatus`, `mergePolicy`
+- `dynamodb-toolkit/rest-core` — `parseFields`, `parseSort`, `parseFilter` (structured clauses), `parseSearch` (free-form text), `parsePatch`, `parseNames`, `parsePaging`, `parseFlag`, `coerceStringQuery`, `buildEnvelope`, `buildErrorBody`, `paginationLinks`, `buildListOptions`, `resolveSort`, `stripMount`, `validateWriteBody`, `defaultPolicy`, `mapErrorStatus`, `mergePolicy`
 - `dynamodb-toolkit/handler` — `createHandler`, `matchRoute`, `readJsonBody`
+- `dynamodb-toolkit/provisioning` — `planTable`, `ensureTable`, `verifyTable`, `diffTable`, `readDescriptor`, `writeDescriptor`
 
 ## Adapter constructor options
 
@@ -73,8 +75,8 @@ await adapter.delete({name: 'Alderaan'});
 
 - `getByKey(key, fields?, options?)` → `TItem | undefined`
 - `getByKeys(keys, fields?, options?)` → `TItem[]`
-- `getAll(options?, example?, index?)` → `{data, offset, limit, total?}`
-- `getAllByParams(params, options?)` → `{data, offset, limit, total?}`
+- `getList(options?, example?, index?)` → `{data, offset, limit, total?}`
+- `getListByParams(params, options?)` → `{data, offset, limit, total?}`
 - `post(item, {returnFailedItem?})` → fails on existing key (ConditionalCheckFailedException → 409)
 - `put(item, {force?, conditions?, params?, returnFailedItem?})`
 - `patch(key, patch, {delete?, separator?, arrayOps?, conditions?, params?, returnFailedItem?})`
@@ -127,13 +129,13 @@ createServer(handler).listen(3000);
 
 - `createHandler`: `maxBodyBytes` (default 1 MB) — oversized bodies → HTTP 413.
 - `defaultPolicy.maxOffset`: 100_000 — caller-supplied `?offset=` clamped before `paginateList`.
-- Parsers: `parseFields(input, {maxItems})` / `parseNames(input, {maxItems})` default 1000; `parseFilter(input, {maxLength})` default 1024; `parsePaging(input, {maxOffset, maxLimit, defaultLimit})` defaults 100_000 / 100 / 10.
+- Parsers: `parseFields(input, {maxItems})` / `parseNames(input, {maxItems})` default 1000; `parseSearch(input, {maxLength})` default 1024; `parsePaging(input, {maxOffset, maxLimit, defaultLimit})` defaults 100_000 / 100 / 10.
 
 ### Standard route pack
 
 | Method | URL | Maps to |
 | --- | --- | --- |
-| `GET` | `/` | `getAll` + paginated envelope `{data, offset, limit, total, links?}` |
+| `GET` | `/` | `getList` + paginated envelope `{data, offset, limit, total, links?}` |
 | `GET` | `/:key` | `getByKey` (404 on miss) |
 | `GET` | `/-by-names?names=A,B` | `getByKeys` (plain array, missing dropped) |
 | `POST` | `/` | `post` (204; 409 on existing) |
