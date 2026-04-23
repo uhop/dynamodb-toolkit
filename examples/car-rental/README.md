@@ -1,30 +1,39 @@
 # Car rental — hierarchical example
 
-Runnable walkthrough exercising the full 3.6.0 toolkit surface against a realistic data model: a national rental agency with **state ⇒ facility ⇒ vehicle**, where each facility rents both cars AND boats.
+Runnable walkthrough exercising the full 3.7.0 toolkit surface against a realistic data model: a national rental agency with **state ⇒ facility ⇒ vehicle**, where each facility rents both cars AND boats and every tier carries real data (not just structural-key prefixes).
 
 ## Data model
 
-- **Structural hierarchy**: `state | facility | vehicle`.
-- **Multi-type same tier**: the leaf records are either `kind: 'car'` or `kind: 'boat'`. Both live in the same table, under the same keyFields; `adapter.typeOf(item)` returns `'car'` / `'boat'` via the `kind` discriminator (wins over depth-based detection).
+- **Structural hierarchy**: `state | facility | vehicle`. Every tier stores records with per-tier fields:
+  - **State** records — manager info (name / email / phone) and a `managedSince: Date` that demonstrates marshalling round-trip through the adapter's hooks.
+  - **Facility** records — address + facility manager info.
+  - **Vehicle** records at the leaf — cars (`make`, `model`, `year`) or boats (`length`, `motorHP`), both with `status` and `dailyPriceCents`.
+- **Multi-type same tier**: vehicles are `kind: 'car'` or `kind: 'boat'`. The same `kind` field is auto-populated on state / facility records too (`typeField: 'kind'`), so `adapter.typeOf(item)` returns `'state'` / `'facility'` / `'car'` / `'boat'` uniformly.
 - **Two index patterns**:
-  - GSI `by-status-createdAt` — "show me every rented vehicle across the fleet, oldest first".
-  - LSI `by-price` — within a single facility (partition), sort by daily price.
+  - GSI `by-status-createdAt` — sparse on the `status` attribute: only vehicles (which carry `status`) appear in the index; "show me every rented vehicle across the fleet" is a cross-partition Query.
+  - LSI `by-price` — within a state, sort vehicles by daily price. Auto-selected via `adapter.getList({sort: 'dailyPriceCents'})`.
 
 ## What it exercises
 
-| Feature                                                                                                                                                                                   | Where                                  |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| Typed declaration (`keyFields` / `structuralKey` / `indices` / `typeLabels` / `typeDiscriminator` / `filterable` / `versionField` / `createdAtField` / `relationships` / `descriptorKey`) | [`adapter.js`](./adapter.js)           |
-| `ensureTable` + `verifyTable` + descriptor record                                                                                                                                         | [`run.js`](./run.js) §Setup, §Teardown |
-| `adapter.buildKey(values, {kind})` (exact / children / partial)                                                                                                                           | §Subtree queries                       |
-| `f-<field>-<op>=<value>` filter grammar (`applyFFilter`)                                                                                                                                  | §Filter grammar                        |
-| Mass ops + cursor resume (`{maxItems, resumeToken}`)                                                                                                                                      | §Resumable mass ops                    |
-| `adapter.edit(key, mapFn)` + `editListByParams`                                                                                                                                           | §In-place updates                      |
-| `rename(from, to)` subtree macro                                                                                                                                                          | §Rename subtree                        |
-| Cascade primitives (`deleteAllUnder`, `cloneAllUnder{,By}`, `moveAllUnder`)                                                                                                               | §Cascade                               |
-| Optimistic concurrency (`versionField`) + scope-freeze (`asOf`)                                                                                                                           | §Concurrency                           |
-| Marshalling helpers (`marshallDateISO`)                                                                                                                                                   | hook wiring in `adapter.js`            |
-| `adapter.typeOf(item)` for car-vs-boat dispatch                                                                                                                                           | §Multi-type dispatch                   |
+| Feature                                                                                                              | Where                                     |
+| -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Typed declaration with shorthands (string `keyFields` / `structuralKey: '_sk'` / `typeDiscriminator: 'kind'`)        | [`adapter.js`](./adapter.js)              |
+| `typeField` auto-populate — built-in prepare stamps `kind` on every write                                            | `adapter.js` + §typeOf                    |
+| `filterable` with explicit `type` override for non-keyField attributes                                               | `adapter.js` (the `year` entry) + §Filter |
+| `planTable` / `ensureTable` split (read-only vs. executing) + `verifyTable` + descriptor record                      | [`run.js`](./run.js) §Setup, §verifyTable |
+| `adapter.putItems` bulk-load for the whole hierarchy                                                                 | §Seed (bulk)                              |
+| `adapter.buildKey` (children default, `{self}`, `{partial}`)                                                         | §Subtree queries                          |
+| `adapter.getListUnder` sugar                                                                                         | §getListUnder                             |
+| Filter URL grammar `?<op>-<field>=<value>` + polymorphic clause shape (`{field, op, value}`)                         | §Filter                                   |
+| LSI auto-promote by sort field                                                                                       | §LSI                                      |
+| GSI explicit cross-partition Query                                                                                   | §GSI                                      |
+| Mass ops + cursor resume (`{maxItems, resumeToken}`)                                                                 | §Resumable mass op                        |
+| `adapter.edit(key, mapFn)` + `editListByParams`                                                                      | §edit / §editListByParams                 |
+| `rename(from, to)` subtree macro                                                                                     | §rename                                   |
+| Cascade primitives (`deleteAllUnder`, `cloneAllUnder{,By}`, `moveAllUnder{,By}`)                                     | §Cascade                                  |
+| Optimistic concurrency (`versionField`) + scope-freeze (`asOf`)                                                      | §Concurrency, §asOf                       |
+| Marshalling round-trip (`marshallDateISO` / `unmarshallDateISO`) wired into the adapter's `prepare` / `revive` hooks | `adapter.js` + §Marshalling               |
+| Canned `stampCreatedAtISO()` prepare-hook builder                                                                    | `adapter.js`                              |
 
 ## Run it
 
@@ -38,5 +47,6 @@ The script creates a one-off table, runs the walkthrough end-to-end, prints each
 
 ## Not covered
 
-- Full REST server — the bundled `dynamodb-toolkit/handler` route pack is exercised programmatically (via `createHandler` + synthetic requests), but this example isn't a deployable service. Adapter packages (`dynamodb-toolkit-koa` etc.) wire this up for production use.
-- Sparse indices, indirect indices — design space is covered by the main Adapter docs; this example keeps the index surface small.
+- Full REST server — the bundled `dynamodb-toolkit/handler` route pack is exercised by the unit tests, not in this walkthrough. Adapter packages (`dynamodb-toolkit-koa` etc.) wire it up for production use.
+- Per-tier sparse-marker GSIs (Pattern 2 from the F10 recipe) and sharded leaf-tier GSIs (Pattern 1 scaled) — the single `typeField`-based GSI shown here is Pattern 1 in its simplest form. Per-tier and sharded variants land when a concrete scale need surfaces.
+- TypeScript counterparts — the adapter is typed end-to-end, but this example is JS-first. A TS mirror lands in a follow-up.

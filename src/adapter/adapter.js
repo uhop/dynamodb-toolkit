@@ -923,11 +923,17 @@ export class Adapter {
   // or the caller passes `{includeDescriptor: true}` (escape hatch for
   // toolkit introspection tools).
   //
-  // Safe to apply to Queries as well as Scans — the filter is a no-op
-  // when the Query's pk condition already excludes the descriptor row.
+  // Only applied on Scans. Queries already constrain the base-table pk
+  // via KeyConditionExpression (descriptor's pk = descriptorKey can't
+  // match a Query on state = 'TX'); a sparse GSI Query wouldn't have
+  // the descriptor's attributes at all. Also DynamoDB rejects
+  // FilterExpressions that reference primary-key attributes when a
+  // KeyConditionExpression uses them, so skipping on Queries is also
+  // required for correctness.
   _hideDescriptor(params, options) {
     if (!this.descriptorKey) return params;
     if (options?.includeDescriptor) return params;
+    if (params.KeyConditionExpression) return params;
     const pkName = this.keyFields[0].name;
     const names = params.ExpressionAttributeNames || {};
     const values = params.ExpressionAttributeValues || {};
@@ -1993,7 +1999,14 @@ export class Adapter {
       }
       return {processed};
     }
-    const processed = await writeItems(this.client, this.table, items, item => this._prepareItem(item));
+    // Native (BatchWriteItem) path: apply versionField before prepare so
+    // first-write items get `_version: 1` and round-trips bump. No OC
+    // condition is enforced (BatchWriteItem doesn't support ConditionExpression
+    // per-item) — callers needing OC should use `put` / `strategy: 'sequential'`.
+    const processed = await writeItems(this.client, this.table, items, item => {
+      const {item: versioned} = this._applyVersionToItem(item);
+      return this._prepareItem(versioned);
+    });
     return {processed};
   }
 

@@ -1,10 +1,51 @@
-// Mixed car + boat seed data across three states. Priced in cents
-// (integer) to keep DynamoDB number encoding honest.
+// Seed data across every tier of the hierarchy.
 //
-// Car shape: {state, facility, vehicle: vin, kind: 'car', status,
-//             dailyPriceCents, make, model, year}
-// Boat shape: {state, facility, vehicle: hull, kind: 'boat', status,
-//              dailyPriceCents, length, motorHP}
+// Three record shapes at the non-leaf tiers, two leaf kinds:
+//   state    — {state, manager: {name, email, phone}, managedSince: Date}
+//   facility — {state, facility, address, manager: {...}}
+//   car      — {state, facility, vehicle, kind: 'car', status,
+//               dailyPriceCents, make, model, year}
+//   boat     — {state, facility, vehicle, kind: 'boat', status,
+//               dailyPriceCents, length, motorHP}
+//
+// `kind` is omitted on states and facilities — the adapter's `typeField`
+// auto-populate stamps it on write (from `typeOf`'s depth inference), so
+// the built-in prepare step adds `kind: 'state'` / `'facility'` before
+// the put lands. Leaf records carry an explicit `kind` that wins over
+// the depth fallback.
+
+export const seedStates = [
+  {state: 'TX', manager: {name: 'Jane Ramos', email: 'jane@tx.example.com', phone: '+1-555-0101'}, managedSince: new Date('2021-03-14T00:00:00Z')},
+  {state: 'FL', manager: {name: 'Luis Ortega', email: 'luis@fl.example.com', phone: '+1-555-0202'}, managedSince: new Date('2022-07-01T00:00:00Z')},
+  {state: 'CA', manager: {name: 'Priya Patel', email: 'priya@ca.example.com', phone: '+1-555-0303'}, managedSince: new Date('2019-11-20T00:00:00Z')}
+];
+
+export const seedFacilities = [
+  {
+    state: 'TX',
+    facility: 'Dallas',
+    address: '1200 Commerce St, Dallas, TX 75202',
+    manager: {name: 'Bob Chen', email: 'bob@dallas.tx.example.com', phone: '+1-555-0110'}
+  },
+  {
+    state: 'TX',
+    facility: 'Austin',
+    address: '301 Congress Ave, Austin, TX 78701',
+    manager: {name: 'Alice Wu', email: 'alice@austin.tx.example.com', phone: '+1-555-0120'}
+  },
+  {
+    state: 'FL',
+    facility: 'Miami',
+    address: '100 Biscayne Blvd, Miami, FL 33132',
+    manager: {name: 'Carlos Rivera', email: 'carlos@miami.fl.example.com', phone: '+1-555-0210'}
+  },
+  {
+    state: 'CA',
+    facility: 'LA',
+    address: '1 World Way, Los Angeles, CA 90045',
+    manager: {name: 'Dana Kim', email: 'dana@la.ca.example.com', phone: '+1-555-0310'}
+  }
+];
 
 export const seedVehicles = [
   // TX ▸ Dallas
@@ -49,3 +90,6 @@ export const seedVehicles = [
   {state: 'CA', facility: 'LA', vehicle: 'VIN-CA-001', kind: 'car', status: 'rented', dailyPriceCents: 12000, make: 'Mercedes', model: 'S-Class', year: 2024},
   {state: 'CA', facility: 'LA', vehicle: 'VIN-CA-002', kind: 'car', status: 'available', dailyPriceCents: 7500, make: 'Tesla', model: 'Model Y', year: 2023}
 ];
+
+/** Combined seed: every record to write, in hierarchy order. Use with `adapter.putItems` for bulk load. */
+export const seedAll = [...seedStates, ...seedFacilities, ...seedVehicles];

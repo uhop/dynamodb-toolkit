@@ -652,6 +652,26 @@ test('putItems: native uses BatchWrite', async t => {
   t.equal(sent[0].constructor.name, 'BatchWriteCommand');
 });
 
+test('putItems: native initializes versionField on first-write items', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    return {UnprocessedItems: {}};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    technicalPrefix: '_',
+    versionField: '_version'
+  });
+  await adapter.putItems([{name: 'A'}, {name: 'B'}]);
+  const batch = sent[0].input.RequestItems.T;
+  for (const req of batch) {
+    t.equal(req.PutRequest.Item._version, 1, 'first-write items get _version: 1');
+  }
+});
+
 test('putItems: sequential uses individual Puts', async t => {
   const sent = [];
   const {adapter} = makeAdapter(async cmd => {
@@ -3241,10 +3261,7 @@ test('Adapter: filterable {ops, type} coerces filter values to the declared type
 
 test('Adapter: filterable rejects invalid {ops, type} shapes', t => {
   const client = makeMockClient(async () => ({}));
-  t.throws(
-    () => new Adapter({client, table: 'T', keyFields: ['name'], filterable: {year: {ops: ['eq'], type: 'date'}}}),
-    'bad type'
-  );
+  t.throws(() => new Adapter({client, table: 'T', keyFields: ['name'], filterable: {year: {ops: ['eq'], type: 'date'}}}), 'bad type');
   t.throws(() => new Adapter({client, table: 'T', keyFields: ['name'], filterable: {year: {ops: 'eq'}}}), 'ops must be array');
   t.throws(() => new Adapter({client, table: 'T', keyFields: ['name'], filterable: {year: {type: 'number'}}}), 'ops required');
 });
@@ -3270,7 +3287,9 @@ test('adapter.getListUnder: equivalent to getListByParams(buildKey(key))', async
   // Children-default: begins_with on base + trailing separator.
   t.matchString(queryCmd.input.KeyConditionExpression, /begins_with/);
   t.equal(
-    queryCmd.input.ExpressionAttributeValues[Object.keys(queryCmd.input.ExpressionAttributeValues).find(k => queryCmd.input.ExpressionAttributeValues[k] === 'TX|')],
+    queryCmd.input.ExpressionAttributeValues[
+      Object.keys(queryCmd.input.ExpressionAttributeValues).find(k => queryCmd.input.ExpressionAttributeValues[k] === 'TX|')
+    ],
     'TX|'
   );
 });
