@@ -52,7 +52,7 @@ test('applyBatch: chunks at 25 items', async t => {
 test('applyBatch: retries UnprocessedItems', async t => {
   let callCount = 0;
   const client = makeMockClient(async () => {
-    callCount++;
+    ++callCount;
     if (callCount === 1) {
       return {UnprocessedItems: {T: [{PutRequest: {Item: {id: 'retry'}}}]}};
     }
@@ -318,7 +318,7 @@ test('getBatch: returns items keyed by table', async t => {
 test('getBatch: retries UnprocessedKeys', async t => {
   let callCount = 0;
   const client = makeMockClient(async () => {
-    callCount++;
+    ++callCount;
     if (callCount === 1) {
       return {
         Responses: {T: [{id: '1', name: 'A'}]},

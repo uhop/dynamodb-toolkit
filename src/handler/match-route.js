@@ -10,8 +10,8 @@
 const splitPath = path => {
   let start = 0,
     end = path.length;
-  while (start < end && path[start] === '/') start++;
-  while (end > start && path[end - 1] === '/') end--;
+  while (start < end && path[start] === '/') ++start;
+  while (end > start && path[end - 1] === '/') --end;
   return path.slice(start, end).split('/');
 };
 

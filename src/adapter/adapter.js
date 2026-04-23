@@ -636,7 +636,7 @@ export class Adapter {
     for (const field of this.keyFields) {
       const v = item[field.name];
       if (v === undefined || v === null) break;
-      depth++;
+      ++depth;
     }
 
     if (depth === 0) return undefined;
@@ -668,7 +668,7 @@ export class Adapter {
       throw new Error('swapPrefix: srcPrefix and dstPrefix must name the same keyFields');
     }
     // Validate contiguous-from-start against keyFields, and same set of keys.
-    for (let i = 0; i < srcKeys.length; i++) {
+    for (let i = 0; i < srcKeys.length; ++i) {
       const name = this.keyFields[i].name;
       if (srcKeys[i] !== name || dstKeys[i] !== name) {
         throw new Error(
@@ -1464,7 +1464,7 @@ export class Adapter {
         const diff = this._diffForUpdate(rawItem, mapFn);
 
         if (diff.status === 'mapfn-dropped' || diff.status === 'noop') {
-          skipped++;
+          ++skipped;
           continue;
         }
 
@@ -1479,7 +1479,7 @@ export class Adapter {
           }
           try {
             await this.move(key, () => diff.mapped, options);
-            processed++;
+            ++processed;
           } catch (err) {
             failed.push({key, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
           }
@@ -1491,7 +1491,7 @@ export class Adapter {
         const observed = observedV === undefined || observedV === null ? undefined : Number(observedV);
         try {
           await this._dispatchEdit(key, diff.setOps, diff.removeOps, observed, options);
-          processed++;
+          ++processed;
         } catch (err) {
           // CCF in the versioned path means: either the item was
           // deleted (race) or the version changed (conflict). We can't
@@ -1503,7 +1503,7 @@ export class Adapter {
               conflicts.push({key, reason: 'VersionConflict', sdkError: err});
               continue;
             }
-            skipped++;
+            ++skipped;
             continue;
           }
           failed.push({key, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
@@ -1566,7 +1566,7 @@ export class Adapter {
         const revived = this.hooks.revive(rawItem);
         const mapped = mapFn(revived);
         if (!mapped) {
-          skipped++;
+          ++skipped;
           continue;
         }
         const prepared = this._prepareItem(mapped);
@@ -1590,7 +1590,7 @@ export class Adapter {
         // new content. Source stays intact (clone, not move).
         try {
           await this.client.send(new PutCommand({TableName: this.table, Item: prepared}));
-          processed++;
+          ++processed;
         } catch (err) {
           failed.push({key: srcKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
         }
@@ -1823,7 +1823,7 @@ export class Adapter {
         const revived = this.hooks.revive(rawItem);
         const mapped = mapFn(revived);
         if (!mapped) {
-          skipped++;
+          ++skipped;
           continue;
         }
         const prepared = this._prepareItem(mapped);
@@ -1833,7 +1833,7 @@ export class Adapter {
           await this.client.send(new PutCommand(putParams));
         } catch (err) {
           if (isConditionFailure(err)) {
-            skipped++;
+            ++skipped;
             continue;
           }
           failed.push({key: srcKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
@@ -1842,7 +1842,7 @@ export class Adapter {
 
         try {
           await this.client.send(new DeleteCommand({TableName: this.table, Key: srcKey}));
-          processed++;
+          ++processed;
         } catch (err) {
           failed.push({key: srcKey, reason: classifyMassOpError(err), details: err?.message, sdkError: err});
         }
@@ -1995,7 +1995,7 @@ export class Adapter {
       let processed = 0;
       for (const item of items) {
         await this.put(item, {force: true, params: options?.params});
-        processed++;
+        ++processed;
       }
       return {processed};
     }
@@ -2016,7 +2016,7 @@ export class Adapter {
       let processed = 0;
       for (const key of keys) {
         await this.delete(key);
-        processed++;
+        ++processed;
       }
       return {processed};
     }
@@ -2112,10 +2112,10 @@ export class Adapter {
       const withCondition = this._checkExistence(p, invert);
       try {
         await this.client.send(new PutCommand(withCondition));
-        processed++;
+        ++processed;
       } catch (err) {
         if (isConditionFailure(err)) {
-          skipped++;
+          ++skipped;
           continue;
         }
         // Non-CCF errors that are clearly per-item (ValidationException,

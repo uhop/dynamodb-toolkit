@@ -40,7 +40,7 @@ export const applyBatch = async (client, ...requests) => {
       const req = toBatchRequest(item);
       if (!batch[req.table]) batch[req.table] = [];
       batch[req.table].push(req.request);
-      added++;
+      ++added;
     }
     if (added) {
       await batchWrite(client, batch);

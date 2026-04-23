@@ -38,7 +38,7 @@ either its default export or a named \`adapter\` export.`;
 
 const parseArgs = argv => {
   const out = {flags: {}, positional: []};
-  for (let i = 0; i < argv.length; i++) {
+  for (let i = 0; i < argv.length; ++i) {
     const a = argv[i];
     if (a === '--strict') out.flags.strict = true;
     else if (a === '--require-descriptor') out.flags.requireDescriptor = true;

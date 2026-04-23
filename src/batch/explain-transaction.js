@@ -24,7 +24,7 @@ export const explainTransactionCancellation = (err, ...requests) => {
   collectActions(requests, descriptors);
 
   const failures = [];
-  for (let i = 0; i < reasons.length; i++) {
+  for (let i = 0; i < reasons.length; ++i) {
     const reason = reasons[i];
     if (!reason || !reason.Code || reason.Code === 'None') continue;
     failures.push({

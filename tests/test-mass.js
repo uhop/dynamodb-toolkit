@@ -44,7 +44,7 @@ const batchClient = (scanItems, batchHandler) =>
 test('getTotal: counts across pages', async t => {
   let callCount = 0;
   const client = makeMockClient(async () => {
-    callCount++;
+    ++callCount;
     if (callCount === 1) return {Count: 50, LastEvaluatedKey: {id: '50'}};
     return {Count: 11};
   });
@@ -58,7 +58,7 @@ test('getTotal: counts across pages', async t => {
 test('iterateList: yields pages', async t => {
   let callCount = 0;
   const client = makeMockClient(async () => {
-    callCount++;
+    ++callCount;
     if (callCount === 1) return {Items: [{id: '1'}], Count: 1, LastEvaluatedKey: {id: '1'}};
     return {Items: [{id: '2'}], Count: 1};
   });
@@ -242,7 +242,7 @@ test('paginateList: respects maxLimit', async t => {
 test('paginateList: negative offset returns empty data with total', async t => {
   let countCalls = 0;
   const client = makeMockClient(async () => {
-    countCalls++;
+    ++countCalls;
     return {Count: 42};
   });
   const result = await paginateList(client, {TableName: 'T'}, {offset: -1, limit: 10});
@@ -413,7 +413,7 @@ test('runPaged: empty pages do not invoke onPage', async t => {
   let onPageCalls = 0;
   const client = makeMockClient(async () => ({Items: []}));
   const result = await runPaged(client, {TableName: 'T'}, {}, items => {
-    onPageCalls++;
+    ++onPageCalls;
     return {processed: items.length};
   });
   t.equal(onPageCalls, 0);

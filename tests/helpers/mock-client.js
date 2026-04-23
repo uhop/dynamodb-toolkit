@@ -5,7 +5,7 @@
 export const makeMockClient = handler => {
   let callCount = 0;
   const send = async (...args) => {
-    callCount++;
+    ++callCount;
     return handler(...args);
   };
   send.mock = {

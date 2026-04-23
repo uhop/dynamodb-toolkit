@@ -560,7 +560,7 @@ test('hooks: validateItem invoked on post', async t => {
   const {adapter} = makeAdapter(async () => ({}), {
     hooks: {
       validateItem: async () => {
-        validateCount++;
+        ++validateCount;
       }
     }
   });
@@ -573,7 +573,7 @@ test('hooks: validateItem skipped for Raw items', async t => {
   const {adapter} = makeAdapter(async () => ({}), {
     hooks: {
       validateItem: async () => {
-        validateCount++;
+        ++validateCount;
       }
     }
   });
@@ -592,7 +592,7 @@ test('hooks: prepare skipped for Raw items', async t => {
     {
       hooks: {
         prepare: item => {
-          prepareCount++;
+          ++prepareCount;
           return {...item, prepared: true};
         }
       }
@@ -1257,7 +1257,7 @@ test('editListByParams: CCF on versionField → conflicts bucket', async t => {
     const n = cmd.constructor.name;
     if (n === 'QueryCommand' || n === 'ScanCommand') return {Items: [{name: 'A', _version: 1, hp: 10}]};
     if (n === 'UpdateCommand') {
-      call++;
+      ++call;
       const err = new Error('stale');
       err.name = 'ConditionalCheckFailedException';
       throw err;

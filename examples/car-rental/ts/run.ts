@@ -79,11 +79,11 @@ const walkthrough = async (client: DDoc): Promise<void> => {
   let boatCount = 0;
   let maxYear = 0;
   for (const item of page.data as AnyRecord[]) {
-    if (isState(item)) stateCount++;
+    if (isState(item)) ++stateCount;
     else if (isCar(item)) {
-      carCount++;
+      ++carCount;
       if (item.year > maxYear) maxYear = item.year;
-    } else if (isBoat(item)) boatCount++;
+    } else if (isBoat(item)) ++boatCount;
   }
   info(`states=${stateCount} cars=${carCount} boats=${boatCount}; newest car year=${maxYear}`);
   if (stateCount !== seedStates.length) fail(`expected ${seedStates.length} states, saw ${stateCount}`);
