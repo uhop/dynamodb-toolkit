@@ -1,3 +1,4 @@
+// @ts-self-types="./index.d.ts"
 export {getPath} from './get-path.js';
 export {setPath} from './set-path.js';
 export {deletePath} from './delete-path.js';

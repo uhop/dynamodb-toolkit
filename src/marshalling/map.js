@@ -1,3 +1,4 @@
+// @ts-self-types="./map.d.ts"
 // Map ↔ plain-object marshalling for DynamoDB's M (map) attribute type.
 // The DocumentClient accepts plain `{}`; `Map` instances are not
 // converted automatically. Apps that use `Map` in-memory for explicit

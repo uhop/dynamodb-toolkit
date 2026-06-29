@@ -1,3 +1,4 @@
+// @ts-self-types="./condition.d.ts"
 // Build a ConditionExpression for DynamoDB from a declarative clause tree.
 
 const isInteger = /^\d+$/;

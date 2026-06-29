@@ -1,3 +1,4 @@
+// @ts-self-types="./key-condition.d.ts"
 // Build a KeyConditionExpression clause for DynamoDB's Query operation.
 // Adapter-agnostic primitive — accepts a fully-prepared value string; the
 // caller is responsible for joining keyFields values into the right shape.

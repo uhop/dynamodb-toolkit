@@ -1,3 +1,4 @@
+// @ts-self-types="./build-list-options.d.ts"
 // Build `ListOptions` for `adapter.getList` / `adapter._buildListParams` from a
 // parsed query map. Composes the REST-core parsers with policy-driven caps so
 // every adapter gets the same pagination / filter / fields plumbing.

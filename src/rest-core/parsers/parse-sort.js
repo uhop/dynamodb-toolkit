@@ -1,3 +1,4 @@
+// @ts-self-types="./parse-sort.d.ts"
 // Parse a `sort` query value: '-name' or 'name' → {field, direction}.
 // Leading '-' means descending. Empty/missing input → null.
 // Multi-field input ('name,-other') returns the first; the chain field

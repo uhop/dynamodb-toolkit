@@ -1,3 +1,4 @@
+// @ts-self-types="./get-path.d.ts"
 // Traverse an object by a dotted path, returning the value or a default.
 // Walks own enumerable properties only — inherited prototype-chain values
 // resolve to `defaultValue` rather than leaking inherited methods / fields.

@@ -1,3 +1,4 @@
+// @ts-self-types="./clean-params.d.ts"
 // Remove unused ExpressionAttributeNames and ExpressionAttributeValues from params.
 
 const expressionFields = ['KeyConditionExpression', 'ConditionExpression', 'UpdateExpression', 'ProjectionExpression', 'FilterExpression'];

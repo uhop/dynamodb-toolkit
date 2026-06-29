@@ -1,3 +1,4 @@
+// @ts-self-types="./policy.d.ts"
 // Default REST policy: prefixes, envelope keys, status codes, paging defaults.
 // Consumers override per-route or globally on the handler.
 

@@ -1,3 +1,4 @@
+// @ts-self-types="./parse-filter.d.ts"
 // Parse `<op>-<field>=<value>` query parameters into a structured clause
 // list. Pure shape extraction — no type coercion, no allowlist check. The
 // adapter's `applyFilter` compiles these clauses into FilterExpression /

@@ -1,3 +1,4 @@
+// @ts-self-types="./projection.d.ts"
 // Build a ProjectionExpression for DynamoDB, handling de-duplication and attribute aliasing.
 
 import {normalizeFields} from '../paths/normalize-fields.js';

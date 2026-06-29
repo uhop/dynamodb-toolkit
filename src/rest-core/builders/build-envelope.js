@@ -1,3 +1,4 @@
+// @ts-self-types="./build-envelope.d.ts"
 // Build a paginated response envelope. Keys are policy-configurable.
 // Default shape: {data, total, offset, limit}.
 

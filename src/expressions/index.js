@@ -1,3 +1,4 @@
+// @ts-self-types="./index.d.ts"
 export {buildUpdate} from './update.js';
 export {addProjection} from './projection.js';
 export {buildSearch, buildFilterByExample} from './search.js';

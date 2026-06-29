@@ -1,3 +1,4 @@
+// @ts-self-types="./ensure-table.d.ts"
 // planTable / ensureTable: ADD-only table provisioning from an adapter declaration.
 //
 // `planTable` is read-only — diffs the declaration against DescribeTable
@@ -173,30 +174,12 @@ export const executePlan = async (client, plan) => {
   return {executed};
 };
 
-/**
- * planTable(adapterOrDeclaration)
- *
- * Read-only entry point. Fetches `DescribeTable`, diffs against the
- * declaration, and returns the plan `{tableName, steps, summary}`. Never
- * writes. Use this to preview or display what `ensureTable` would do.
- */
 export const planTable = async adapterOrDeclaration => {
   const decl = extractDeclaration(adapterOrDeclaration);
   const live = await describeTable(decl.client, decl.table);
   return planAddOnly(decl, live);
 };
 
-/**
- * ensureTable(adapterOrDeclaration)
- *
- * Compose `planTable` with `executePlan`: computes the plan, runs it, and
- * returns `{plan, executed, descriptorWritten?}`. Writes the descriptor
- * record after execution when `descriptorKey` is declared — including on
- * a no-op plan, so existing IaC-managed tables can opt into toolkit
- * management without a fresh create.
- *
- * For the read-only view, call `planTable` instead.
- */
 export const ensureTable = async adapterOrDeclaration => {
   const decl = extractDeclaration(adapterOrDeclaration);
   const live = await describeTable(decl.client, decl.table);

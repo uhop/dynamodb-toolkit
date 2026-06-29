@@ -94,18 +94,20 @@ The published tarball ships **`src/`, `bin/`, `README.md`, `LICENSE`, `llms.txt`
 ## Code style
 
 - **ESM only** — `import` / `export`, `"type": "module"` in `package.json`. No CommonJS, no transpiler.
-- **`.js` + hand-written `.d.ts` sidecars** — not true TypeScript. Both files live next to each other (`foo.js` ↔ `foo.d.ts`). Every exported symbol carries JSDoc on the `.d.ts` side for IDE hover.
+- **`.js` + hand-written `.d.ts` sidecars** — not true TypeScript. Both files live next to each other (`foo.js` ↔ `foo.d.ts`). The `.d.ts` is the sole source of types and docs; every `.js` opens with `// @ts-self-types="./foo.d.ts"` so IDE hover and importers defer to the sidecar. `.js` files carry no JSDoc except the load-bearing inline `/** @type */` / `/** @returns */` annotations the implementation needs to type-check.
 - **Node 20+** target. Also runs on the latest Bun and Deno.
 - **No `node:*` runtime imports in `src/`.** Type-only `import type {...} from 'node:http'` in `.d.ts` is fine; runtime code stays portable. (`tests/` and `bin/` may use `node:*` freely.)
 - **No `any` in `.d.ts`.** Use proper shapes or `unknown`.
 - **Arrow functions + FP style preferred** for standalone helpers; classes only when long-lived state earns one (`Adapter`, `Raw`, error classes).
 - **Prettier** enforces formatting (`.prettierrc`). Run `npm run lint:fix` before commits.
-- **Default to no comments.** Add a one-line comment only when the WHY is non-obvious.
+- **No narrating comments.** Comments are short _why_-markers only — a non-trivial decision or constraint, an algorithm reference, or required JSDoc. Never narrate _what_ the code does; the bar is _why_, never _what_.
 - **Two tsconfig files:** `tsconfig.json` strict (for `.d.ts` sidecars), `tsconfig.check.json` lenient + `checkJs` (catches unused vars / undeclared refs in `.js`).
 - **Pre-increment when the value is discarded** (`++i` / `--i` not `i++` / `i--`). Cross-project style rule.
 - **GIGO, no runtime arg-shape validation.** TS is the contract; JS fails naturally when violated. Don't add `typeof x !== 'function'` guards for TS-typed arguments.
 
 ## Architecture
+
+→ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the standalone architecture reference (module map, write/read-path invariants, layout).
 
 `Adapter` is the composition root over orthogonal modules. It owns long-lived state (client, table, declarative schema, hooks) but delegates real work to the sub-exports.
 
@@ -183,9 +185,7 @@ Pass via the constructor `options.hooks` or override the corresponding methods o
 
 - **Zero runtime dependencies.** Anything in `package.json` `dependencies` is wrong. The SDK is a `peerDependencies` entry; `tape-six` / `prettier` / `typescript` / `@types/node` / `@aws-sdk/*` (for local dev) are `devDependencies`.
 - **Do not modify `wiki/`** unless explicitly asked — it's a separate git submodule. When asked, work on a feature branch inside the submodule; Eugene commits primary-branch history manually.
-- **Do not self-commit to master / main** unless explicitly asked. Stage + report; Eugene commits.
-- **Do not add or remove comments** unless explicitly asked.
-- **Do not introduce a build step, transpiler, or bundler.** The package ships source as-is.
+- **Do not self-commit to master / main** unless explicitly asked. Stage + report; Eugene commits.- **Do not introduce a build step, transpiler, or bundler.** The package ships source as-is.
 - **Do not import from `aws-sdk` (v2) anywhere.** v3 is built exclusively on `@aws-sdk/*`.
 - **Do not import `node:*` modules at runtime in `src/`.** Type-only imports in `.d.ts` are fine. Tests and `bin/` may use `node:*` freely.
 - **Run the full check matrix before claiming work is ready.** `npm run lint && npm run ts-check && npm run js-check && npm test && npm run test:bun && npm run test:deno` + `npm run ts-test`.

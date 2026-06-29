@@ -1,3 +1,4 @@
+// @ts-self-types="./raw.d.ts"
 // Raw<T> bypass marker — wraps an item to skip prepare/revive hooks.
 
 export class Raw {

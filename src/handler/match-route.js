@@ -1,3 +1,4 @@
+// @ts-self-types="./match-route.d.ts"
 // Match an HTTP method + URL pathname to one of the standard route shapes.
 // Returns a discriminated result; caller dispatches.
 //

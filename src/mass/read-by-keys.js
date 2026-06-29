@@ -1,3 +1,4 @@
+// @ts-self-types="./read-by-keys.d.ts"
 // Read items by a list of keys via BatchGetItem and return them in the caller's
 // input-key order, length-preserving (undefined at positions whose key had no
 // matching item). This is a bulk-individual-read helper — the plural form of

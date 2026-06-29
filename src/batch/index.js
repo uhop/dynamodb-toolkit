@@ -1,3 +1,4 @@
+// @ts-self-types="./index.d.ts"
 export {applyBatch} from './apply-batch.js';
 export {applyTransaction, TRANSACTION_LIMIT} from './apply-transaction.js';
 export {explainTransactionCancellation} from './explain-transaction.js';

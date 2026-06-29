@@ -1,3 +1,4 @@
+// @ts-self-types="./run-paged.d.ts"
 // Resumable paging primitive for mass ops.
 //
 // Walks Query/Scan pages, invokes a per-page handler, accumulates a

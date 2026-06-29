@@ -1,3 +1,4 @@
+// @ts-self-types="./adapter.d.ts"
 // Adapter — composition root tying expressions, batch, mass, paths, and hooks together.
 
 import {GetCommand, PutCommand, DeleteCommand} from '@aws-sdk/lib-dynamodb';
@@ -481,18 +482,6 @@ export class Adapter {
 
   // --- built-in prepare / revive steps (gated by technicalPrefix) ---
 
-  /**
-   * Validates incoming user fields (reject any starting with
-   * `technicalPrefix`) and computes adapter-managed fields: the structural
-   * key (from `keyFields`, contiguous-from-start rule) and searchable
-   * mirrors. Runs before the user's `prepare` hook.
-   *
-   * For `put` / `post` (isPatch falsy), the structural key is written from
-   * the full item's keyFields values. For `patch`, the structural key is
-   * not touched (it's a primary-key attribute; DynamoDB rejects mutation
-   * via `UpdateExpression`). Searchable mirrors ARE written for any
-   * searchable field present in a patch payload.
-   */
   _builtInPrepare(item, isPatch) {
     if (!item || typeof item !== 'object') return item;
     // Fast path: nothing declared, nothing to do — byte-for-byte identical
@@ -557,17 +546,6 @@ export class Adapter {
     return out;
   }
 
-  /**
-   * Strip every field whose name starts with `technicalPrefix` from the raw
-   * item before the user's `revive` hook sees it. Keeps adapter-managed
-   * implementation details off the wire. When `technicalPrefix` is unset,
-   * this is a pass-through.
-   *
-   * Exception: `versionField` is preserved — callers round-trip it
-   * through read-modify-write for optimistic concurrency. Writing it
-   * back is how the toolkit knows which version the caller saw; the
-   * auto-condition and auto-increment ride on its value.
-   */
   _builtInRevive(rawItem) {
     if (!this.technicalPrefix || !rawItem || typeof rawItem !== 'object') return rawItem;
     const prefix = this.technicalPrefix;
@@ -580,20 +558,6 @@ export class Adapter {
     return out;
   }
 
-  /**
-   * Compose the structural-key field on a read-key shape so DynamoDB
-   * GetItem / DeleteItem / UpdateItem receive `{pk, sk}` where sk is the
-   * structural key. Runs before the user's `prepareKey` hook.
-   *
-   * When the key is targeted at a secondary index (`index` set), this is
-   * a pass-through — the GSI/LSI has its own key schema (declared in
-   * `this.indices[index]`) that the user's `prepareKey` hook is
-   * responsible for producing until declarative GSI-key composition
-   * lands in a follow-up.
-   *
-   * When `structuralKey` isn't declared (single-field `keyFields`), this
-   * is a pass-through — the sole keyField IS the sort/partition key.
-   */
   _builtInPrepareKey(key, index) {
     if (!key || typeof key !== 'object') return key;
     if (index) return key;
@@ -613,16 +577,6 @@ export class Adapter {
 
   // --- type detection ---
 
-  /**
-   * Return the type label for an item, using (in priority order):
-   *   1. `typeDiscriminator.name` value when present on the item.
-   *   2. `typeLabels[depth - 1]` where depth = count of contiguous-from-start
-   *      defined `keyFields` on the item, when `typeLabels` is declared.
-   *   3. Raw depth number when no `typeLabels` is declared.
-   *
-   * Returns `undefined` when the item has no recognised type-signalling
-   * fields at all (empty item, no discriminator, no keyFields present).
-   */
   typeOf(item) {
     if (!item) return undefined;
 
@@ -646,15 +600,6 @@ export class Adapter {
 
   // --- canned mapFn builders (Q23 follow-up) ---
 
-  /**
-   * Build a mapFn that swaps a leading keyFields prefix. Given
-   * `srcPrefix = {state: 'TX'}` and `dstPrefix = {state: 'FL'}`, the returned
-   * function rewrites each item's `state` field from `'TX'` to `'FL'`, leaving
-   * all other keyFields and non-key data intact. Throws at construction when
-   * the prefixes aren't contiguous-from-start or don't have matching keys,
-   * and throws at apply time when an item doesn't actually match `srcPrefix`
-   * (sign of a mis-scoped query upstream).
-   */
   swapPrefix(srcPrefix, dstPrefix) {
     if (!srcPrefix || typeof srcPrefix !== 'object' || !dstPrefix || typeof dstPrefix !== 'object') {
       throw new Error('swapPrefix: both srcPrefix and dstPrefix must be objects');
@@ -697,13 +642,6 @@ export class Adapter {
     };
   }
 
-  /**
-   * Build a mapFn that merges a static overlay object into each item.
-   * `{...item, ...obj}` — `obj`'s values win. If `obj` touches a keyField,
-   * the destination structural key shifts accordingly. Validates that the
-   * overlay doesn't set any keyField to `undefined` / `null` (which would
-   * break destination-key formation).
-   */
   overlayFields(obj) {
     if (!obj || typeof obj !== 'object') {
       throw new Error('overlayFields: overlay must be an object');
@@ -721,11 +659,6 @@ export class Adapter {
 
   // --- key builders (A1' / Q12) ---
 
-  /**
-   * Format a single keyFields value per its declared field: numbers get
-   * zero-padded to `width` (required in composite keyFields), strings pass
-   * through, binary values are coerced via String().
-   */
   _formatKeyComponent(field, value) {
     if (field.type === 'number') {
       if (field.width !== undefined) {
@@ -736,29 +669,6 @@ export class Adapter {
     return String(value);
   }
 
-  /**
-   * Build a KeyConditionExpression for a Query against this Adapter's main
-   * table. Always list-oriented — defaults to matching descendants under
-   * the supplied key values. For single-record reads, use `getByKey`.
-   *
-   * @param values Object keyed by `keyFields` names (contiguous-from-start).
-   * @param options
-   *   - `partial` (string) — narrow to items whose next tier starts with
-   *     this prefix. E.g., `buildKey({state: 'TX'}, {partial: 'Dal'})` →
-   *     items under TX at `_sk` beginning with `TX|Dal`.
-   *   - `self` (boolean) — additionally include the row AT the supplied
-   *     key (parent + descendants). Uses the separator character to
-   *     distinguish self vs. descendants; assumes sibling values at the
-   *     same tier are not prefixes of each other (always true for
-   *     zero-padded numeric keyFields; user's responsibility for string
-   *     values).
-   *   - `indexName` — reserved for a future declarative-GSI surface
-   *     (throws today).
-   *   - `partial` takes precedence over `self` when both are set;
-   *     combining them would require two Queries.
-   * @param params Optional existing params to merge into.
-   * @returns The same `params` with `KeyConditionExpression` set.
-   */
   buildKey(values, options = {}, params = {}) {
     if (!values || typeof values !== 'object') {
       throw new Error('buildKey(values): values must be an object keyed by keyFields names');
@@ -1015,12 +925,6 @@ export class Adapter {
     return Boolean(idx && this.indices[idx]?.indirect);
   }
 
-  /**
-   * Refuse strong-consistent reads against a declared GSI (DynamoDB rejects
-   * `ConsistentRead: true` on GSI Query — GSIs are eventually consistent
-   * by design). LSIs support strong consistency and are left alone;
-   * undeclared indices are deferred to DynamoDB (no local knowledge).
-   */
   _checkConsistentRead(params) {
     if (!params?.ConsistentRead) return;
     const idx = params.IndexName;
@@ -1029,12 +933,6 @@ export class Adapter {
     if (spec && spec.type === 'gsi') throw new ConsistentReadOnGSIRejected(idx);
   }
 
-  /**
-   * Resolve the declared type of a field for filter value coercion.
-   * Precedence: `filterable[field].type` (explicit E6 shape) → keyFields
-   * → indices (pk then sk). Fields not declared anywhere fall back to
-   * `'string'` (DynamoDB's default attribute shape).
-   */
   _typeOfField(name) {
     if (this.filterableTypes[name]) return this.filterableTypes[name];
     for (const f of this.keyFields) if (f.name === name) return f.type;
@@ -1059,23 +957,6 @@ export class Adapter {
     return value;
   }
 
-  /**
-   * Compile parsed `<op>-<field>=<value>` clauses into `params`. Validates
-   * each clause against the adapter's `filterable` allowlist; coerces
-   * value(s) to the declared field type; auto-promotes index-compatible
-   * clauses to `KeyConditionExpression` when the target (base table or
-   * `params.IndexName`) has matching pk/sk; everything else lands in
-   * `FilterExpression`. Counter-based placeholders live alongside any
-   * existing aliases so merging with other builders is safe.
-   *
-   * Clause shape (polymorphic by op):
-   *   - no-value ops (`ex`, `nx`): `{field, op}` — no `value`
-   *   - multi-value ops (`in`, `btw`): `{field, op, value: [...]}`
-   *   - single-value ops: `{field, op, value: scalar}`
-   *
-   * @throws `BadFilterField` when a clause names a field not in `filterable`.
-   * @throws `BadFilterOp` when the op isn't allowlisted for that field.
-   */
   applyFilter(params, clauses) {
     if (!clauses || clauses.length === 0) return params;
     // Validate allowlist first — fail fast on the whole request.
@@ -1183,18 +1064,6 @@ export class Adapter {
     return params;
   }
 
-  /**
-   * Find the declared secondary index whose sort key (`sk.name`) matches
-   * the requested sort field. Prefers LSI over GSI when both match.
-   * Throws `NoIndexForSortField` when no declared index matches — the
-   * toolkit does not in-memory-sort (per the no-client-side-list-
-   * manipulation principle).
-   *
-   * @param field Sort field name (from `?sort=<field>` or programmatic
-   *   `options.sort`).
-   * @returns The name of the matching index.
-   * @throws `NoIndexForSortField` when nothing matches.
-   */
   findIndexForSort(field) {
     let lsiMatch;
     let gsiMatch;
@@ -1934,12 +1803,6 @@ export class Adapter {
     return this.getListByParams(params, options);
   }
 
-  /**
-   * Sugar for the common "list descendants under a partial key" pattern.
-   * Equivalent to `getListByParams(buildKey(partialKey), options)`.
-   * For `{self: true}` or `{partial}` shapes, compose `buildKey` +
-   * `getListByParams` directly.
-   */
   async getListUnder(partialKey, options) {
     const params = this.buildKey(partialKey);
     params.TableName = this.table;

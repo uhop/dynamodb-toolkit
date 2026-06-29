@@ -1,3 +1,4 @@
+// @ts-self-types="./write-items.d.ts"
 // Bulk-individual write helper — the caller supplies N items, the toolkit
 // batches them via BatchWriteItem with an optional per-item mapFn. Not a
 // list operation (the DB doesn't produce the set); plural form of `put`.

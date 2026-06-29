@@ -1,3 +1,4 @@
+// @ts-self-types="./random.d.ts"
 // Random string generator for unique suffixes.
 
 export const random = (length = 8) => {

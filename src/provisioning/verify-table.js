@@ -1,3 +1,4 @@
+// @ts-self-types="./verify-table.d.ts"
 // verifyTable: compare the declared schema against the live table.
 //
 // Returns `{ok, diffs}` by default — callers log + continue. Pass
@@ -124,18 +125,6 @@ export const diffTable = (decl, live) => {
   return diffs;
 };
 
-/**
- * verifyTable(adapterOrDeclaration, options?)
- *
- * - Compares declared key schema + GSI/LSI specs against DescribeTable.
- * - Billing / stream config compared only when declared on the adapter.
- * - When `descriptorKey` is declared, reads the reserved-record descriptor
- *   and diffs it against the current declaration. Absent descriptor is a
- *   `warn` only when `{requireDescriptor: true}` is passed — otherwise
- *   silent (IaC-managed tables have no descriptor by default).
- * - `{throwOnMismatch: true}` → throws `TableVerificationFailed` when any
- *   `error`-severity diff is present. Otherwise returns `{ok, diffs}`.
- */
 export const verifyTable = async (adapterOrDeclaration, options = {}) => {
   const decl = extractDeclaration(adapterOrDeclaration);
   const live = await describeTable(decl.client, decl.table);

@@ -1,3 +1,4 @@
+// @ts-self-types="./hooks.d.ts"
 // Default Adapter hook implementations. All identity-shaped except revive (subsetObject).
 
 import {subsetObject} from '../paths/subset-object.js';

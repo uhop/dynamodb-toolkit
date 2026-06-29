@@ -1,3 +1,4 @@
+// @ts-self-types="./resolve-sort.d.ts"
 // Resolve a `?sort=name` / `?sort=-name` query value to `{index, descending}`.
 //
 // `sortableIndices` maps field names to GSI/LSI names (e.g.

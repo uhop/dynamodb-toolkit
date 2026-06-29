@@ -1,3 +1,4 @@
+// @ts-self-types="./backoff.d.ts"
 // Exponential back-off with full jitter.
 
 const jitter = n => Math.floor(n * Math.random());

@@ -1,3 +1,4 @@
+// @ts-self-types="./descriptor.d.ts"
 // Opt-in reserved-record descriptor. Writes a JSON snapshot of the
 // adapter declaration at `{keyFields[0]: descriptorKey}` (structuralKey
 // derived from that single component when composite). Detects drift

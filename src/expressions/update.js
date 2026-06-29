@@ -1,3 +1,4 @@
+// @ts-self-types="./update.d.ts"
 // Build an UpdateExpression for DynamoDB from a patch object and options.
 
 const isInteger = /^\d+$/;

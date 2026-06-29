@@ -1,3 +1,4 @@
+// @ts-self-types="./iterate-list.d.ts"
 // Async generator that yields raw DynamoDB response pages.
 
 import {cleanParams} from '../expressions/clean-params.js';

@@ -1,3 +1,4 @@
+// @ts-self-types="./read-json-body.d.ts"
 // Node-stream JSON body reader with a byte-size cap.
 //
 // Tracks `size` in bytes (measured off each `Buffer` chunk, not UTF-16 code

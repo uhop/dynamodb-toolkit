@@ -1,3 +1,4 @@
+// @ts-self-types="./apply-patch.d.ts"
 // Apply a patch object to a target, with optional delete paths.
 
 import {setPath} from './set-path.js';

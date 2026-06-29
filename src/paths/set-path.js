@@ -1,3 +1,4 @@
+// @ts-self-types="./set-path.d.ts"
 // Set a value at a dotted path, creating intermediate objects as needed.
 
 // Guard against prototype-pollution: user-supplied paths may contain '__proto__',

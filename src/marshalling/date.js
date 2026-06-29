@@ -1,3 +1,4 @@
+// @ts-self-types="./date.d.ts"
 // Date marshalling — two canonical encodings. Callers pick ONE per field
 // and stick with it for the field's lifetime. No generic `marshallDate`:
 // silently choosing ISO vs epoch behind a single name is how

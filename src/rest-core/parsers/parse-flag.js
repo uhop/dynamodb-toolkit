@@ -1,3 +1,4 @@
+// @ts-self-types="./parse-flag.d.ts"
 // Parse a truthy query flag: 'yes', 'true', '1', 'on' (case-insensitive) → true; everything else → false.
 
 const positive = new Set(['yes', 'true', '1', 'on']);

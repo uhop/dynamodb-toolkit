@@ -1,3 +1,4 @@
+// @ts-self-types="./cursor.d.ts"
 // Opaque base64 cursor for resumable mass operations.
 //
 // The cursor is the only resumption signal a caller needs to plumb through.

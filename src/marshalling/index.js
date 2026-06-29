@@ -1,3 +1,4 @@
+// @ts-self-types="./index.d.ts"
 // Marshalling helpers — thin transforms between in-memory JS types and
 // DynamoDB attribute shapes. Callers compose them in their `prepare` /
 // `revive` hooks on the Adapter; the toolkit never applies them

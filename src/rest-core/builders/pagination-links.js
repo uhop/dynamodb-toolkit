@@ -1,3 +1,4 @@
+// @ts-self-types="./pagination-links.d.ts"
 // Compute prev/next pagination links from offset/limit/total + a URL builder.
 // urlBuilder: ({offset, limit}) => string. Returns {prev: string|null, next: string|null}.
 // Without a urlBuilder this returns null for both — caller can construct URLs separately.

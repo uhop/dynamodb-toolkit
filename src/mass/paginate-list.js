@@ -1,3 +1,4 @@
+// @ts-self-types="./paginate-list.d.ts"
 // Offset/limit pagination with filter accumulation.
 // When FilterExpression is present, DynamoDB's Limit is pre-filter — we must accumulate matches.
 

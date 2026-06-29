@@ -1,3 +1,4 @@
+// @ts-self-types="./handler.d.ts"
 // node:http request handler — wires rest-core to a (req, res) function.
 // Duck-types req/res so the handler is runtime-neutral (Node, Bun, Deno's std/http compat).
 

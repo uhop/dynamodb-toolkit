@@ -1,3 +1,4 @@
+// @ts-self-types="./apply-batch.d.ts"
 // Chunk and execute BatchWriteItem requests with retry.
 
 import {batchWrite} from './batch-write.js';

@@ -1,3 +1,4 @@
+// @ts-self-types="./seq.d.ts"
 // Sequential counter.
 
 let counter = 0;

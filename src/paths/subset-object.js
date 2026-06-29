@@ -1,3 +1,4 @@
+// @ts-self-types="./subset-object.d.ts"
 // Return a new object containing only the fields at the specified paths.
 
 import {normalizeFields} from './normalize-fields.js';

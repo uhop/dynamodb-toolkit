@@ -1,3 +1,4 @@
+// @ts-self-types="./index.d.ts"
 export {paginateList} from './paginate-list.js';
 export {iterateList, iterateItems} from './iterate-list.js';
 export {readList, readListGetItems} from './read-list.js';

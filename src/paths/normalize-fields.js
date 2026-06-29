@@ -1,3 +1,4 @@
+// @ts-self-types="./normalize-fields.d.ts"
 // Normalize field specifications to a string array, applying projectionFieldMap if provided.
 // Returns null when no fields are requested (caller interprets as "project everything"),
 // including for strings that degenerate to zero segments after trimming (e.g. ',,,').

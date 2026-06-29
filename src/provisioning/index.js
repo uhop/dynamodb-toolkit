@@ -1,3 +1,4 @@
+// @ts-self-types="./index.d.ts"
 // dynamodb-toolkit/provisioning — module entry.
 //
 // Table-lifecycle support driven by the adapter declaration. Keeps

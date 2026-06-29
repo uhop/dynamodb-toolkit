@@ -1,3 +1,4 @@
+// @ts-self-types="./validate-write-body.d.ts"
 // Validate a parsed JSON body for write-shaped routes (POST, PUT, PATCH).
 //
 // Write routes spread the body into the outbound item (`{...body, ...key}`).

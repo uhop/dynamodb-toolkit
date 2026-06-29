@@ -1,3 +1,4 @@
+// @ts-self-types="./get-batch.d.ts"
 // Chunk and execute BatchGetItem requests with retry, returning collected results.
 
 import {batchGet} from './batch-get.js';

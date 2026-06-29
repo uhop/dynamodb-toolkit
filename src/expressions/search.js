@@ -1,3 +1,4 @@
+// @ts-self-types="./search.d.ts"
 // Build a FilterExpression for DynamoDB using searchable mirror columns.
 
 import {normalizeFields} from '../paths/normalize-fields.js';

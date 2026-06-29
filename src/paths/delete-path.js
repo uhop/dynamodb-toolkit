@@ -1,3 +1,4 @@
+// @ts-self-types="./delete-path.d.ts"
 // Delete a value at a dotted path. Returns true if deletion occurred, false otherwise.
 
 // Guard against prototype-pollution: refuse to walk or delete through '__proto__',

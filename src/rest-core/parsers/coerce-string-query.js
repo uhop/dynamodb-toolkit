@@ -1,3 +1,4 @@
+// @ts-self-types="./coerce-string-query.d.ts"
 // Coerce a framework query object into `Record<string, string>` — filter values
 // to strings only. Useful when the framework's qs parser hands back nested
 // objects or arrays (Express's `qs`, Koa's `ctx.query`, etc.). Non-string

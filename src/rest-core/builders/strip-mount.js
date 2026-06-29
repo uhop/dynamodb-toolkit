@@ -1,3 +1,4 @@
+// @ts-self-types="./strip-mount.d.ts"
 // Strip a configured mount path from a request pathname.
 //
 // Returns the tail (starting with '/') when `pathname` begins with `mountPath`,

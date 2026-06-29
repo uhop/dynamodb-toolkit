@@ -1,3 +1,4 @@
+// @ts-self-types="./parse-patch.d.ts"
 // Split a wire-format patch body into {patch, options} for buildUpdate.
 // Body shape: {field: value, _delete: [...], _separator: '.', _arrayOps: [...]}.
 // metaPrefix configurable; default '_'.

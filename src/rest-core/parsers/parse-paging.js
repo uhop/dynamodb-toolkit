@@ -1,3 +1,4 @@
+// @ts-self-types="./parse-paging.d.ts"
 // Parse offset/limit query values with sane defaults and a hard ceiling.
 // Negative offset → 0; non-numeric → defaults; over-cap limit clamped to maxLimit.
 // Offset is capped to `maxOffset` (default 100_000) to prevent DoS via ?offset=1e15

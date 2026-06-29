@@ -1,3 +1,4 @@
+// @ts-self-types="./url.d.ts"
 // URL ↔ string. DynamoDB stores URLs as strings; in-memory they're
 // `URL` instances for typed field access and validation. These
 // helpers are round-trip clean: `unmarshall(marshall(u)).href === u.href`.

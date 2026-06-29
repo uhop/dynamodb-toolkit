@@ -1,3 +1,4 @@
+// @ts-self-types="./parse-search.d.ts"
 // Parse a `search` query value into {query, mode?}. Mode defaults are caller's call.
 // Query truncated to `options.maxLength` chars (default 1024) to bound CPU work
 // during casefold / downstream expression building.

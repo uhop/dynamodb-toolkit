@@ -1,3 +1,4 @@
+// @ts-self-types="./apply-transaction.d.ts"
 // Execute a TransactWriteItems request. No chunking — transactions are atomic.
 
 import {TransactWriteCommand} from '@aws-sdk/lib-dynamodb';

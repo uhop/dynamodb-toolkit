@@ -1,3 +1,4 @@
+// @ts-self-types="./index.d.ts"
 // HTTP handler — node:http request handler wiring rest-core to (req, res) =>.
 
 export {createHandler} from './handler.js';

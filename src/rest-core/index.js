@@ -1,3 +1,4 @@
+// @ts-self-types="./index.d.ts"
 // REST core — parsers, builders, policy. Framework-agnostic.
 
 export {parseFields} from './parsers/parse-fields.js';

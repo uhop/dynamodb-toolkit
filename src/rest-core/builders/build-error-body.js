@@ -1,3 +1,4 @@
+// @ts-self-types="./build-error-body.d.ts"
 // Build a standard error envelope: {code, message}. Extensible via options.
 
 export const buildErrorBody = (err, options = {}) => {

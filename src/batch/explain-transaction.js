@@ -1,3 +1,4 @@
+// @ts-self-types="./explain-transaction.d.ts"
 // Map TransactionCanceledException.CancellationReasons back to input descriptors.
 
 const collectActions = (requests, out) => {

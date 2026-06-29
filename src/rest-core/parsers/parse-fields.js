@@ -1,3 +1,4 @@
+// @ts-self-types="./parse-fields.d.ts"
 // Parse a `fields` query value: 'name,climate' or ['name', 'climate'] → string[] | null.
 // Returns null when input is missing/empty (caller should not project).
 // Output length capped at `options.maxItems` (default 1000) to prevent DoS via

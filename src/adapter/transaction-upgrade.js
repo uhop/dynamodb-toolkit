@@ -1,3 +1,4 @@
+// @ts-self-types="./transaction-upgrade.d.ts"
 // Auto-upgrade single ops to TransactWriteItems when checkConsistency returns extra actions.
 // If checks is null, executes the single op via the appropriate Command and returns its result.
 // If checks is an array (possibly empty), executes everything as one TransactWriteItems call.

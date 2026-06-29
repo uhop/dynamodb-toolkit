@@ -1,3 +1,4 @@
+// @ts-self-types="./declaration.d.ts"
 // Normalize an Adapter instance or an adapter-shaped declaration object
 // into the shape the provisioning helpers consume. Provisioning never
 // runs hook composition or hits DynamoDB on its own — it needs the

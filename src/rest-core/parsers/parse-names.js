@@ -1,3 +1,4 @@
+// @ts-self-types="./parse-names.d.ts"
 // Parse a `names` query value or request body into a string[]. Comma-separated string,
 // JSON array body, or already-an-array all accepted. Empty / missing → [].
 // Output length capped at `options.maxItems` (default 1000) to prevent DoS via

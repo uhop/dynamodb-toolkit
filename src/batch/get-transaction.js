@@ -1,3 +1,4 @@
+// @ts-self-types="./get-transaction.d.ts"
 // Execute a TransactGetItems request.
 
 import {TransactGetCommand} from '@aws-sdk/lib-dynamodb';
