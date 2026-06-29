@@ -730,7 +730,7 @@ hooks: {
 }
 ```
 
-## 10. Hook builders (`dynamodb-toolkit/hooks`)
+## 10. Hook builders (`dynamodb-toolkit`)
 
 Re-exported from the root.
 
