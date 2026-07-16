@@ -16,6 +16,10 @@
     "./handler": "./src/handler/index.js",
     "./marshalling": "./src/marshalling/index.js",
     "./provisioning": "./src/provisioning/index.js",
+    "./express": "./src/express/index.js",
+    "./koa": "./src/koa/index.js",
+    "./fetch": "./src/fetch/index.js",
+    "./lambda": "./src/lambda/index.js",
     "./*": "./src/*"
   },
   "bin": {
@@ -81,7 +85,12 @@
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.1088.0",
     "@aws-sdk/lib-dynamodb": "^3.1088.0",
+    "@types/aws-lambda": "^8.10.162",
+    "@types/express": "^5.0.6",
+    "@types/koa": "^3.0.3",
     "@types/node": "^26.1.1",
+    "express": "^5.2.1",
+    "koa": "^3.2.1",
     "prettier": "^3.9.5",
     "tape-six": "^1.15.0",
     "typescript": "^7.0.2"

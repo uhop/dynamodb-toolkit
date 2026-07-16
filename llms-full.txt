@@ -595,16 +595,22 @@ Per `policy.statusCodes`. Default: `ConditionalCheckFailedException` / `Transact
 
 `policy.errorBody` builds the response body. Default returns `{code, message}`.
 
-### 7.4 Framework adapters (separate packages)
+### 7.4 Framework adapters (subpath exports)
 
-The bundled handler is `node:http`-only. Framework bindings ship as separate unscoped npm packages so the core keeps zero runtime dependencies. Each is a thin wrapper (~150–300 LoC) that translates its framework's request/response shape into calls through the same `rest-core` parsers/builders + `matchRoute`. Wire contract is identical across all four.
+The bundled handler is `node:http`-only. Framework bindings ship as subpath exports of this package — the core keeps zero runtime dependencies because every adapter duck-types its framework's request/response surface (no framework imports at runtime). Each is a thin wrapper that translates its framework's request/response shape into calls through the same `rest-core` parsers/builders + `matchRoute`. Wire contract is identical across all four.
 
-| Package | Runtime / framework | Peer deps | Version |
-| --- | --- | --- | --- |
-| `dynamodb-toolkit-koa` | Koa 2.x / 3.x | `koa` | 0.3.0 (peer `dynamodb-toolkit@^3.7.0`) |
-| `dynamodb-toolkit-express` | Express 4.x / 5.x | `express` | 0.3.0 |
-| `dynamodb-toolkit-fetch` | Fetch API — `(Request) => Promise<Response>`. Runs on Cloudflare Workers, Deno Deploy, Bun.serve, Hono, Node native fetch server | none | 0.3.0 |
-| `dynamodb-toolkit-lambda` | AWS Lambda — API Gateway REST (v1), HTTP (v2), Function URL, ALB. Auto-detects event shape. Ships `createNodeListener` / `createFetchBridge` for local-debug without `sam local` | none | 0.3.0 |
+| Sub-export | Factory | Runtime / framework |
+| --- | --- | --- |
+| `dynamodb-toolkit/koa` | `createKoaAdapter(adapter, options?)` → Koa `Middleware` | Koa 2.x / 3.x |
+| `dynamodb-toolkit/express` | `createExpressAdapter(adapter, options?)` → Express `RequestHandler` | Express 4.x / 5.x |
+| `dynamodb-toolkit/fetch` | `createFetchAdapter(adapter, options?)` → `(Request) => Promise<Response>` | Fetch API — Cloudflare Workers, Deno Deploy, Bun.serve, Hono, Node native fetch server |
+| `dynamodb-toolkit/lambda` | `createLambdaAdapter(adapter, options?)` → `(event, context) => Promise<result>` | AWS Lambda — API Gateway REST (v1), HTTP (v2), Function URL, ALB; auto-detects event shape |
+
+Shared options bag: `{policy?, sortableIndices?, keyFromPath?, exampleFromContext?, maxBodyBytes?}`; fetch and lambda add `mountPath?`, fetch adds `onMiss?` (compose into a parent router by returning `null`). `exampleFromContext` receives `{query, body, adapter, framework, ...}` with a per-adapter `framework` discriminator (`'koa' | 'express' | 'fetch' | 'lambda'`) so one tenant-scoping callback can serve all four.
+
+`dynamodb-toolkit/lambda/local.js` ships the zero-dependency local-debug bridges: `createNodeListener(handler, {eventShape?, context?, makeContext?})` returns a `(req, res)` listener for `http.createServer`; `createFetchBridge(handler, options?)` returns a `(request) => Promise<Response>` handler for Bun.serve / Deno.serve. Both synthesize full v1/v2 API Gateway events from real HTTP traffic — the exact production handler runs locally without `sam local`.
+
+The former standalone packages `dynamodb-toolkit-{koa,express,fetch,lambda}` (0.3.0) are superseded by these subpaths.
 
 ## 8. Provisioning (`dynamodb-toolkit/provisioning`)
 
@@ -829,7 +835,7 @@ Reach for a recipe when the question is "how do I do X" rather than "what does m
 - Options bags everywhere — `put(item, {force: true})`, `patch(key, patch, {delete: [...]})`.
 - Hooks renamed: `prepareListParams` → `prepareListInput`, `updateParams` → `updateInput`.
 - Patch wire format: `_delete` / `_separator` (single underscore by default; configurable via `policy.metaPrefix`).
-- REST split into `rest-core` (framework-agnostic) + `handler` (`node:http`). Koa lives in a separate package.
+- REST split into `rest-core` (framework-agnostic) + `handler` (`node:http`). Koa / Express / Fetch / Lambda bindings are subpath exports.
 - Dropped: `makeClient`, `getProfileName`, `specialTypes`, `converter`, `converterOptions`. Use `@aws-sdk/credential-providers` (`fromIni`, `fromNodeProviderChain`) directly.
 - `generic*` mass methods folded into `options.strategy: 'native' | 'sequential'`.
 - Transaction limit raised 25 → 100.

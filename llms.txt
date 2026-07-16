@@ -242,14 +242,14 @@ Per `policy.statusCodes`: `ConditionalCheckFailedException` / `TransactionCancel
 
 ## Framework adapters
 
-The bundled `dynamodb-toolkit/handler` is `node:http`-only. Framework bindings ship as separate zero-dep packages (frameworks are peer deps). All share the same wire contract as the bundled handler.
+The bundled `dynamodb-toolkit/handler` is `node:http`-only. Framework bindings ship as subpath exports of this package (frameworks are duck-typed at runtime — no framework dependencies). All share the same wire contract as the bundled handler.
 
-- [`dynamodb-toolkit-koa`](https://www.npmjs.com/package/dynamodb-toolkit-koa) — Koa 2 / 3 middleware.
-- [`dynamodb-toolkit-express`](https://www.npmjs.com/package/dynamodb-toolkit-express) — Express 4 / 5 middleware.
-- [`dynamodb-toolkit-fetch`](https://www.npmjs.com/package/dynamodb-toolkit-fetch) — `(Request) => Promise<Response>` for Cloudflare Workers, Deno Deploy, Bun.serve, Hono, Node's native fetch server.
-- [`dynamodb-toolkit-lambda`](https://www.npmjs.com/package/dynamodb-toolkit-lambda) — AWS Lambda (API Gateway v1 / v2, Function URL, ALB) with auto-detection + local-debug bridges.
+- `dynamodb-toolkit/koa` — `createKoaAdapter(adapter, options?)`: Koa 2 / 3 middleware.
+- `dynamodb-toolkit/express` — `createExpressAdapter(adapter, options?)`: Express 4 / 5 middleware.
+- `dynamodb-toolkit/fetch` — `createFetchAdapter(adapter, options?)`: `(Request) => Promise<Response>` for Cloudflare Workers, Deno Deploy, Bun.serve, Hono, Node's native fetch server.
+- `dynamodb-toolkit/lambda` — `createLambdaAdapter(adapter, options?)`: AWS Lambda (API Gateway v1 / v2, Function URL, ALB) with auto-detection; `dynamodb-toolkit/lambda/local.js` ships `createNodeListener` / `createFetchBridge` local-debug bridges.
 
-Each is at `0.3.0` with peer-dep `dynamodb-toolkit@^3.7.0`.
+Shared options bag: `{policy?, sortableIndices?, keyFromPath?, exampleFromContext?, maxBodyBytes?}` (+ `mountPath?` on fetch / lambda, `onMiss?` on fetch). The former standalone `dynamodb-toolkit-{koa,express,fetch,lambda}` packages are superseded by these subpaths.
 
 ## Provisioning
 
@@ -408,7 +408,7 @@ Each recipe opens with the SQL-equivalent question, shows the minimal declaratio
 - Options bags everywhere (`put(item, {force: true})`, `patch(key, patch, {delete: [...]})`).
 - Hooks renamed: `prepareListParams` → `prepareListInput`, `updateParams` → `updateInput`.
 - Patch wire format: `_delete` / `_separator` (single underscore; configurable via `policy.metaPrefix`).
-- REST split into `rest-core` (framework-agnostic) + `handler` (`node:http`); Koa in separate package.
+- REST split into `rest-core` (framework-agnostic) + `handler` (`node:http`); framework bindings (koa / express / fetch / lambda) are subpath exports.
 - Dropped: `makeClient`, `getProfileName`, `specialTypes`, `converter`, `converterOptions`. Use `@aws-sdk/credential-providers`.
 - `generic*` mass methods folded into `options.strategy: 'native' | 'sequential'`.
 - Transaction limit 25 → 100.
