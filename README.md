@@ -152,7 +152,7 @@ The bundled `dynamodb-toolkit/handler` is a pure `node:http` handler. Framework-
 | `dynamodb-toolkit/fetch`   | Fetch API — `(Request) => Promise<Response>` | `createFetchAdapter` — zero-framework; runs on Cloudflare Workers, Deno Deploy, Bun.serve, Hono, Node native fetch server                                                                                                                              |
 | `dynamodb-toolkit/lambda`  | AWS Lambda handler                           | `createLambdaAdapter` — four event shapes (API Gateway REST / HTTP, Function URL, ALB); local-debug bridges at `dynamodb-toolkit/lambda/local.js` (`createNodeListener`, `createFetchBridge`) for running the handler on real HTTP without `sam local` |
 
-The former standalone packages ([`dynamodb-toolkit-koa`](https://www.npmjs.com/package/dynamodb-toolkit-koa), [`-express`](https://www.npmjs.com/package/dynamodb-toolkit-express), [`-fetch`](https://www.npmjs.com/package/dynamodb-toolkit-fetch), [`-lambda`](https://www.npmjs.com/package/dynamodb-toolkit-lambda)) are superseded by these subpaths — existing consumers keep working, new code should import the subpaths.
+The former standalone packages ([`dynamodb-toolkit-koa`](https://www.npmjs.com/package/dynamodb-toolkit-koa), [`-express`](https://www.npmjs.com/package/dynamodb-toolkit-express), [`-fetch`](https://www.npmjs.com/package/dynamodb-toolkit-fetch), [`-lambda`](https://www.npmjs.com/package/dynamodb-toolkit-lambda)) are superseded by these subpaths — existing consumers keep working, new code should import the subpaths. Full adapter docs live in the wiki: [Framework adapters](https://github.com/uhop/dynamodb-toolkit/wiki/Framework-adapters) plus a page per adapter.
 
 ## Sub-exports
 
