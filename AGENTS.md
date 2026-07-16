@@ -9,7 +9,7 @@ For published API docs see the [wiki](https://github.com/uhop/dynamodb-toolkit/w
 This project uses a git submodule for the wiki:
 
 ```bash
-git clone --recursive git@github.com:uhop/dynamodb-toolkit.git
+git clone --recursive https://github.com/uhop/dynamodb-toolkit.git
 cd dynamodb-toolkit
 npm install
 ```

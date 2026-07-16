@@ -74,11 +74,6 @@
   },
   "homepage": "https://github.com/uhop/dynamodb-toolkit#readme",
   "funding": "https://github.com/sponsors/uhop",
-  "llms": "https://raw.githubusercontent.com/uhop/dynamodb-toolkit/master/llms.txt",
-  "llmsFull": "https://raw.githubusercontent.com/uhop/dynamodb-toolkit/master/llms-full.txt",
-  "engines": {
-    "node": ">=20"
-  },
   "peerDependencies": {
     "@aws-sdk/client-dynamodb": "^3.0.0",
     "@aws-sdk/lib-dynamodb": "^3.0.0"

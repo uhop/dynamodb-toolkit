@@ -168,9 +168,9 @@ The package ships discrete, tree-shakable sub-exports for callers who want only 
 | `dynamodb-toolkit/handler`      | `createHandler`, `matchRoute`, `readJsonBody`                                                                                                                                                                                                                                                                                                             |
 | `dynamodb-toolkit/provisioning` | `planTable`, `ensureTable`, `verifyTable`, `diffTable`, `planAddOnly`, `describeTable`, `executePlan`, `buildCreateTableInput`, `buildAddGsiInput`, `readDescriptor`, `writeDescriptor`, `compareDescriptor`, `extractDeclaration`                                                                                                                        |
 
-A bundled CLI (`dynamodb-toolkit`) wraps the provisioning helpers for scripted use — see [Table provisioning](https://github.com/uhop/dynamodb-toolkit/wiki/Table-provisioning) in the wiki.
+A bundled CLI (`dynamodb-toolkit`) wraps the provisioning helpers for scripted use — see [Recipe: Provisioning workflow](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-Provisioning-workflow) in the wiki.
 
-Full reference docs live in the [wiki](https://github.com/uhop/dynamodb-toolkit/wiki). Problem-first [recipes](https://github.com/uhop/dynamodb-toolkit/wiki/Recipes) cover common patterns (hierarchical lookups, cascade ops, reservations with auto-release, filter URL grammar, text search, resumable mass ops, provisioning).
+Full reference docs live in the [wiki](https://github.com/uhop/dynamodb-toolkit/wiki) — browse the [index](https://github.com/uhop/dynamodb-toolkit/wiki/Home) or [search it](https://uhop.github.io/wiki-search/app/?wiki=uhop/dynamodb-toolkit). Problem-first [recipes](https://github.com/uhop/dynamodb-toolkit/wiki/Recipes) cover common patterns (hierarchical lookups, cascade ops, reservations with auto-release, filter URL grammar, text search, resumable mass ops, provisioning).
 
 ## Compatibility
 
@@ -201,6 +201,19 @@ v3 is not a drop-in upgrade. Highlights:
 - **No more `makeClient` / `getProfileName`** — use `@aws-sdk/credential-providers` (`fromIni`, `fromNodeProviderChain`) directly.
 
 The v2 documentation snapshot lives in the wiki repo at the `v2.3-docs` git tag. The v2 source code remains available on npm as `dynamodb-toolkit@2.3.0` and on GitHub at the matching git tag.
+
+## Release notes
+
+- 3.7.1 _`applyFilter` auto-promotes sort-key range ops to `KeyConditionExpression`; deep `llms.txt` + wiki documentation refresh._
+- 3.7.0 _Breaking: filter grammar flipped to `?<op>-<field>=<value>`; naming consolidation, typed dispatch on every tier, bulk-load versioning, descriptor hiding._
+- 3.6.1 _Bug fixes from the car-rental ergonomics review; no API-shape changes._
+- 3.6.0 _Consolidated publish of the hierarchical-use-case workstream (3.2–3.6); renamed bulk-individual helpers ship with deprecated aliases; first npm publish since 3.1.2._
+- 3.1.2 _Rest-core extractions + streaming body reader; purely additive._
+- 3.1.1 _Security + correctness hardening sweep: 19 bug fixes + 9 defensive improvements._
+- 3.1.0 _Additive features; no breaking changes._
+- 3.0.0 _Green-field rewrite on AWS SDK v3; v2 consumers stay on `dynamodb-toolkit@2.3.0`._
+
+Full details in the wiki's [Release notes](https://github.com/uhop/dynamodb-toolkit/wiki/Release-notes).
 
 ## Status
 
