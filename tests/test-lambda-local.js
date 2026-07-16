@@ -11,7 +11,7 @@ import test from 'tape-six';
 import {createLambdaAdapter} from 'dynamodb-toolkit/lambda';
 import {createNodeListener, createFetchBridge} from 'dynamodb-toolkit/lambda/local.js';
 
-import {makeMockAdapter} from './helpers/mock-adapter-lambda.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 
 const serveOnce = async (listener, fn) => {
   const server = http.createServer(listener);

@@ -5,7 +5,7 @@ import test from 'tape-six';
 
 import {createExpressAdapter} from 'dynamodb-toolkit/express';
 
-import {makeMockAdapter} from './helpers/mock-adapter-express.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 import {withExpressServer} from './helpers/with-express-server.js';
 
 test('unknown route shape → next() fires; downstream middleware responds', async t => {

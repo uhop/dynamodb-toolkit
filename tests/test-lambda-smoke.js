@@ -2,7 +2,7 @@ import test from 'tape-six';
 
 import {createLambdaAdapter} from 'dynamodb-toolkit/lambda';
 
-import {makeMockAdapter} from './helpers/mock-adapter-lambda.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 import {makeClient} from './helpers/with-lambda-handler.js';
 
 test('smoke: package loads + factory returns a Lambda handler', t => {

@@ -5,7 +5,7 @@ import test from 'tape-six';
 
 import {createKoaAdapter} from 'dynamodb-toolkit/koa';
 
-import {makeMockAdapter} from './helpers/mock-adapter-koa.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 import {withKoaServer} from './helpers/with-koa-server.js';
 
 test('unknown route shape → next() fires; downstream middleware responds', async t => {

@@ -2,7 +2,7 @@ import test from 'tape-six';
 
 import {createExpressAdapter} from 'dynamodb-toolkit/express';
 
-import {makeMockAdapter} from './helpers/mock-adapter-express.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 
 test('smoke: package loads + factory returns middleware', t => {
   const adapter = makeMockAdapter();

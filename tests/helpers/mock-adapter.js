@@ -1,6 +1,7 @@
 // Minimal stand-in for dynamodb-toolkit's Adapter — records every call for
-// assertions and returns canned data. Tests focus on wire translation (Koa ctx
-// ↔ adapter methods), not on the Adapter's own DynamoDB behavior.
+// assertions and returns canned data. Tests focus on wire translation
+// (framework request/response ↔ adapter methods), not on the Adapter's own
+// DynamoDB behavior. Shared by all framework-adapter suites.
 
 export const makeMockAdapter = (overrides = {}) => {
   const calls = [];

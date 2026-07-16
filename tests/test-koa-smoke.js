@@ -2,7 +2,7 @@ import test from 'tape-six';
 
 import {createKoaAdapter} from 'dynamodb-toolkit/koa';
 
-import {makeMockAdapter} from './helpers/mock-adapter-koa.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 
 test('smoke: package loads + factory returns middleware', t => {
   const adapter = makeMockAdapter();

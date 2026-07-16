@@ -6,7 +6,7 @@ import test from 'tape-six';
 
 import {createFetchAdapter} from 'dynamodb-toolkit/fetch';
 
-import {makeMockAdapter} from './helpers/mock-adapter-fetch.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 import {withFetchHandler} from './helpers/with-fetch-handler.js';
 
 test('unknown route shape → default terminal 404 when no onMiss', async t => {

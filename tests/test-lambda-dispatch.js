@@ -7,7 +7,7 @@ import test from 'tape-six';
 
 import {createLambdaAdapter} from 'dynamodb-toolkit/lambda';
 
-import {makeMockAdapter} from './helpers/mock-adapter-lambda.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 import {withLambdaHandler, makeClient, readJsonResult, makeV2Event, makeContext} from './helpers/with-lambda-handler.js';
 
 test('unknown route shape → 404', async t => {

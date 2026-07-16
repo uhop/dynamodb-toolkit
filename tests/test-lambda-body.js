@@ -7,7 +7,7 @@ import test from 'tape-six';
 
 import {createLambdaAdapter} from 'dynamodb-toolkit/lambda';
 
-import {makeMockAdapter} from './helpers/mock-adapter-lambda.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 import {withLambdaHandler, makeClient, readJsonResult, makeV1Event, makeContext} from './helpers/with-lambda-handler.js';
 
 test('utf-8 body is parsed from event.body', async t => {

@@ -7,7 +7,7 @@ import test from 'tape-six';
 
 import {createLambdaAdapter} from 'dynamodb-toolkit/lambda';
 
-import {makeMockAdapter} from './helpers/mock-adapter-lambda.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 import {makeClient, readJsonResult} from './helpers/with-lambda-handler.js';
 
 const KINDS = ['v1', 'v2', 'alb'];

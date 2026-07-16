@@ -6,7 +6,7 @@ import test from 'tape-six';
 
 import {createKoaAdapter} from 'dynamodb-toolkit/koa';
 
-import {makeMockAdapter} from './helpers/mock-adapter-koa.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 import {withKoaServer} from './helpers/with-koa-server.js';
 
 test('stream body is parsed when ctx.request.body is undefined', async t => {

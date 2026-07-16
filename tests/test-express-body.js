@@ -7,7 +7,7 @@ import express from 'express';
 
 import {createExpressAdapter} from 'dynamodb-toolkit/express';
 
-import {makeMockAdapter} from './helpers/mock-adapter-express.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 import {withExpressServer} from './helpers/with-express-server.js';
 
 test('stream body is parsed when req.body is undefined', async t => {

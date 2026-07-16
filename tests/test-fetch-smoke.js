@@ -2,7 +2,7 @@ import test from 'tape-six';
 
 import {createFetchAdapter} from 'dynamodb-toolkit/fetch';
 
-import {makeMockAdapter} from './helpers/mock-adapter-fetch.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 
 test('smoke: package loads + factory returns a fetch handler', t => {
   const adapter = makeMockAdapter();

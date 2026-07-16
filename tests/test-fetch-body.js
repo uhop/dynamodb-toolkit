@@ -5,7 +5,7 @@ import test from 'tape-six';
 
 import {createFetchAdapter} from 'dynamodb-toolkit/fetch';
 
-import {makeMockAdapter} from './helpers/mock-adapter-fetch.js';
+import {makeMockAdapter} from './helpers/mock-adapter.js';
 import {withFetchHandler} from './helpers/with-fetch-handler.js';
 
 test('body stream is parsed from Request', async t => {
