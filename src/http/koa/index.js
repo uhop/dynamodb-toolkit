@@ -25,8 +25,8 @@ import {
   resolveSort,
   coerceStringQuery,
   validateWriteBody
-} from '../rest-core/index.js';
-import {matchRoute, readJsonBody} from '../handler/index.js';
+} from '../../rest-core/index.js';
+import {matchRoute, readJsonBody} from '../../handler/index.js';
 
 // Prefer a pre-parsed body (koa-bodyparser, @koa/bodyparser, koa-body…). Fall
 // back to streaming the raw Node request with our own cap. Pre-parsed bodies
@@ -82,7 +82,7 @@ export const createKoaAdapter = (adapter, options = {}) => {
   // --- collection-level handlers ---
 
   const handleGetAll = async (ctx, query) => {
-    /** @type {import('../index.js').ListOptions} */
+    /** @type {import('../../index.js').ListOptions} */
     const opts = buildListOptions(query, policy);
     const {index, descending} = resolveSort(query, sortableIndices);
     if (descending) opts.descending = true;

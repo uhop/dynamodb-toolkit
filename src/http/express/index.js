@@ -26,8 +26,8 @@ import {
   resolveSort,
   coerceStringQuery,
   validateWriteBody
-} from '../rest-core/index.js';
-import {matchRoute, readJsonBody} from '../handler/index.js';
+} from '../../rest-core/index.js';
+import {matchRoute, readJsonBody} from '../../handler/index.js';
 
 // Prefer a pre-parsed body (`express.json()` or equivalent populates
 // `req.body`). Fall back to streaming the raw Node request with our own cap.
@@ -89,7 +89,7 @@ export const createExpressAdapter = (adapter, options = {}) => {
   // --- collection-level handlers ---
 
   const handleGetAll = async (req, res, query) => {
-    /** @type {import('../index.js').ListOptions} */
+    /** @type {import('../../index.js').ListOptions} */
     const opts = buildListOptions(query, policy);
     const {index, descending} = resolveSort(query, sortableIndices);
     if (descending) opts.descending = true;
@@ -174,7 +174,7 @@ export const createExpressAdapter = (adapter, options = {}) => {
   const handleCloneAll = async (req, res, query) => {
     const body = await getBody(req, maxBodyBytes);
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
-    /** @type {import('../index.js').ListOptions} */
+    /** @type {import('../../index.js').ListOptions} */
     const opts = buildListOptions(query, policy);
     const {index} = resolveSort(query, sortableIndices);
     const example = exampleFromContext(makeExampleCtx(query, body, req));
@@ -186,7 +186,7 @@ export const createExpressAdapter = (adapter, options = {}) => {
   const handleMoveAll = async (req, res, query) => {
     const body = await getBody(req, maxBodyBytes);
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
-    /** @type {import('../index.js').ListOptions} */
+    /** @type {import('../../index.js').ListOptions} */
     const opts = buildListOptions(query, policy);
     const {index} = resolveSort(query, sortableIndices);
     const example = exampleFromContext(makeExampleCtx(query, body, req));

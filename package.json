@@ -16,10 +16,11 @@
     "./handler": "./src/handler/index.js",
     "./marshalling": "./src/marshalling/index.js",
     "./provisioning": "./src/provisioning/index.js",
-    "./express": "./src/express/index.js",
-    "./koa": "./src/koa/index.js",
-    "./fetch": "./src/fetch/index.js",
-    "./lambda": "./src/lambda/index.js",
+    "./express": "./src/http/express/index.js",
+    "./koa": "./src/http/koa/index.js",
+    "./fetch": "./src/http/fetch/index.js",
+    "./lambda": "./src/http/lambda/index.js",
+    "./lambda/local.js": "./src/http/lambda/local.js",
     "./*": "./src/*"
   },
   "bin": {

@@ -26,8 +26,8 @@ import {
   resolveSort,
   stripMount,
   validateWriteBody
-} from '../rest-core/index.js';
-import {matchRoute} from '../handler/index.js';
+} from '../../rest-core/index.js';
+import {matchRoute} from '../../handler/index.js';
 
 import {readJsonBody} from './read-web-body.js';
 
@@ -84,7 +84,7 @@ export const createFetchAdapter = (adapter, options = {}) => {
   // --- collection-level handlers ---
 
   const handleGetAll = async (request, query) => {
-    /** @type {import('../index.js').ListOptions} */
+    /** @type {import('../../index.js').ListOptions} */
     const opts = buildListOptions(query, policy);
     const {index, descending} = resolveSort(query, sortableIndices);
     if (descending) opts.descending = true;
@@ -104,7 +104,7 @@ export const createFetchAdapter = (adapter, options = {}) => {
   };
 
   const handleDeleteAll = async (request, query) => {
-    /** @type {import('../index.js').ListOptions} */
+    /** @type {import('../../index.js').ListOptions} */
     const opts = buildListOptions(query, policy);
     const {index} = resolveSort(query, sortableIndices);
     const example = exampleFromContext(makeExampleCtx(query, null, request));
@@ -170,7 +170,7 @@ export const createFetchAdapter = (adapter, options = {}) => {
   const handleCloneAll = async (request, query) => {
     const body = await readJsonBody(request, maxBodyBytes);
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
-    /** @type {import('../index.js').ListOptions} */
+    /** @type {import('../../index.js').ListOptions} */
     const opts = buildListOptions(query, policy);
     const {index} = resolveSort(query, sortableIndices);
     const example = exampleFromContext(makeExampleCtx(query, body, request));
@@ -182,7 +182,7 @@ export const createFetchAdapter = (adapter, options = {}) => {
   const handleMoveAll = async (request, query) => {
     const body = await readJsonBody(request, maxBodyBytes);
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
-    /** @type {import('../index.js').ListOptions} */
+    /** @type {import('../../index.js').ListOptions} */
     const opts = buildListOptions(query, policy);
     const {index} = resolveSort(query, sortableIndices);
     const example = exampleFromContext(makeExampleCtx(query, body, request));

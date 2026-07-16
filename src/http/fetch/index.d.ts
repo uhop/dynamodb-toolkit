@@ -1,5 +1,5 @@
-import type {Adapter} from '../index.js';
-import type {RestPolicy} from '../rest-core/index.js';
+import type {Adapter} from '../../index.js';
+import type {RestPolicy} from '../../rest-core/index.js';
 
 /** Return value from {@link FetchAdapterOptions.onMiss}. */
 export type OnMissResult = Response | null | Promise<Response | null>;

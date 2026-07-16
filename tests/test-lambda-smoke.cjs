@@ -9,7 +9,7 @@
 
 const {test} = require('tape-six');
 const {createLambdaAdapter} = require('dynamodb-toolkit/lambda');
-const {readJsonBody} = require('dynamodb-toolkit/lambda/read-lambda-body.js');
+const {readJsonBody} = require('dynamodb-toolkit/http/lambda/read-lambda-body.js');
 
 // Minimal adapter stand-in: createLambdaAdapter only reads `keyFields` at
 // dispatch time, not at factory time. Enough for a require-shape smoke check.

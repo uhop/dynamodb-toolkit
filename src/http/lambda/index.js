@@ -25,8 +25,8 @@ import {
   resolveSort,
   stripMount,
   validateWriteBody
-} from '../rest-core/index.js';
-import {matchRoute} from '../handler/index.js';
+} from '../../rest-core/index.js';
+import {matchRoute} from '../../handler/index.js';
 
 import {readJsonBody} from './read-lambda-body.js';
 
@@ -156,7 +156,7 @@ export const createLambdaAdapter = (adapter, options = {}) => {
   // --- collection-level handlers ---
 
   const handleGetAll = async (event, context, kind, query) => {
-    /** @type {import('../index.js').ListOptions} */
+    /** @type {import('../../index.js').ListOptions} */
     const opts = buildListOptions(query, policy);
     const {index, descending} = resolveSort(query, sortableIndices);
     if (descending) opts.descending = true;
@@ -176,7 +176,7 @@ export const createLambdaAdapter = (adapter, options = {}) => {
   };
 
   const handleDeleteAll = async (event, context, query) => {
-    /** @type {import('../index.js').ListOptions} */
+    /** @type {import('../../index.js').ListOptions} */
     const opts = buildListOptions(query, policy);
     const {index} = resolveSort(query, sortableIndices);
     const example = exampleFromContext(makeExampleCtx(query, null, event, context));
@@ -242,7 +242,7 @@ export const createLambdaAdapter = (adapter, options = {}) => {
   const handleCloneAll = async (event, context, query) => {
     const body = await readJsonBody(event.body, event.isBase64Encoded, maxBodyBytes);
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
-    /** @type {import('../index.js').ListOptions} */
+    /** @type {import('../../index.js').ListOptions} */
     const opts = buildListOptions(query, policy);
     const {index} = resolveSort(query, sortableIndices);
     const example = exampleFromContext(makeExampleCtx(query, body, event, context));
@@ -254,7 +254,7 @@ export const createLambdaAdapter = (adapter, options = {}) => {
   const handleMoveAll = async (event, context, query) => {
     const body = await readJsonBody(event.body, event.isBase64Encoded, maxBodyBytes);
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
-    /** @type {import('../index.js').ListOptions} */
+    /** @type {import('../../index.js').ListOptions} */
     const opts = buildListOptions(query, policy);
     const {index} = resolveSort(query, sortableIndices);
     const example = exampleFromContext(makeExampleCtx(query, body, event, context));

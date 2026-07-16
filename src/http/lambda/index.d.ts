@@ -1,5 +1,5 @@
-import type {Adapter} from '../index.js';
-import type {RestPolicy} from '../rest-core/index.js';
+import type {Adapter} from '../../index.js';
+import type {RestPolicy} from '../../rest-core/index.js';
 import type {
   APIGatewayProxyEvent,
   APIGatewayProxyResult,

@@ -8,7 +8,7 @@
 
 const {test} = require('tape-six');
 const {createFetchAdapter} = require('dynamodb-toolkit/fetch');
-const {readJsonBody} = require('dynamodb-toolkit/fetch/read-web-body.js');
+const {readJsonBody} = require('dynamodb-toolkit/http/fetch/read-web-body.js');
 
 // Minimal adapter stand-in: createFetchAdapter only reads `keyFields` at
 // dispatch time, not at factory time. Enough for a require-shape smoke check.

@@ -64,10 +64,12 @@ dynamodb-toolkit/
 │   │                                #   Builders: buildEnvelope, buildErrorBody, paginationLinks,
 │   │                                #   buildListOptions, resolveSort, stripMount, validateWriteBody
 │   ├── handler/                     # node:http (req, res) handler + matchRoute + readJsonBody
-│   ├── express/                     # createExpressAdapter — Express 4/5 middleware
-│   ├── koa/                         # createKoaAdapter — Koa 2/3 middleware
-│   ├── fetch/                       # createFetchAdapter — (Request) => Promise<Response>
-│   ├── lambda/                      # createLambdaAdapter — API GW v1/v2, Function URL, ALB
+│   ├── http/                        # Framework adapters (public subpaths keep short names:
+│   │   │                            #   dynamodb-toolkit/express → src/http/express/)
+│   │   ├── express/                 # createExpressAdapter — Express 4/5 middleware
+│   │   ├── koa/                     # createKoaAdapter — Koa 2/3 middleware
+│   │   ├── fetch/                   # createFetchAdapter — (Request) => Promise<Response>
+│   │   └── lambda/                  # createLambdaAdapter — API GW v1/v2, Function URL, ALB
 │   │                                #   + local.js: createNodeListener / createFetchBridge
 │   ├── hooks/                       # stampCreatedAtISO / stampCreatedAtEpoch prepare-hook factories
 │   ├── marshalling/                 # Marshaller<TRuntime, TStored> pairs: dateISO, dateEpoch, url
@@ -141,7 +143,7 @@ Every declarative option is opt-in and additive. An Adapter with none of them be
 - `paths/` — nested-path get/set/delete/patch on plain JS objects. Prototype-safe (rejects `__proto__` / `constructor` / `prototype` segments).
 - `rest-core/` — REST primitives (parsers + builders + policy). DoS-gated: `parsePaging.maxOffset` (100k default), `parseFields/Names.maxItems` (1000), `parseSearch.maxLength` (1024), `validateWriteBody` for `{...body, ...key}` safety, null-prototype accumulators throughout. `parseFilter` (Option W): `?<op>-<field>=<value>`; ops `eq ne lt le gt ge in btw beg ct ex nx`; multi-value ops use first-char delimiter.
 - `handler/` — `node:http` `(req, res) =>` handler on top of rest-core. `HEAD → GET` auto-promote, byte-accurate `maxBodyBytes` (default 1 MiB), `readJsonBody` with streaming TextDecoder (~1× body size peak memory).
-- `express/` / `koa/` / `fetch/` / `lambda/` — framework adapters over rest-core + `matchRoute`; same wire contract as `handler/`. Frameworks are duck-typed at runtime (zero runtime deps; `express` / `koa` and the `@types/*` packages are devDeps for tests + type checks). `lambda/local.js` carries the local-debug bridges (`createNodeListener`, `createFetchBridge`).
+- `http/{express,koa,fetch,lambda}/` — framework adapters over rest-core + `matchRoute`; same wire contract as `handler/`. Frameworks are duck-typed at runtime (zero runtime deps; `express` / `koa` and the `@types/*` packages are devDeps for tests + type checks). Public subpaths keep their short names (`dynamodb-toolkit/express` → `src/http/express/`). `http/lambda/local.js` carries the local-debug bridges (`createNodeListener`, `createFetchBridge`).
 - `hooks/` — `stampCreatedAtISO` / `stampCreatedAtEpoch` prepare-hook factories (first-insert only; patches and round-tripped reads untouched).
 - `marshalling/` — `Marshaller<TRuntime, TStored>` pairs. `dateISO`, `dateEpoch`, `url`, plus `marshallMap` / `unmarshallMap` for `Map` ⇔ plain object. Undefined / null pass through everywhere.
 - `provisioning/` — ADD-only table lifecycle. `planTable` (read-only plan), `ensureTable` (plan + apply), `verifyTable` (diff + optional throw), descriptor read/write. IaC-agnostic: absent descriptor is neutral by default.
