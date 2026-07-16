@@ -2148,27 +2148,29 @@ const warnOnce = (oldName, newName) => {
   warnedAliases[oldName] = true;
   console.warn(`dynamodb-toolkit: Adapter.${oldName} is deprecated, use Adapter.${newName}.`);
 };
-Adapter.prototype.putAll = function (items, options) {
+// cast: TS 7 checkJs no longer infers expando prototype members as declarations
+const proto = /** @type {any} */ (Adapter.prototype);
+proto.putAll = function (items, options) {
   warnOnce('putAll', 'putItems');
   return this.putItems(items, options);
 };
-Adapter.prototype.getAll = function (options, example, index) {
+proto.getAll = function (options, example, index) {
   warnOnce('getAll', 'getList');
   return this.getList(options, example, index);
 };
-Adapter.prototype.getAllByParams = function (params, options) {
+proto.getAllByParams = function (params, options) {
   warnOnce('getAllByParams', 'getListByParams');
   return this.getListByParams(params, options);
 };
-Adapter.prototype.deleteAllByParams = function (params, options) {
+proto.deleteAllByParams = function (params, options) {
   warnOnce('deleteAllByParams', 'deleteListByParams');
   return this.deleteListByParams(params, options);
 };
-Adapter.prototype.cloneAllByParams = function (params, mapFn, options) {
+proto.cloneAllByParams = function (params, mapFn, options) {
   warnOnce('cloneAllByParams', 'cloneListByParams');
   return this.cloneListByParams(params, mapFn, options);
 };
-Adapter.prototype.moveAllByParams = function (params, mapFn, options) {
+proto.moveAllByParams = function (params, mapFn, options) {
   warnOnce('moveAllByParams', 'moveListByParams');
   return this.moveListByParams(params, mapFn, options);
 };

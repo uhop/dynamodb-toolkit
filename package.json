@@ -79,12 +79,12 @@
     "@aws-sdk/lib-dynamodb": "^3.0.0"
   },
   "devDependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1076.0",
-    "@aws-sdk/lib-dynamodb": "^3.1076.0",
-    "@types/node": "^26.0.1",
-    "prettier": "^3.9.3",
-    "tape-six": "^1.11.0",
-    "typescript": "^6.0.3"
+    "@aws-sdk/client-dynamodb": "^3.1088.0",
+    "@aws-sdk/lib-dynamodb": "^3.1088.0",
+    "@types/node": "^26.1.1",
+    "prettier": "^3.9.5",
+    "tape-six": "^1.15.0",
+    "typescript": "^7.0.2"
   },
   "files": [
     "src",
