@@ -11,6 +11,7 @@ import {buildKeyCondition} from '../expressions/key-condition.js';
 import {buildSearch} from '../expressions/search.js';
 import {cleanParams} from '../expressions/clean-params.js';
 import {cloneParams} from '../expressions/clone-params.js';
+import {makeAllocator} from '../expressions/allocator.js';
 
 import {applyBatch} from '../batch/apply-batch.js';
 import {applyTransaction} from '../batch/apply-transaction.js';
@@ -986,20 +987,7 @@ export class Adapter {
       skName = this.structuralKey ? this.structuralKey.name : undefined;
     }
 
-    const names = params.ExpressionAttributeNames || {};
-    const values = params.ExpressionAttributeValues || {};
-    let nameCounter = Object.keys(names).length;
-    let valueCounter = Object.keys(values).length;
-    const allocName = n => {
-      const k = '#ff' + nameCounter++;
-      names[k] = n;
-      return k;
-    };
-    const allocValue = v => {
-      const k = ':ffv' + valueCounter++;
-      values[k] = v;
-      return k;
-    };
+    const alloc = makeAllocator(params, '#ff', ':ffv');
 
     const kcParts = [];
     const feParts = [];
@@ -1025,7 +1013,7 @@ export class Adapter {
       if (skMatch) skPromoted = true;
       if (!canPromote && (pkEligible || skEligible)) fallbacks.push({field: c.field, op: c.op});
       const target = canPromote ? kcParts : feParts;
-      const nameAlias = allocName(c.field);
+      const nameAlias = alloc.name(c.field);
 
       if (FILTER_OP_NO_VALUE.has(c.op)) {
         target.push(c.op === 'ex' ? 'attribute_exists(' + nameAlias + ')' : 'attribute_not_exists(' + nameAlias + ')');
@@ -1034,31 +1022,31 @@ export class Adapter {
       if (c.op === 'in') {
         const vs = c.value;
         if (!Array.isArray(vs) || vs.length === 0) throw new Error(`filter 'in' on '${c.field}' requires at least one value`);
-        const aliases = vs.map(v => allocValue(this.coerceFilterValue(c.field, v)));
+        const aliases = vs.map(v => alloc.value(this.coerceFilterValue(c.field, v)));
         target.push(nameAlias + ' IN (' + aliases.join(', ') + ')');
         continue;
       }
       if (c.op === 'btw') {
         const vs = c.value;
         if (!Array.isArray(vs) || vs.length !== 2) throw new Error(`filter 'btw' on '${c.field}' requires exactly 2 values`);
-        const lo = allocValue(this.coerceFilterValue(c.field, vs[0]));
-        const hi = allocValue(this.coerceFilterValue(c.field, vs[1]));
+        const lo = alloc.value(this.coerceFilterValue(c.field, vs[0]));
+        const hi = alloc.value(this.coerceFilterValue(c.field, vs[1]));
         target.push(nameAlias + ' BETWEEN ' + lo + ' AND ' + hi);
         continue;
       }
       if (c.op === 'beg') {
-        const v = allocValue(this.coerceFilterValue(c.field, c.value));
+        const v = alloc.value(this.coerceFilterValue(c.field, c.value));
         target.push('begins_with(' + nameAlias + ', ' + v + ')');
         continue;
       }
       if (c.op === 'ct') {
-        const v = allocValue(this.coerceFilterValue(c.field, c.value));
+        const v = alloc.value(this.coerceFilterValue(c.field, c.value));
         target.push('contains(' + nameAlias + ', ' + v + ')');
         continue;
       }
       // Comparison ops: eq ne lt le gt ge.
       const op = FILTER_OP_COMPARISON[c.op];
-      const v = allocValue(this.coerceFilterValue(c.field, c.value));
+      const v = alloc.value(this.coerceFilterValue(c.field, c.value));
       target.push(nameAlias + ' ' + op + ' ' + v);
     }
 
@@ -1074,8 +1062,7 @@ export class Adapter {
         ? '(' + params.FilterExpression + ') AND (' + expr + ')'
         : expr;
     }
-    if (Object.keys(names).length) params.ExpressionAttributeNames = names;
-    if (Object.keys(values).length) params.ExpressionAttributeValues = values;
+    alloc.commit();
     // Diagnostic only — non-enumerable so it never reaches the wire or survives cloneParams.
     if (fallbacks.length) Object.defineProperty(params, 'filterFallbacks', {value: fallbacks, configurable: true});
     return params;

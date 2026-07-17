@@ -2,6 +2,7 @@
 // Build a FilterExpression for DynamoDB using searchable mirror columns.
 
 import {normalizeFields} from '../paths/normalize-fields.js';
+import {makeAllocator} from './allocator.js';
 
 export const buildSearch = (searchable, query, options, params = {}) => {
   if (!query) return params;
@@ -47,18 +48,8 @@ export const buildFilterByExample = (example, params = {}) => {
   const keys = Object.keys(example);
   if (!keys.length) return params;
 
-  const names = params.ExpressionAttributeNames || {};
-  const values = params.ExpressionAttributeValues || {};
-  let nameCounter = Object.keys(names).length;
-  let valueCounter = Object.keys(values).length;
-
-  const clauses = keys.map(key => {
-    const nameAlias = '#fbe' + nameCounter++;
-    const valueAlias = ':fbe' + valueCounter++;
-    names[nameAlias] = key;
-    values[valueAlias] = example[key];
-    return nameAlias + ' = ' + valueAlias;
-  });
+  const alloc = makeAllocator(params, '#fbe', ':fbe');
+  const clauses = keys.map(key => alloc.name(key) + ' = ' + alloc.value(example[key]));
 
   const expr = clauses.join(' AND ');
   if (params.FilterExpression) {
@@ -67,7 +58,6 @@ export const buildFilterByExample = (example, params = {}) => {
     params.FilterExpression = expr;
   }
 
-  params.ExpressionAttributeNames = names;
-  params.ExpressionAttributeValues = values;
+  alloc.commit();
   return params;
 };

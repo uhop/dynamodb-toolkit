@@ -1,16 +1,16 @@
 // @ts-self-types="./update.d.ts"
 // Build an UpdateExpression for DynamoDB from a patch object and options.
 
+import {makeAllocator} from './allocator.js';
+
 const isInteger = /^\d+$/;
 
-const aliasPath = (path, separator, uniqueNames, names, keyCounter) => {
+// `uniqueNames` memo: the same path segment reused across the patch gets one alias.
+const aliasPath = (path, separator, uniqueNames, alloc) => {
   return path.split(separator).map(part => {
     if (isInteger.test(part)) return part;
     let alias = uniqueNames['#' + part];
-    if (!alias) {
-      alias = uniqueNames['#' + part] = '#upk' + keyCounter.n++;
-      names[alias] = part;
-    }
+    if (!alias) alias = uniqueNames['#' + part] = alloc.name(part);
     return alias;
   });
 };
@@ -22,11 +22,8 @@ export const buildUpdate = (patch, options, params = {}) => {
   const deleteProps = options?.delete;
   const arrayOps = options?.arrayOps;
 
-  const names = params.ExpressionAttributeNames || {},
-    values = params.ExpressionAttributeValues || {},
-    uniqueNames = {};
-  const keyCounter = {n: Object.keys(names).length};
-  let valueCounter = Object.keys(values).length;
+  const alloc = makeAllocator(params, '#upk', ':upv');
+  const uniqueNames = {};
 
   const setActions = [];
   const removeActions = [];
@@ -34,16 +31,14 @@ export const buildUpdate = (patch, options, params = {}) => {
 
   // Regular field SET actions
   for (const key of Object.keys(patch)) {
-    const parts = aliasPath(key, separator, uniqueNames, names, keyCounter);
-    const valueAlias = ':upv' + valueCounter++;
-    values[valueAlias] = patch[key];
-    setActions.push(joinPath(parts) + ' = ' + valueAlias);
+    const parts = aliasPath(key, separator, uniqueNames, alloc);
+    setActions.push(joinPath(parts) + ' = ' + alloc.value(patch[key]));
   }
 
   // REMOVE actions from options.delete
   if (Array.isArray(deleteProps)) {
     for (const key of deleteProps) {
-      const parts = aliasPath(key, separator, uniqueNames, names, keyCounter);
+      const parts = aliasPath(key, separator, uniqueNames, alloc);
       removeActions.push(joinPath(parts));
     }
   }
@@ -51,30 +46,24 @@ export const buildUpdate = (patch, options, params = {}) => {
   // Array operations
   if (Array.isArray(arrayOps)) {
     for (const op of arrayOps) {
-      const parts = aliasPath(op.path, separator, uniqueNames, names, keyCounter);
+      const parts = aliasPath(op.path, separator, uniqueNames, alloc);
       const pathExpr = joinPath(parts);
 
       switch (op.op) {
         case 'append': {
-          const emptyAlias = ':upv' + valueCounter++;
-          values[emptyAlias] = [];
-          const valAlias = ':upv' + valueCounter++;
-          values[valAlias] = op.values;
+          const emptyAlias = alloc.value([]);
+          const valAlias = alloc.value(op.values);
           setActions.push(pathExpr + ' = list_append(if_not_exists(' + pathExpr + ', ' + emptyAlias + '), ' + valAlias + ')');
           break;
         }
         case 'prepend': {
-          const emptyAlias = ':upv' + valueCounter++;
-          values[emptyAlias] = [];
-          const valAlias = ':upv' + valueCounter++;
-          values[valAlias] = op.values;
+          const emptyAlias = alloc.value([]);
+          const valAlias = alloc.value(op.values);
           setActions.push(pathExpr + ' = list_append(' + valAlias + ', if_not_exists(' + pathExpr + ', ' + emptyAlias + '))');
           break;
         }
         case 'setAtIndex': {
-          const valAlias = ':upv' + valueCounter++;
-          values[valAlias] = op.value;
-          setActions.push(pathExpr + '[' + op.index + '] = ' + valAlias);
+          setActions.push(pathExpr + '[' + op.index + '] = ' + alloc.value(op.value));
           break;
         }
         case 'removeAtIndex': {
@@ -82,9 +71,7 @@ export const buildUpdate = (patch, options, params = {}) => {
           break;
         }
         case 'add': {
-          const valAlias = ':upv' + valueCounter++;
-          values[valAlias] = op.value;
-          addActions.push(pathExpr + ' ' + valAlias);
+          addActions.push(pathExpr + ' ' + alloc.value(op.value));
           break;
         }
         default:
@@ -93,7 +80,7 @@ export const buildUpdate = (patch, options, params = {}) => {
     }
   }
 
-  if (Object.keys(names).length) params.ExpressionAttributeNames = names;
+  if (Object.keys(alloc.names).length) params.ExpressionAttributeNames = alloc.names;
 
   const parts = [];
   if (setActions.length) parts.push('SET ' + setActions.join(', '));
@@ -101,7 +88,9 @@ export const buildUpdate = (patch, options, params = {}) => {
   if (addActions.length) parts.push('ADD ' + addActions.join(', '));
   params.UpdateExpression = parts.join(' ');
 
-  if (setActions.length || addActions.length) params.ExpressionAttributeValues = values;
+  // values attach only when a value-carrying action exists — REMOVE-only
+  // updates must not ship an empty (or stale) values map.
+  if (setActions.length || addActions.length) params.ExpressionAttributeValues = alloc.values;
 
   return params;
 };

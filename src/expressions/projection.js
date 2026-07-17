@@ -2,6 +2,7 @@
 // Build a ProjectionExpression for DynamoDB, handling de-duplication and attribute aliasing.
 
 import {normalizeFields} from '../paths/normalize-fields.js';
+import {makeAllocator} from './allocator.js';
 
 const isInteger = /^\d+$/;
 
@@ -18,11 +19,13 @@ export const addProjection = (params, fields, projectionFieldMap, skipSelect, se
   fields = normalizeFields(fields, projectionFieldMap);
   if (!fields) return params;
 
-  const names = params.ExpressionAttributeNames || {},
-    keys = Object.keys(names),
-    reversedNames = keys.reduce((acc, key) => ((acc['#' + names[key]] = key), acc), {}),
+  // names-only builder — no value prefix. `reversedNames` re-uses aliases
+  // already on `params` for the same attribute; `uniqueNames` memoizes
+  // within this invocation.
+  const alloc = makeAllocator(params, '#pj'),
+    names = alloc.names,
+    reversedNames = Object.keys(names).reduce((acc, key) => ((acc['#' + names[key]] = key), acc), {}),
     uniqueNames = {};
-  let keyCounter = keys.length;
 
   const projection = fields
     .filter(removeDups())
@@ -30,10 +33,7 @@ export const addProjection = (params, fields, projectionFieldMap, skipSelect, se
       const path = key.split(separator).map(part => {
         if (isInteger.test(part)) return part;
         let alias = uniqueNames['#' + part] || reversedNames['#' + part];
-        if (!alias) {
-          alias = uniqueNames['#' + part] = '#pj' + keyCounter++;
-          names[alias] = part;
-        }
+        if (!alias) alias = uniqueNames['#' + part] = alloc.name(part);
         return alias;
       });
       acc.push(path.reduce((acc, part) => acc + (acc ? (isInteger.test(part) ? '[' + part + ']' : '.' + part) : part), ''));

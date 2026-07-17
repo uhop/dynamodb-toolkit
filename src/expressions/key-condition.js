@@ -17,33 +17,20 @@
 // Merges into `params` with counter-based placeholder names (`#kc<n>` /
 // `:kcv<n>`), AND-combined with any existing KeyConditionExpression.
 
+import {makeAllocator} from './allocator.js';
+
 export const buildKeyCondition = (input, params = {}) => {
   const {name, value, kind, pkName, pkValue} = input;
 
-  const names = params.ExpressionAttributeNames || {};
-  const values = params.ExpressionAttributeValues || {};
-  let nameCounter = Object.keys(names).length;
-  let valueCounter = Object.keys(values).length;
-
-  const allocName = fieldName => {
-    const key = '#kc' + nameCounter++;
-    names[key] = fieldName;
-    return key;
-  };
-  const allocValue = v => {
-    const key = ':kcv' + valueCounter++;
-    values[key] = v;
-    return key;
-  };
-
+  const alloc = makeAllocator(params, '#kc', ':kcv');
   const clauses = [];
 
   if (pkName !== undefined && pkValue !== undefined) {
-    clauses.push(allocName(pkName) + ' = ' + allocValue(pkValue));
+    clauses.push(alloc.name(pkName) + ' = ' + alloc.value(pkValue));
   }
 
-  const nameAlias = allocName(name);
-  const valueAlias = allocValue(value);
+  const nameAlias = alloc.name(name);
+  const valueAlias = alloc.value(value);
   if (kind === 'prefix') {
     clauses.push('begins_with(' + nameAlias + ', ' + valueAlias + ')');
   } else {
@@ -59,7 +46,6 @@ export const buildKeyCondition = (input, params = {}) => {
     params.KeyConditionExpression = expr;
   }
 
-  if (Object.keys(names).length) params.ExpressionAttributeNames = names;
-  if (Object.keys(values).length) params.ExpressionAttributeValues = values;
+  alloc.commit();
   return params;
 };
