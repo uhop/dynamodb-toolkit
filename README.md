@@ -210,6 +210,7 @@ The v2 documentation snapshot lives in the wiki repo at the `v2.3-docs` git tag.
 
 ## Release notes
 
+- 3.8.0 _Framework adapters (Express/Koa/Fetch/Lambda) ship in the box as subpath exports; cursor pagination (`?cursor`) and NDJSON output (`?format=jsonl`); configurable batch retry; resumable mass ops on the wire (`?max-items`/`?resume`); unscoped `DELETE /` now requires `?confirm=true` (policy opt-out)._
 - 3.7.1 _`applyFilter` auto-promotes sort-key range ops to `KeyConditionExpression`; deep `llms.txt` + wiki documentation refresh._
 - 3.7.0 _Breaking: filter grammar flipped to `?<op>-<field>=<value>`; naming consolidation, typed dispatch on every tier, bulk-load versioning, descriptor hiding._
 - 3.6.1 _Bug fixes from the car-rental ergonomics review; no API-shape changes._
