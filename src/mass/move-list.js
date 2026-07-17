@@ -9,7 +9,7 @@ const identity = x => x;
 // With v3 transaction limit at 100, the batch write limit is still 25.
 const MOVE_CHUNK = 12;
 
-export const moveList = async (client, params, mapFn = identity, keyFn = identity) => {
+export const moveList = async (client, params, mapFn = identity, keyFn = identity, retry) => {
   const tableName = params.TableName;
   let p = params,
     processed = 0;
@@ -33,7 +33,7 @@ export const moveList = async (client, params, mapFn = identity, keyFn = identit
         const puts = pairs.map(({put}) => ({action: 'put', params: {TableName: tableName, Item: put}}));
         /** @type {{action: 'delete', params: any}[]} */
         const deletes = pairs.map(({key}) => ({action: 'delete', params: {TableName: tableName, Key: key}}));
-        processed += await applyBatch(client, [...puts, ...deletes]);
+        processed += await applyBatch(client, [...puts, ...deletes], retry && {options: {retry}});
       }
     });
   }

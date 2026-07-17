@@ -5,6 +5,8 @@ import type {Raw} from '../raw.js';
 import type {ArrayOp} from '../expressions/update.js';
 import type {ConditionClause} from '../expressions/condition.js';
 import type {PaginatedResult} from '../mass/paginate-list.js';
+import type {CursorPage} from '../mass/cursor-list.js';
+import type {RetryOptions} from '../batch/backoff.js';
 import type {AdapterHooks} from './hooks.js';
 
 /**
@@ -246,6 +248,14 @@ export interface AdapterOptions<TItem extends Record<string, unknown>, _TKey = P
    * Typical value: `'__adapter__'`.
    */
   descriptorKey?: string;
+  /**
+   * Default retry policy for chunked batch I/O (`BatchWriteItem` /
+   * `BatchGetItem`) issued by this adapter's bulk methods. Per-call
+   * `options.retry` overrides. Default unset — the AWS-guidance schedule
+   * (exponential + full jitter, 50 ms → 20 s cap, 8 attempts). Transactions
+   * are excluded: the SDK's adaptive retry handles those.
+   */
+  retry?: RetryOptions;
   /** Per-instance hook overrides; merges over {@link defaultHooks}. */
   hooks?: AdapterHooks<TItem>;
 }
@@ -285,6 +295,8 @@ export interface GetOptions {
   ignoreIndirection?: boolean;
   /** Extra DynamoDB input merged into the Command (e.g. `IndexName`, `ConsistentRead`). */
   params?: Record<string, unknown>;
+  /** Retry policy override for `BatchGetItem`-backed reads (`getByKeys`). Defaults to the adapter's `retry`. */
+  retry?: RetryOptions;
 }
 
 /** Options for `post`. */
@@ -459,14 +471,25 @@ export interface MassOptions {
    * verification tooling that needs to see the descriptor.
    */
   includeDescriptor?: boolean;
+  /**
+   * Retry policy override for the chunked `BatchWriteItem` / `BatchGetItem`
+   * calls this operation issues. Defaults to the adapter's `retry`.
+   */
+  retry?: RetryOptions;
 }
 
-/** Options for list reads (`getList` / `getListByParams`). */
+/** Options for list reads (`getList` / `getListByParams` / `getPage` / `getPageByParams`). */
 export interface ListOptions {
-  /** Zero-based starting offset. Default `0`. */
+  /** Zero-based starting offset. Default `0`. Offset paging only — ignored by `getPage*`. */
   offset?: number;
   /** Maximum items per page. Default `10`. */
   limit?: number;
+  /**
+   * Opaque cursor from a prior page (`getPage*` only — ignored by offset
+   * paging). Omit for the first page. Throws `TypeError` when malformed —
+   * wire input should be validated with `parseCursor` at the boundary.
+   */
+  cursor?: string;
   /** Descending sort (reverses `ScanIndexForward`). */
   descending?: boolean;
   /**
@@ -524,6 +547,12 @@ export interface ListOptions {
    * verification tooling that needs to see the descriptor.
    */
   includeDescriptor?: boolean;
+  /**
+   * Retry policy override for the indirect-index second-hop `BatchGetItem`.
+   * Defaults to the adapter's `retry`. No effect on direct (non-indirect)
+   * list reads — those page via `Query` / `Scan`, which the SDK retries.
+   */
+  retry?: RetryOptions;
 }
 
 /**
@@ -585,7 +614,7 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   /** Allowlist for the `<op>-<field>=<value>` filter grammar. */
   filterable: Record<string, string[]>;
   /** Per-field type overrides from the `filterable: {ops, type}` shape. Used
-   * by `_coerceFilterValue` when the field isn't reachable from `keyFields`
+   * by `coerceFilterValue` when the field isn't reachable from `keyFields`
    * / `indices`. Empty when every entry uses the array shape. */
   filterableTypes: Record<string, 'string' | 'number' | 'binary'>;
   /** Mirror-column prefix. Default `'-search-'`. */
@@ -597,6 +626,8 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * legacy `indirectIndices` entries synthesised into minimal GSI shapes.
    */
   indices: Record<string, Required<Omit<IndexSpec, 'pk' | 'sk'>> & {pk?: IndexKeySpec; sk?: IndexKeySpec}>;
+  /** Default retry policy for chunked batch I/O, when declared. Per-call `options.retry` overrides. */
+  retry?: RetryOptions;
   /** Resolved hooks bag (defaults merged with user overrides). */
   hooks: Required<AdapterHooks<TItem>>;
 
@@ -627,6 +658,21 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
   findIndexForSort(field: string): string;
 
   /**
+   * Coerce a filter value to the field's declared type: `filterable`'s
+   * `{ops, type}` override first, then `keyFields` / `indices` key
+   * declarations, defaulting to `'string'`. `'number'` fields are
+   * `Number()`-coerced (throws on `NaN`); `'string'` and `'binary'` pass
+   * through unchanged. Public so custom filter paths (pre-filtering ahead
+   * of `applyFilter`, custom mass-op scoping) can reuse the toolkit's
+   * coercion.
+   *
+   * @param field Field name as declared in `filterable` / key declarations.
+   * @param value Raw value (typically a string off the URL grammar).
+   * @returns The coerced value.
+   */
+  coerceFilterValue(field: string, value: unknown): unknown;
+
+  /**
    * Compile parsed `<op>-<field>=<value>` clauses into `params`.
    * Validates against `filterable`, coerces values to declared types,
    * auto-promotes index-compatible clauses to `KeyConditionExpression`;
@@ -635,6 +681,13 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * Clause shape is polymorphic by op: no-value ops (`ex`, `nx`) omit
    * `value`; multi-value ops (`in`, `btw`) carry `value` as array;
    * single-value ops carry `value` as scalar.
+   *
+   * At most one clause per key component is promoted — DynamoDB rejects
+   * over-specified key conditions. Clauses that targeted a pk/sk slot
+   * already taken fall through to `FilterExpression`; when that happens the
+   * returned `params` carries a non-enumerable `filterFallbacks` array of
+   * `{field, op}` (invisible to serialization and `cloneParams` — a
+   * build-time diagnostic, not wire state).
    *
    * @throws BadFilterField when a clause names a field not in `filterable`.
    * @throws BadFilterOp when the op isn't allowlisted for that field.
@@ -788,6 +841,33 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    *   `partialKey`), with the same envelope as `getList`.
    */
   getListUnder(partialKey: Partial<TItem>, options?: ListOptions): Promise<PaginatedResult<TItem>>;
+
+  /**
+   * Cursor-paged list of items — DynamoDB's native `LastEvaluatedKey`
+   * paging. Constant cost per page regardless of depth (offset paging walks
+   * COUNT pages toward the offset) and never computes a `total`. The page
+   * carries an opaque `cursor` while more data may exist; pass it back via
+   * `options.cursor` for the next page. A filtered page may come back short
+   * (even empty) and still carry a cursor — keep paging while `cursor` is
+   * present.
+   *
+   * @param options Cursor / limit / sorting / projection / filter / revive options.
+   * @param example Partial example fed to `prepareListInput` (for index lookups).
+   * @param index GSI name fed to `prepareListInput`.
+   * @returns One page: `data` (revived unless `reviveItems: false`), the clamped
+   *   `limit`, and `cursor` when more data may exist.
+   */
+  getPage(options?: ListOptions, example?: Partial<TItem>, index?: string): Promise<CursorPage<TItem>>;
+
+  /**
+   * Cursor-paged list from caller-built DynamoDB params. Skips the
+   * `prepareListInput` hook. Same page shape as {@link Adapter.getPage}.
+   *
+   * @param params Pre-built DynamoDB `Query` / `Scan` input.
+   * @param options Cursor / limit / revive options.
+   * @returns One page of items plus `limit` and optional `cursor`.
+   */
+  getPageByParams(params: Record<string, unknown>, options?: ListOptions): Promise<CursorPage<TItem>>;
 
   /** @deprecated Use {@link Adapter.getList}. Removed in a future minor. */
   getAll(options?: ListOptions, example?: Partial<TItem>, index?: string): Promise<PaginatedResult<TItem>>;

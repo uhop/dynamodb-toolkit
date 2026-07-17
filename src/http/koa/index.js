@@ -40,6 +40,14 @@ export const createKoaAdapter = (adapter, options = {}) => {
 
   const send = (kctx, result) => {
     kctx.status = result.status;
+    if (result.type === 'text') {
+      // Content-Type must land before the body assignment — Koa's body setter
+      // only infers a type when the header is still unset.
+      kctx.set('content-type', result.contentType);
+      if (result.headers) kctx.set(result.headers);
+      kctx.body = result.body;
+      return;
+    }
     kctx.body = result.type === 'empty' ? '' : result.body;
   };
 

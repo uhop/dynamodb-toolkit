@@ -1,7 +1,7 @@
 import type {IncomingMessage, ServerResponse} from 'node:http';
 
 import type {Adapter} from '../adapter/adapter.js';
-import type {RestPolicy} from '../rest-core/policy.js';
+import type {RestPolicyOverrides} from '../rest-core/policy.js';
 
 /** `(req, res) =>` request handler compatible with `node:http.createServer`. */
 export type RequestHandler = (req: IncomingMessage, res: ServerResponse) => Promise<void>;
@@ -9,7 +9,7 @@ export type RequestHandler = (req: IncomingMessage, res: ServerResponse) => Prom
 /** Options for {@link createHandler}. */
 export interface HandlerOptions {
   /** Partial overrides for the REST policy (merged with the default). */
-  policy?: Partial<RestPolicy>;
+  policy?: RestPolicyOverrides;
   /**
    * Map from sort-field name to the GSI index that provides that ordering.
    * `?sort=name` becomes `{index: sortableIndices.name, descending: false}`.

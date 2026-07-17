@@ -1,5 +1,5 @@
 import type {Adapter} from '../../index.js';
-import type {RestPolicy} from '../../rest-core/index.js';
+import type {RestPolicyOverrides} from '../../rest-core/index.js';
 import type {
   APIGatewayProxyEvent,
   APIGatewayProxyResult,
@@ -54,7 +54,7 @@ export interface LambdaExampleContext<TItem extends Record<string, unknown> = Re
 /** Options for {@link createLambdaAdapter}. */
 export interface LambdaAdapterOptions<TItem extends Record<string, unknown> = Record<string, unknown>> {
   /** Partial overrides for the REST policy (merged with the default). */
-  policy?: Partial<RestPolicy>;
+  policy?: RestPolicyOverrides;
   /**
    * Map from sort-field name to the GSI index that provides that ordering.
    * `?sort=name` becomes `{index: sortableIndices.name, descending: false}`.

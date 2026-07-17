@@ -12,10 +12,11 @@ import {getBatch} from '../batch/get-batch.js';
 // of writing to Object.prototype. Defends against records whose key values
 // happen to match reserved property names.
 
-export const readByKeys = async (client, tableName, keys, params) => {
+export const readByKeys = async (client, tableName, keys, params, retry) => {
   const result = await getBatch(
     client,
-    keys.map(key => ({action: 'get', params: {...params, TableName: tableName, Key: key}}))
+    keys.map(key => ({action: 'get', params: {...params, TableName: tableName, Key: key}})),
+    retry && {options: {retry}}
   );
   const items = result.map(pair => pair.item);
   if (!keys.length) return items;

@@ -5,7 +5,7 @@ import {readList} from './read-list.js';
 
 const identity = x => x;
 
-export const deleteList = async (client, params, keyFn = identity) => {
+export const deleteList = async (client, params, keyFn = identity, retry) => {
   let p = params,
     processed = 0;
   while (p) {
@@ -14,7 +14,8 @@ export const deleteList = async (client, params, keyFn = identity) => {
         const keys = data.Items.map(keyFn).filter(identity);
         processed += await applyBatch(
           client,
-          keys.map(key => ({action: 'delete', params: {TableName: params.TableName, Key: key}}))
+          keys.map(key => ({action: 'delete', params: {TableName: params.TableName, Key: key}})),
+          retry && {options: {retry}}
         );
       }
     });
@@ -22,8 +23,9 @@ export const deleteList = async (client, params, keyFn = identity) => {
   return processed;
 };
 
-export const deleteByKeys = async (client, tableName, keys) =>
+export const deleteByKeys = async (client, tableName, keys, retry) =>
   applyBatch(
     client,
-    keys.map(key => ({action: 'delete', params: {TableName: tableName, Key: key}}))
+    keys.map(key => ({action: 'delete', params: {TableName: tableName, Key: key}})),
+    retry && {options: {retry}}
   );

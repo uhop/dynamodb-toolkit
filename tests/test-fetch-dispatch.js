@@ -254,3 +254,15 @@ test('sortableIndices: ?sort=-name sets descending', async t => {
     t.equal(adapter.calls[0].opts.descending, true);
   });
 });
+
+test('jsonl cursor mode: x-cursor response header carries the next-page token', async t => {
+  const adapter = makeMockAdapter();
+  await withFetchHandler(createFetchAdapter(adapter), async client => {
+    const res = await client('/?cursor&format=jsonl&limit=2');
+    t.equal(res.status, 200);
+    t.matchString(res.headers.get('content-type'), /x-ndjson/);
+    t.equal(res.headers.get('x-cursor'), 'next-token');
+    const text = await res.text();
+    t.equal(text, '{"name":"earth"}\n{"name":"mars"}\n');
+  });
+});

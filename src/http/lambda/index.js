@@ -123,10 +123,13 @@ export const createLambdaAdapter = (adapter, options = {}) => {
   const maxBodyBytes = options.maxBodyBytes ?? 1024 * 1024;
   const mountPath = options.mountPath || '';
 
-  const send = result =>
-    result.type === 'empty'
-      ? {status: result.status, body: ''}
-      : {status: result.status, body: JSON.stringify(result.body), headers: JSON_HEADERS};
+  const send = result => {
+    if (result.type === 'empty') return {status: result.status, body: ''};
+    if (result.type === 'text') {
+      return {status: result.status, body: result.body, headers: {'content-type': result.contentType, ...result.headers}};
+    }
+    return {status: result.status, body: JSON.stringify(result.body), headers: JSON_HEADERS};
+  };
 
   return async (event, context) => {
     const kind = detectKind(event);

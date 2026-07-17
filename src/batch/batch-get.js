@@ -9,11 +9,12 @@ import {sleep} from '../sleep.js';
 // fits AWS's "stop around one minute" guidance for DynamoDB retries.
 const MAX_ATTEMPTS = 8;
 
-export const batchGet = async (client, requestItems) => {
+export const batchGet = async (client, requestItems, retry) => {
+  const maxAttempts = retry?.maxAttempts ?? MAX_ATTEMPTS;
   let params = {RequestItems: requestItems};
   const responses = {};
   let attempts = 0;
-  for (const delay of backoff()) {
+  for (const delay of (retry?.backoff ?? backoff)()) {
     try {
       const data = await client.send(new BatchGetCommand(params));
       if (data.Responses) {
@@ -30,10 +31,11 @@ export const batchGet = async (client, requestItems) => {
     } catch (error) {
       if (error.name !== 'ProvisionedThroughputExceededException') throw error;
     }
-    if (++attempts >= MAX_ATTEMPTS) {
-      throw new Error(`batchGet exceeded ${MAX_ATTEMPTS} attempts (UnprocessedKeys or throttling persisted)`);
+    if (++attempts >= maxAttempts) {
+      throw new Error(`batchGet exceeded ${maxAttempts} attempts (UnprocessedKeys or throttling persisted)`);
     }
     await sleep(delay);
   }
-  return responses;
+  // reached only when a custom finite backoff ran dry with work still pending
+  throw new Error('batchGet: retry delays exhausted (UnprocessedKeys or throttling persisted)');
 };

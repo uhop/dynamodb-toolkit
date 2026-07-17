@@ -45,10 +45,16 @@ export const createFetchAdapter = (adapter, options = {}) => {
   const mountPath = options.mountPath || '';
   const onMiss = options.onMiss;
 
-  const send = result =>
-    result.type === 'empty'
-      ? new Response(null, {status: result.status})
-      : new Response(JSON.stringify(result.body), {status: result.status, headers: JSON_HEADERS});
+  const send = result => {
+    if (result.type === 'empty') return new Response(null, {status: result.status});
+    if (result.type === 'text') {
+      return new Response(result.body, {
+        status: result.status,
+        headers: {'content-type': result.contentType, ...result.headers}
+      });
+    }
+    return new Response(JSON.stringify(result.body), {status: result.status, headers: JSON_HEADERS});
+  };
 
   const handleMiss = async request => {
     if (!onMiss) return new Response(null, {status: 404});

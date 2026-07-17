@@ -1,4 +1,5 @@
 import type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
+import type {RetryOptions} from '../batch/backoff.js';
 
 /**
  * Batch-read items by key and return them in the caller's input-key order.
@@ -16,6 +17,7 @@ import type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
  * @param keys Keys to fetch, in the desired result order.
  * @param params Extra DynamoDB input merged into each sub-request (e.g.
  *   `ConsistentRead`, `ProjectionExpression`).
+ * @param retry Retry policy override for the underlying batch reads.
  * @returns Array aligned 1:1 with `keys` — `result[i]` is the item for
  *   `keys[i]`, or `undefined` when that key had no matching item.
  */
@@ -23,5 +25,6 @@ export function readByKeys<T = Record<string, unknown>>(
   client: DynamoDBDocumentClient,
   tableName: string,
   keys: Record<string, unknown>[],
-  params?: Record<string, unknown>
+  params?: Record<string, unknown>,
+  retry?: RetryOptions
 ): Promise<(T | undefined)[]>;

@@ -26,6 +26,12 @@ export interface PaginatedResult<T = Record<string, unknown>> {
  * so a naive read returns short/empty pages. With `needTotal: true` (default),
  * counts the remaining matches via `Select: 'COUNT'` and returns `total`.
  *
+ * `offset` is floored but not capped here — a huge offset walks the table in
+ * `Select: 'COUNT'` pages until exhausted, so its cost is bounded by table
+ * size, not rejected. The REST boundary clamps offsets before they reach this
+ * function (`parsePaging` → `policy.maxOffset`); programmatic callers are
+ * trusted code and bound their own offsets.
+ *
  * @param client The DynamoDB DocumentClient.
  * @param params DynamoDB `Query` / `Scan` input.
  * @param options Offset and limit window.

@@ -16,6 +16,7 @@ import {applyBatch} from '../batch/apply-batch.js';
 import {applyTransaction} from '../batch/apply-transaction.js';
 
 import {paginateList} from '../mass/paginate-list.js';
+import {cursorList} from '../mass/cursor-list.js';
 import {readByKeys} from '../mass/read-by-keys.js';
 import {writeItems} from '../mass/write-items.js';
 import {mergeMapFn} from '../mass/map-fns.js';
@@ -308,6 +309,13 @@ export class Adapter {
       }
       this.descriptorKey = options.descriptorKey;
     }
+
+    // Default retry policy for chunked batch I/O (BatchWriteItem / BatchGetItem):
+    // {backoff?: () => Iterable<number>, maxAttempts?: number}. Per-call
+    // options.retry overrides. Default unset — AWS-guidance backoff (50ms → 20s
+    // cap, 8 attempts). Transactions are excluded: the SDK's adaptive retry
+    // handles those.
+    if (options.retry !== undefined) this.retry = options.retry;
 
     this.client = options.client;
     this.table = options.table;
@@ -943,7 +951,7 @@ export class Adapter {
     return 'string';
   }
 
-  _coerceFilterValue(name, value) {
+  coerceFilterValue(name, value) {
     const type = this._typeOfField(name);
     if (type === 'number') {
       const n = Number(value);
@@ -1003,12 +1011,19 @@ export class Adapter {
     // where both comparisons apply post-fetch.
     let pkPromoted = false;
     let skPromoted = false;
+    const fallbacks = [];
     for (const c of clauses) {
-      const pkMatch = c.op === 'eq' && pkName && c.field === pkName && !pkPromoted;
-      const skMatch = skName && c.field === skName && !skPromoted && (c.op === 'eq' || c.op === 'beg' || c.op === 'btw' || c.op === 'lt' || c.op === 'le' || c.op === 'gt' || c.op === 'ge');
+      const pkEligible = Boolean(pkName) && c.op === 'eq' && c.field === pkName;
+      const skEligible =
+        Boolean(skName) &&
+        c.field === skName &&
+        (c.op === 'eq' || c.op === 'beg' || c.op === 'btw' || c.op === 'lt' || c.op === 'le' || c.op === 'gt' || c.op === 'ge');
+      const pkMatch = pkEligible && !pkPromoted;
+      const skMatch = skEligible && !skPromoted;
       const canPromote = pkMatch || skMatch;
       if (pkMatch) pkPromoted = true;
       if (skMatch) skPromoted = true;
+      if (!canPromote && (pkEligible || skEligible)) fallbacks.push({field: c.field, op: c.op});
       const target = canPromote ? kcParts : feParts;
       const nameAlias = allocName(c.field);
 
@@ -1019,31 +1034,31 @@ export class Adapter {
       if (c.op === 'in') {
         const vs = c.value;
         if (!Array.isArray(vs) || vs.length === 0) throw new Error(`filter 'in' on '${c.field}' requires at least one value`);
-        const aliases = vs.map(v => allocValue(this._coerceFilterValue(c.field, v)));
+        const aliases = vs.map(v => allocValue(this.coerceFilterValue(c.field, v)));
         target.push(nameAlias + ' IN (' + aliases.join(', ') + ')');
         continue;
       }
       if (c.op === 'btw') {
         const vs = c.value;
         if (!Array.isArray(vs) || vs.length !== 2) throw new Error(`filter 'btw' on '${c.field}' requires exactly 2 values`);
-        const lo = allocValue(this._coerceFilterValue(c.field, vs[0]));
-        const hi = allocValue(this._coerceFilterValue(c.field, vs[1]));
+        const lo = allocValue(this.coerceFilterValue(c.field, vs[0]));
+        const hi = allocValue(this.coerceFilterValue(c.field, vs[1]));
         target.push(nameAlias + ' BETWEEN ' + lo + ' AND ' + hi);
         continue;
       }
       if (c.op === 'beg') {
-        const v = allocValue(this._coerceFilterValue(c.field, c.value));
+        const v = allocValue(this.coerceFilterValue(c.field, c.value));
         target.push('begins_with(' + nameAlias + ', ' + v + ')');
         continue;
       }
       if (c.op === 'ct') {
-        const v = allocValue(this._coerceFilterValue(c.field, c.value));
+        const v = allocValue(this.coerceFilterValue(c.field, c.value));
         target.push('contains(' + nameAlias + ', ' + v + ')');
         continue;
       }
       // Comparison ops: eq ne lt le gt ge.
       const op = FILTER_OP_COMPARISON[c.op];
-      const v = allocValue(this._coerceFilterValue(c.field, c.value));
+      const v = allocValue(this.coerceFilterValue(c.field, c.value));
       target.push(nameAlias + ' ' + op + ' ' + v);
     }
 
@@ -1061,6 +1076,8 @@ export class Adapter {
     }
     if (Object.keys(names).length) params.ExpressionAttributeNames = names;
     if (Object.keys(values).length) params.ExpressionAttributeValues = values;
+    // Diagnostic only — non-enumerable so it never reaches the wire or survives cloneParams.
+    if (fallbacks.length) Object.defineProperty(params, 'filterFallbacks', {value: fallbacks, configurable: true});
     return params;
   }
 
@@ -1768,7 +1785,7 @@ export class Adapter {
     activeParams = cleanParams(activeParams);
     const dynamoKeys = keys.map(k => this._toKey(k, activeParams.IndexName));
 
-    let items = await readByKeys(this.client, this.table, dynamoKeys, activeParams);
+    let items = await readByKeys(this.client, this.table, dynamoKeys, activeParams, options?.retry ?? this.retry);
 
     if (isIndirect && items.some(Boolean)) {
       let indirectParams = this._cloneParams(params);
@@ -1786,7 +1803,7 @@ export class Adapter {
           foundKeys.push(this._restrictKey(item));
         }
       });
-      const fetched = await readByKeys(this.client, this.table, foundKeys, indirectParams);
+      const fetched = await readByKeys(this.client, this.table, foundKeys, indirectParams, options?.retry ?? this.retry);
       const remapped = new Array(items.length).fill(undefined);
       foundIndexes.forEach((i, j) => (remapped[i] = fetched[j]));
       items = remapped;
@@ -1809,7 +1826,13 @@ export class Adapter {
     return this.getListByParams(params, options);
   }
 
-  async getListByParams(params, options) {
+  // Honor options.filter / options.search / options.asOf the same
+  // way the mass-op list methods (`deleteListByParams` etc.) do —
+  // otherwise passing these through a hand-built-params path would
+  // silently ignore them. Both entry points (getList / getPage via
+  // `_buildListParams`, and *ByParams via hand-built params) funnel
+  // through here.
+  _prepareListParams(params, options) {
     this._checkConsistentRead(params);
     const isIndirect = this._isIndirect(params, options);
     let activeParams = this._cloneParams(params);
@@ -1817,12 +1840,6 @@ export class Adapter {
       delete activeParams.ProjectionExpression;
       activeParams = addProjection(activeParams, this.primaryKeyAttrs, null, true);
     }
-    // Honor options.filter / options.search / options.asOf the same
-    // way the mass-op list methods (`deleteListByParams` etc.) do —
-    // otherwise passing these through a hand-built-params path would
-    // silently ignore them. Both entry points (getList via
-    // `_buildListParams`, and getListByParams via hand-built params)
-    // funnel through here.
     if (options?.filter && options.filter.length) {
       activeParams = this.applyFilter(activeParams, options.filter);
     }
@@ -1836,11 +1853,11 @@ export class Adapter {
     }
     activeParams = this._applyAsOf(activeParams, options?.asOf);
     activeParams = this._hideDescriptor(activeParams, options);
-    activeParams = cleanParams(activeParams);
+    return {activeParams: cleanParams(activeParams), isIndirect};
+  }
 
-    const needTotal = options?.needTotal !== false;
-    const result = await paginateList(this.client, activeParams, options, needTotal);
-
+  // Indirect second hop + revive — shared tail of getListByParams / getPageByParams.
+  async _finishList(result, params, options, isIndirect) {
     if (isIndirect && result.data.length) {
       let indirectParams = this._cloneParams(params);
       delete indirectParams.IndexName;
@@ -1850,13 +1867,34 @@ export class Adapter {
         this.client,
         this.table,
         result.data.map(item => this._restrictKey(item)),
-        indirectParams
+        indirectParams,
+        options?.retry ?? this.retry
       );
       result.data = items.filter(Boolean);
     }
 
     result.data = result.data.map(item => this._reviveOne(item, options?.fields, options));
     return result;
+  }
+
+  async getListByParams(params, options) {
+    const {activeParams, isIndirect} = this._prepareListParams(params, options);
+    const needTotal = options?.needTotal !== false;
+    const result = await paginateList(this.client, activeParams, options, needTotal);
+    return this._finishList(result, params, options, isIndirect);
+  }
+
+  // --- cursor paging (native LastEvaluatedKey; constant cost per page) ---
+
+  async getPage(options, example, index) {
+    const params = await this._buildListParams(options, true, example, index);
+    return this.getPageByParams(params, options);
+  }
+
+  async getPageByParams(params, options) {
+    const {activeParams, isIndirect} = this._prepareListParams(params, options);
+    const result = await cursorList(this.client, activeParams, options);
+    return this._finishList(result, params, options, isIndirect);
   }
 
   // --- mass writes ---
@@ -1875,10 +1913,16 @@ export class Adapter {
     // first-write items get `_version: 1` and round-trips bump. No OC
     // condition is enforced (BatchWriteItem doesn't support ConditionExpression
     // per-item) — callers needing OC should use `put` / `strategy: 'sequential'`.
-    const processed = await writeItems(this.client, this.table, items, item => {
-      const {item: versioned} = this._applyVersionToItem(item);
-      return this._prepareItem(versioned);
-    });
+    const processed = await writeItems(
+      this.client,
+      this.table,
+      items,
+      item => {
+        const {item: versioned} = this._applyVersionToItem(item);
+        return this._prepareItem(versioned);
+      },
+      options?.retry ?? this.retry
+    );
     return {processed};
   }
 
@@ -1893,7 +1937,7 @@ export class Adapter {
       return {processed};
     }
     const dynamoKeys = keys.map(k => this._toKey(k));
-    const processed = await deleteByKeys(this.client, this.table, dynamoKeys);
+    const processed = await deleteByKeys(this.client, this.table, dynamoKeys, options?.retry ?? this.retry);
     return {processed};
   }
 
@@ -1904,19 +1948,20 @@ export class Adapter {
     p = this._hideDescriptor(p, options);
     p = cleanParams(p);
 
+    const retry = options?.retry ?? this.retry;
     return runPaged(this.client, p, options, async items => {
       const keys = items.map(item => this._restrictKey(item)).filter(Boolean);
       if (!keys.length) return {processed: 0};
       /** @type {{action: 'delete', params: any}[]} */
       const batch = keys.map(key => ({action: 'delete', params: {TableName: this.table, Key: key}}));
-      const processed = await applyBatch(this.client, batch);
+      const processed = await applyBatch(this.client, batch, retry && {options: {retry}});
       return {processed};
     });
   }
 
   async cloneByKeys(keys, mapFn, options) {
     const dynamoKeys = keys.map(k => this._toKey(k));
-    const items = await readByKeys(this.client, this.table, dynamoKeys);
+    const items = await readByKeys(this.client, this.table, dynamoKeys, undefined, options?.retry ?? this.retry);
     const cloned = items.filter(Boolean).map(item => {
       const revived = this.hooks.revive(item);
       const mapped = mapFn(revived);
@@ -1933,7 +1978,7 @@ export class Adapter {
       return {processed: result.processed, skipped: result.skipped, failed: result.failed, conflicts: []};
     }
 
-    const processed = await writeItems(this.client, this.table, valid);
+    const processed = await writeItems(this.client, this.table, valid, undefined, options?.retry ?? this.retry);
     return {processed};
   }
 
@@ -1944,6 +1989,7 @@ export class Adapter {
     p = cleanParams(p);
 
     const useConditionPath = options?.ifNotExists || options?.ifExists;
+    const retry = options?.retry ?? this.retry;
 
     return runPaged(this.client, p, options, async items => {
       const prepared = items
@@ -1961,7 +2007,7 @@ export class Adapter {
 
       /** @type {{action: 'put', params: any}[]} */
       const batch = prepared.map(item => ({action: 'put', params: {TableName: this.table, Item: item}}));
-      const processed = await applyBatch(this.client, batch);
+      const processed = await applyBatch(this.client, batch, retry && {options: {retry}});
       return {processed};
     });
   }
@@ -2004,9 +2050,10 @@ export class Adapter {
     return {processed, skipped, failed};
   }
 
-  async moveByKeys(keys, mapFn, _options) {
+  async moveByKeys(keys, mapFn, options) {
+    const retry = options?.retry ?? this.retry;
     const dynamoKeys = keys.map(k => this._toKey(k));
-    const items = await readByKeys(this.client, this.table, dynamoKeys);
+    const items = await readByKeys(this.client, this.table, dynamoKeys, undefined, retry);
     const valid = items.filter(Boolean);
     if (!valid.length) return {processed: 0};
 
@@ -2027,7 +2074,7 @@ export class Adapter {
       const puts = pairs.map(({put}) => ({action: 'put', params: {TableName: this.table, Item: put}}));
       /** @type {{action: 'delete', params: any}[]} */
       const deletes = pairs.map(({key}) => ({action: 'delete', params: {TableName: this.table, Key: key}}));
-      processed += await applyBatch(this.client, [...puts, ...deletes]);
+      processed += await applyBatch(this.client, [...puts, ...deletes], retry && {options: {retry}});
     }
     return {processed};
   }
@@ -2038,6 +2085,7 @@ export class Adapter {
     p = this._hideDescriptor(p, options);
     p = cleanParams(p);
 
+    const retry = options?.retry ?? this.retry;
     return runPaged(this.client, p, options, async items => {
       let processed = 0;
       for (let offset = 0; offset < items.length; offset += MOVE_CHUNK) {
@@ -2056,7 +2104,7 @@ export class Adapter {
         const puts = pairs.map(({put}) => ({action: 'put', params: {TableName: this.table, Item: put}}));
         /** @type {{action: 'delete', params: any}[]} */
         const deletes = pairs.map(({key}) => ({action: 'delete', params: {TableName: this.table, Key: key}}));
-        processed += await applyBatch(this.client, [...puts, ...deletes]);
+        processed += await applyBatch(this.client, [...puts, ...deletes], retry && {options: {retry}});
       }
       return {processed};
     });

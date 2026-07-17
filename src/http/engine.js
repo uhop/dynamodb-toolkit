@@ -1,16 +1,20 @@
 // Neutral-result REST engine shared by the framework adapters ("ports").
-// Handlers return {type: 'json' | 'empty' | 'error', status, body?, error?}
-// and never touch a socket — each port translates results to its framework's
-// response surface and owns the framework quirks (Express headersSent → next,
-// Koa null-body coercion, fetch onMiss, Lambda result envelopes). Internal
-// module: not a public subpath; the public API is each port's index.js/.d.ts.
+// Handlers return {type: 'json' | 'text' | 'empty' | 'error', status, body?,
+// contentType?, headers?, error?} and never touch a socket — each port
+// translates results to its framework's response surface and owns the
+// framework quirks (Express headersSent → next, Koa null-body coercion,
+// fetch onMiss, Lambda result envelopes). Internal module: not a public
+// subpath; the public API is each port's index.js/.d.ts.
 
 import {
   parsePatch,
   parseNames,
   parseFields,
   parseFlag,
+  parseCursor,
+  parseMassOptions,
   buildEnvelope,
+  buildMassResult,
   paginationLinks,
   mergePolicy,
   mapErrorStatus,
@@ -22,6 +26,19 @@ import {matchRoute} from '../handler/index.js';
 
 const json = (status, body) => ({type: 'json', status, body});
 const empty = (status = 204) => ({type: 'empty', status});
+
+// JSONL rendering: one item per line, no envelope. Page metadata that has no
+// line to live on rides response headers (x-cursor).
+const ndjson = result => {
+  const out = {
+    type: 'text',
+    status: 200,
+    contentType: 'application/x-ndjson; charset=utf-8',
+    body: result.data.map(item => JSON.stringify(item) + '\n').join('')
+  };
+  if (result.cursor) out.headers = {'x-cursor': result.cursor};
+  return out;
+};
 
 const overlayOf = body => (body && typeof body === 'object' && !Array.isArray(body) ? body : {});
 
@@ -55,7 +72,32 @@ export const createEngine = (adapter, options = {}) => {
     const {index, descending} = resolveSort(ctx.query, sortableIndices);
     if (descending) opts.descending = true;
     const example = makeExample(ctx, null);
+
+    const format = ctx.query.format;
+    if (format !== undefined && format !== 'json' && format !== 'jsonl') {
+      return error(
+        Object.assign(new Error(`Unknown 'format' value '${format}'. Supported: json, jsonl.`), {
+          status: 400,
+          code: 'BadFormat'
+        })
+      );
+    }
+    const jsonl = format === 'jsonl';
+    if (jsonl) opts.needTotal = false; // dump mode — skip the COUNT pass
+
+    // Cursor mode: `?cursor` present (empty = first page). Native
+    // LastEvaluatedKey paging — no offset, no total, no prev/next links;
+    // the envelope's `cursor` is the next-page token.
+    if ('cursor' in ctx.query) {
+      const cursor = parseCursor(ctx.query.cursor);
+      if (cursor) opts.cursor = cursor;
+      const result = await adapter.getPage(opts, example, index);
+      if (jsonl) return ndjson(result);
+      return json(200, buildEnvelope(result, {keys: policy.envelope}));
+    }
+
     const result = await adapter.getList(opts, example, index);
+    if (jsonl) return ndjson(result);
 
     const links = paginationLinks(result.offset, result.limit, result.total, ctx.urlBuilder);
     const envelopeOpts = {keys: policy.envelope};
@@ -73,15 +115,26 @@ export const createEngine = (adapter, options = {}) => {
     const opts = buildListOptions(ctx.query, policy);
     const {index} = resolveSort(ctx.query, sortableIndices);
     const example = makeExample(ctx, null);
+    // Delete-all footgun guard: an unscoped DELETE / must be explicit.
+    if (policy.confirmMassDelete && !opts.filter && !opts.search && !(example && Object.keys(example).length) && !parseFlag(ctx.query.confirm)) {
+      return error(
+        Object.assign(new Error("Unscoped mass delete requires '?confirm=true' (or a filter / search scope)"), {
+          status: 400,
+          code: 'UnscopedMassDelete'
+        })
+      );
+    }
     const params = await adapter._buildListParams(opts, false, example, index);
-    const r = await adapter.deleteListByParams(params);
-    return json(200, {processed: r.processed});
+    const r = await adapter.deleteListByParams(params, parseMassOptions(ctx.query));
+    return json(200, buildMassResult(r));
   };
 
-  // --- /-by-names handlers ---
+  // --- /-by-keys handlers (route + `keys` param; `-by-names` / `names` are legacy aliases) ---
+
+  const namesOf = query => parseNames(query.keys ?? query.names);
 
   const handleGetByNames = async ctx => {
-    const names = parseNames(ctx.query.names);
+    const names = namesOf(ctx.query);
     const fields = parseFields(ctx.query.fields);
     const consistent = parseFlag(ctx.query.consistent);
     const keys = names.map(name => keyFromPath(name, adapter));
@@ -90,7 +143,7 @@ export const createEngine = (adapter, options = {}) => {
   };
 
   const handleDeleteByNames = async ctx => {
-    const namesQ = parseNames(ctx.query.names);
+    const namesQ = namesOf(ctx.query);
     let names = namesQ;
     if (!names.length) {
       const body = await ctx.getBody();
@@ -98,29 +151,29 @@ export const createEngine = (adapter, options = {}) => {
     }
     const keys = names.map(name => keyFromPath(name, adapter));
     const r = await adapter.deleteByKeys(keys);
-    return json(200, {processed: r.processed});
+    return json(200, buildMassResult(r));
   };
 
   const handleCloneByNames = async ctx => {
-    const namesQ = parseNames(ctx.query.names);
+    const namesQ = namesOf(ctx.query);
     const body = await ctx.getBody();
     let names = namesQ;
     if (!names.length && Array.isArray(body)) names = body.map(s => String(s));
     const overlay = overlayOf(body);
     const keys = names.map(name => keyFromPath(name, adapter));
     const r = await adapter.cloneByKeys(keys, item => ({...item, ...overlay}));
-    return json(200, {processed: r.processed});
+    return json(200, buildMassResult(r));
   };
 
   const handleMoveByNames = async ctx => {
-    const namesQ = parseNames(ctx.query.names);
+    const namesQ = namesOf(ctx.query);
     const body = await ctx.getBody();
     let names = namesQ;
     if (!names.length && Array.isArray(body)) names = body.map(s => String(s));
     const overlay = overlayOf(body);
     const keys = names.map(name => keyFromPath(name, adapter));
     const r = await adapter.moveByKeys(keys, item => ({...item, ...overlay}));
-    return json(200, {processed: r.processed});
+    return json(200, buildMassResult(r));
   };
 
   const handleLoad = async ctx => {
@@ -129,7 +182,7 @@ export const createEngine = (adapter, options = {}) => {
       return error(Object.assign(new Error('Body must be an array of items'), {status: 400, code: 'BadLoadBody'}));
     }
     const r = await adapter.putItems(body);
-    return json(200, {processed: r.processed});
+    return json(200, buildMassResult(r));
   };
 
   const handleCloneAll = async ctx => {
@@ -139,8 +192,8 @@ export const createEngine = (adapter, options = {}) => {
     const {index} = resolveSort(ctx.query, sortableIndices);
     const example = makeExample(ctx, body);
     const params = await adapter._buildListParams(opts, false, example, index);
-    const r = await adapter.cloneListByParams(params, item => ({...item, ...overlay}));
-    return json(200, {processed: r.processed});
+    const r = await adapter.cloneListByParams(params, item => ({...item, ...overlay}), parseMassOptions(ctx.query));
+    return json(200, buildMassResult(r));
   };
 
   const handleMoveAll = async ctx => {
@@ -150,8 +203,8 @@ export const createEngine = (adapter, options = {}) => {
     const {index} = resolveSort(ctx.query, sortableIndices);
     const example = makeExample(ctx, body);
     const params = await adapter._buildListParams(opts, false, example, index);
-    const r = await adapter.moveListByParams(params, item => ({...item, ...overlay}));
-    return json(200, {processed: r.processed});
+    const r = await adapter.moveListByParams(params, item => ({...item, ...overlay}), parseMassOptions(ctx.query));
+    return json(200, buildMassResult(r));
   };
 
   // --- item-level handlers ---
@@ -217,15 +270,17 @@ export const createEngine = (adapter, options = {}) => {
           if (route.method === 'POST') return await handlePost(ctx);
           if (route.method === 'DELETE') return await handleDeleteAll(ctx);
           break;
-        case 'collectionMethod':
-          if (route.method === 'GET' && route.name === 'by-names') return await handleGetByNames(ctx);
-          if (route.method === 'DELETE' && route.name === 'by-names') return await handleDeleteByNames(ctx);
+        case 'collectionMethod': {
+          const byKeys = route.name === 'by-keys' || route.name === 'by-names';
+          if (route.method === 'GET' && byKeys) return await handleGetByNames(ctx);
+          if (route.method === 'DELETE' && byKeys) return await handleDeleteByNames(ctx);
           if (route.method === 'PUT' && route.name === 'load') return await handleLoad(ctx);
           if (route.method === 'PUT' && route.name === 'clone') return await handleCloneAll(ctx);
           if (route.method === 'PUT' && route.name === 'move') return await handleMoveAll(ctx);
-          if (route.method === 'PUT' && route.name === 'clone-by-names') return await handleCloneByNames(ctx);
-          if (route.method === 'PUT' && route.name === 'move-by-names') return await handleMoveByNames(ctx);
+          if (route.method === 'PUT' && (route.name === 'clone-by-keys' || route.name === 'clone-by-names')) return await handleCloneByNames(ctx);
+          if (route.method === 'PUT' && (route.name === 'move-by-keys' || route.name === 'move-by-names')) return await handleMoveByNames(ctx);
           break;
+        }
         case 'item': {
           const key = keyFromPath(route.key, adapter);
           if (route.method === 'GET') return await handleItemGet(ctx, key);

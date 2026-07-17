@@ -139,7 +139,7 @@ const handler = createHandler(adapter, {
 createServer(handler).listen(3000);
 ```
 
-The handler ships a standard route pack — `GET / POST /`, `GET PUT PATCH DELETE /:key`, `GET DELETE /-by-names`, `PUT /-load`, `PUT /-clone`, `PUT /-move`, `PUT /-clone-by-names`, `PUT /-move-by-names`, `PUT /:key/-clone`, `PUT /:key/-move` — with envelope keys, status codes, and prefixes all configurable via `options.policy`.
+The handler ships a standard route pack — `GET / POST /`, `GET PUT PATCH DELETE /:key`, `GET DELETE /-by-keys`, `PUT /-load`, `PUT /-clone`, `PUT /-move`, `PUT /-clone-by-keys`, `PUT /-move-by-keys`, `PUT /:key/-clone`, `PUT /:key/-move` — with envelope keys, status codes, and prefixes all configurable via `options.policy` (the `-by-names` spellings remain as aliases). `GET /` also speaks cursor pagination (`?cursor`, constant cost per page) and NDJSON output (`?format=jsonl`); the mass routes are resumable on the wire (`?max-items`, `?resume`) and an unscoped `DELETE /` requires `?confirm=true`.
 
 ## Framework adapters
 

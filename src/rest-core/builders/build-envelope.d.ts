@@ -1,4 +1,5 @@
 import type {PaginatedResult} from '../../mass/paginate-list.js';
+import type {CursorPage} from '../../mass/cursor-list.js';
 
 /** Key-name overrides for the pagination envelope. */
 export interface EnvelopeKeys {
@@ -10,6 +11,8 @@ export interface EnvelopeKeys {
   offset?: string;
   /** Key for the limit. Default `'limit'`. */
   limit?: string;
+  /** Key for the next-page cursor (cursor paging). Default `'cursor'`. */
+  cursor?: string;
   /** Key for the prev/next links block. Default `'links'`. */
   links?: string;
 }
@@ -23,12 +26,14 @@ export interface BuildEnvelopeOptions {
 }
 
 /**
- * Wrap a paginated result in a configurable-key envelope. `total` is omitted
- * when missing (e.g. when `paginateList` was called with `needTotal: false`).
+ * Wrap a paginated result in a configurable-key envelope. Handles both paging
+ * shapes: offset results emit `{data, offset, limit, total?}`; cursor pages
+ * emit `{data, limit, cursor?}`. Only defined members appear — `total` is
+ * omitted when missing (e.g. `needTotal: false`), `offset` when absent
+ * (cursor mode), `cursor` when the listing is exhausted.
  *
- * @param result The toolkit's paginated result shape.
+ * @param result The toolkit's paginated result or cursor page.
  * @param options Key overrides and optional `links` block.
- * @returns A wire-ready envelope — keys follow `options.keys` (or defaults), and only
- *   defined members appear (`total`/`links` omitted when absent in the source).
+ * @returns A wire-ready envelope — keys follow `options.keys` (or defaults).
  */
-export function buildEnvelope(result: PaginatedResult, options?: BuildEnvelopeOptions): Record<string, unknown>;
+export function buildEnvelope(result: PaginatedResult | CursorPage, options?: BuildEnvelopeOptions): Record<string, unknown>;

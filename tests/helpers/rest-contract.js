@@ -11,17 +11,23 @@
 // readers, event shapes) stays in the per-adapter suites.
 
 import test from 'tape-six';
+import {encodeCursor} from 'dynamodb-toolkit/mass';
 
 import {makeMockAdapter} from './mock-adapter.js';
 
 // Normalizer for harnesses that produce a web `Response` (express, koa, fetch).
-export const wrapWebResponse = res => ({
-  status: res.status,
-  json: async () => {
-    const text = await res.text();
-    return text ? JSON.parse(text) : null;
-  }
-});
+export const wrapWebResponse = res => {
+  let textPromise;
+  const text = () => (textPromise ??= res.text());
+  return {
+    status: res.status,
+    text,
+    json: async () => {
+      const body = await text();
+      return body ? JSON.parse(body) : null;
+    }
+  };
+};
 
 const JSON_INIT = body => ({headers: {'content-type': 'application/json'}, body: JSON.stringify(body)});
 
@@ -58,6 +64,65 @@ export const runRestContract = (label, withClient) => {
     });
   });
 
+  test(`${label}: GET /?cursor — cursor-mode envelope`, async t => {
+    const adapter = makeMockAdapter();
+    await withClient(adapter, async call => {
+      const res = await call('/?cursor&limit=2');
+      t.equal(res.status, 200);
+      const body = await res.json();
+      t.deepEqual(body.data, [{name: 'earth'}, {name: 'mars'}]);
+      t.equal(body.limit, 2);
+      t.equal(body.cursor, 'next-token');
+      t.notOk('offset' in body, 'no offset in cursor mode');
+      t.notOk('total' in body, 'no total in cursor mode');
+      t.equal(adapter.calls[0].fn, 'getPage');
+    });
+  });
+
+  test(`${label}: GET /?cursor=<token> — token passed to getPage`, async t => {
+    const adapter = makeMockAdapter();
+    await withClient(adapter, async call => {
+      const token = encodeCursor({LastEvaluatedKey: {name: 'mars'}});
+      const res = await call(`/?cursor=${token}`);
+      t.equal(res.status, 200);
+      const body = await res.json();
+      t.notOk('cursor' in body, 'exhausted listing omits cursor');
+      t.equal(adapter.calls[0].opts.cursor, token);
+    });
+  });
+
+  test(`${label}: GET /?format=jsonl — NDJSON lines, no envelope`, async t => {
+    const adapter = makeMockAdapter();
+    await withClient(adapter, async call => {
+      const res = await call('/?format=jsonl&limit=2');
+      t.equal(res.status, 200);
+      const text = await res.text();
+      t.equal(text, '{"name":"earth"}\n{"name":"mars"}\n');
+      t.equal(adapter.calls[0].opts.needTotal, false, 'COUNT pass skipped in jsonl mode');
+    });
+  });
+
+  test(`${label}: GET /?format=bogus — 400 BadFormat`, async t => {
+    const adapter = makeMockAdapter();
+    await withClient(adapter, async call => {
+      const res = await call('/?format=bogus');
+      t.equal(res.status, 400);
+      const body = await res.json();
+      t.equal(body.code, 'BadFormat');
+    });
+  });
+
+  test(`${label}: GET /?cursor=garbage — 400 BadCursor`, async t => {
+    const adapter = makeMockAdapter();
+    await withClient(adapter, async call => {
+      const res = await call('/?cursor=%21%21%21not-a-cursor');
+      t.equal(res.status, 400);
+      const body = await res.json();
+      t.equal(body.code, 'BadCursor');
+      t.equal(adapter.calls.length, 0, 'adapter untouched');
+    });
+  });
+
   test(`${label}: POST / — creates via adapter.post`, async t => {
     const adapter = makeMockAdapter();
     await withClient(adapter, async call => {
@@ -71,12 +136,65 @@ export const runRestContract = (label, withClient) => {
   test(`${label}: DELETE / — deleteListByParams with built params`, async t => {
     const adapter = makeMockAdapter();
     await withClient(adapter, async call => {
-      const res = await call('/?limit=10', {method: 'DELETE'});
+      const res = await call('/?limit=10&confirm=true', {method: 'DELETE'});
       const body = await res.json();
       t.equal(res.status, 200);
       t.equal(body.processed, 5);
       t.equal(adapter.calls[0].fn, '_buildListParams');
       t.equal(adapter.calls[1].fn, 'deleteListByParams');
+    });
+  });
+
+  test(`${label}: DELETE / — unscoped without confirm is rejected`, async t => {
+    const adapter = makeMockAdapter();
+    await withClient(adapter, async call => {
+      const res = await call('/', {method: 'DELETE'});
+      t.equal(res.status, 400);
+      const body = await res.json();
+      t.equal(body.code, 'UnscopedMassDelete');
+      t.equal(adapter.calls.length, 0, 'adapter untouched');
+    });
+  });
+
+  test(`${label}: DELETE / — filter scope allows delete without confirm`, async t => {
+    const adapter = makeMockAdapter();
+    await withClient(adapter, async call => {
+      const res = await call('/?eq-name=earth', {method: 'DELETE'});
+      t.equal(res.status, 200);
+      t.equal(adapter.calls[1].fn, 'deleteListByParams');
+    });
+  });
+
+  test(`${label}: DELETE / — mass wire options plumbed + rich result surfaced`, async t => {
+    let seenOpts;
+    const adapter = makeMockAdapter({
+      async deleteListByParams(_params, opts) {
+        seenOpts = opts;
+        return {processed: 5, skipped: 1, failed: [{key: {name: 'x'}, reason: 'Unknown'}], conflicts: [], cursor: 'abc'};
+      }
+    });
+    await withClient(adapter, async call => {
+      const resume = encodeCursor({LastEvaluatedKey: {name: 'm'}});
+      const res = await call(`/?eq-name=earth&max-items=7&resume=${resume}`, {method: 'DELETE'});
+      t.equal(res.status, 200);
+      const body = await res.json();
+      t.equal(body.processed, 5);
+      t.equal(body.skipped, 1);
+      t.equal(body.failed.length, 1);
+      t.equal(body.cursor, 'abc');
+      t.notOk('conflicts' in body, 'empty conflicts omitted');
+      t.equal(seenOpts.maxItems, 7);
+      t.equal(seenOpts.resumeToken, resume);
+    });
+  });
+
+  test(`${label}: DELETE / — malformed resume token is a 400`, async t => {
+    const adapter = makeMockAdapter();
+    await withClient(adapter, async call => {
+      const res = await call('/?eq-name=earth&resume=%21%21%21not-a-cursor', {method: 'DELETE'});
+      t.equal(res.status, 400);
+      const body = await res.json();
+      t.equal(body.code, 'BadCursor');
     });
   });
 
@@ -114,6 +232,30 @@ export const runRestContract = (label, withClient) => {
       t.equal(body.processed, 2);
       const c = adapter.calls[0];
       t.deepEqual(c.keys, [{name: 'x'}, {name: 'y'}]);
+    });
+  });
+
+  test(`${label}: GET /-by-keys — keys param + route alias`, async t => {
+    const adapter = makeMockAdapter();
+    await withClient(adapter, async call => {
+      const res = await call('/-by-keys?keys=earth,mars');
+      const body = await res.json();
+      t.equal(res.status, 200);
+      t.deepEqual(body, [
+        {name: 'earth', v: 1},
+        {name: 'mars', v: 1}
+      ]);
+      t.deepEqual(adapter.calls[0].keys, [{name: 'earth'}, {name: 'mars'}]);
+    });
+  });
+
+  test(`${label}: PUT /-clone-by-keys + /-move-by-keys — aliases dispatch`, async t => {
+    const adapter = makeMockAdapter();
+    await withClient(adapter, async call => {
+      await call('/-clone-by-keys?keys=a', {method: 'PUT', ...JSON_INIT({})});
+      await call('/-move-by-keys?keys=b', {method: 'PUT', ...JSON_INIT({})});
+      t.equal(adapter.calls[0].fn, 'cloneByKeys');
+      t.equal(adapter.calls[1].fn, 'moveByKeys');
     });
   });
 

@@ -51,6 +51,11 @@ export const createExpressAdapter = (adapter, options = {}) => {
     // `res.end()` (not `res.json()`) keeps the configured status with a truly
     // empty body — avoids shipping "null" for 204/404/410/etc.
     if (result.type === 'empty') return res.end();
+    if (result.type === 'text') {
+      res.set('content-type', result.contentType);
+      if (result.headers) res.set(result.headers);
+      return res.send(result.body);
+    }
     res.json(result.body);
   };
 

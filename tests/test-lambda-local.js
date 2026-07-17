@@ -98,7 +98,7 @@ test('createNodeListener: binary body is base64-encoded before reaching the hand
   });
   await serveOnce(createNodeListener(probe), async base => {
     const bin = new Uint8Array([0xff, 0xfe, 0x00, 0x7f]);
-    const res = await fetch(`${base}/`, {
+    const res = await fetch(`${base}/?confirm=true`, {
       method: 'DELETE',
       headers: {'content-type': 'application/octet-stream'},
       body: bin

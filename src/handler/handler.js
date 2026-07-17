@@ -11,7 +11,10 @@ import {
   parseNames,
   parsePaging,
   parseFlag,
+  parseCursor,
+  parseMassOptions,
   buildEnvelope,
+  buildMassResult,
   paginationLinks,
   mergePolicy,
   mapErrorStatus
@@ -38,6 +41,26 @@ const sendJson = (req, res, status, body) => {
 const sendNoContent = (res, status = 204) => {
   res.statusCode = status;
   res.end();
+};
+
+const sendText = (req, res, status, contentType, body, headers) => {
+  res.statusCode = status;
+  res.setHeader('Content-Type', contentType);
+  if (headers) for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+  if (req.method === 'HEAD') {
+    res.setHeader('Content-Length', String(Buffer.byteLength(body, 'utf8')));
+    res.end();
+    return;
+  }
+  res.end(body);
+};
+
+// JSONL rendering: one item per line, no envelope. Page metadata that has no
+// line to live on rides response headers (x-cursor).
+const sendNdjson = (req, res, result) => {
+  const body = result.data.map(item => JSON.stringify(item) + '\n').join('');
+  const headers = result.cursor ? {'x-cursor': result.cursor} : undefined;
+  sendText(req, res, 200, 'application/x-ndjson; charset=utf-8', body, headers);
 };
 
 const requestUrl = req => {
@@ -155,7 +178,34 @@ export const createHandler = (adapter, options = {}) => {
     const {index, descending} = resolveSort(query);
     if (descending) opts.descending = true;
     const example = exampleFromContext(query, null);
+
+    const format = query.format;
+    if (format !== undefined && format !== 'json' && format !== 'jsonl') {
+      return sendError(
+        req,
+        res,
+        Object.assign(new Error(`Unknown 'format' value '${format}'. Supported: json, jsonl.`), {
+          status: 400,
+          code: 'BadFormat'
+        })
+      );
+    }
+    const jsonl = format === 'jsonl';
+    if (jsonl) opts.needTotal = false; // dump mode — skip the COUNT pass
+
+    // Cursor mode: `?cursor` present (empty = first page). Native
+    // LastEvaluatedKey paging — no offset, no total, no prev/next links;
+    // the envelope's `cursor` is the next-page token.
+    if ('cursor' in query) {
+      const cursor = parseCursor(query.cursor);
+      if (cursor) opts.cursor = cursor;
+      const result = await adapter.getPage(opts, example, index);
+      if (jsonl) return sendNdjson(req, res, result);
+      return sendJson(req, res, 200, buildEnvelope(result, {keys: policy.envelope}));
+    }
+
     const result = await adapter.getList(opts, example, index);
+    if (jsonl) return sendNdjson(req, res, result);
 
     const baseUrl = requestUrl(req);
     const urlBuilder = ({offset, limit}) => {
@@ -180,17 +230,30 @@ export const createHandler = (adapter, options = {}) => {
     const opts = buildListOptions(query);
     const {index} = resolveSort(query);
     const example = exampleFromContext(query, null);
+    // Delete-all footgun guard: an unscoped DELETE / must be explicit.
+    if (policy.confirmMassDelete && !opts.filter && !opts.search && !(example && Object.keys(example).length) && !parseFlag(query.confirm)) {
+      return sendError(
+        req,
+        res,
+        Object.assign(new Error("Unscoped mass delete requires '?confirm=true' (or a filter / search scope)"), {
+          status: 400,
+          code: 'UnscopedMassDelete'
+        })
+      );
+    }
     // For mass delete we need the params built like getList, but route through
     // deleteListByParams by re-using the Adapter's internal list-params machinery.
     const params = await adapter._buildListParams(opts, false, example, index);
-    const r = await adapter.deleteListByParams(params);
-    sendJson(req, res, 200, {processed: r.processed});
+    const r = await adapter.deleteListByParams(params, parseMassOptions(query));
+    sendJson(req, res, 200, buildMassResult(r));
   };
 
-  // --- /-by-names handlers ---
+  // --- /-by-keys handlers (route + `keys` param; `-by-names` / `names` are legacy aliases) ---
+
+  const namesOf = query => parseNames(query.keys ?? query.names);
 
   const handleGetByNames = async (req, res, query) => {
-    const names = parseNames(query.names);
+    const names = namesOf(query);
     const fields = parseFields(query.fields);
     const consistent = parseFlag(query.consistent);
     const keys = names.map(name => keyFromPath(name, adapter));
@@ -199,7 +262,7 @@ export const createHandler = (adapter, options = {}) => {
   };
 
   const handleDeleteByNames = async (req, res, query) => {
-    const namesQ = parseNames(query.names);
+    const namesQ = namesOf(query);
     let names = namesQ;
     if (!names.length) {
       const body = await readJsonBody(req, maxBodyBytes);
@@ -207,29 +270,29 @@ export const createHandler = (adapter, options = {}) => {
     }
     const keys = names.map(name => keyFromPath(name, adapter));
     const r = await adapter.deleteByKeys(keys);
-    sendJson(req, res, 200, {processed: r.processed});
+    sendJson(req, res, 200, buildMassResult(r));
   };
 
   const handleCloneByNames = async (req, res, query) => {
-    const namesQ = parseNames(query.names);
+    const namesQ = namesOf(query);
     const body = await readJsonBody(req, maxBodyBytes);
     let names = namesQ;
     if (!names.length && Array.isArray(body)) names = body.map(s => String(s));
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const keys = names.map(name => keyFromPath(name, adapter));
     const r = await adapter.cloneByKeys(keys, item => ({...item, ...overlay}));
-    sendJson(req, res, 200, {processed: r.processed});
+    sendJson(req, res, 200, buildMassResult(r));
   };
 
   const handleMoveByNames = async (req, res, query) => {
-    const namesQ = parseNames(query.names);
+    const namesQ = namesOf(query);
     const body = await readJsonBody(req, maxBodyBytes);
     let names = namesQ;
     if (!names.length && Array.isArray(body)) names = body.map(s => String(s));
     const overlay = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
     const keys = names.map(name => keyFromPath(name, adapter));
     const r = await adapter.moveByKeys(keys, item => ({...item, ...overlay}));
-    sendJson(req, res, 200, {processed: r.processed});
+    sendJson(req, res, 200, buildMassResult(r));
   };
 
   const handleLoad = async (req, res) => {
@@ -238,7 +301,7 @@ export const createHandler = (adapter, options = {}) => {
       return sendError(req, res, Object.assign(new Error('Body must be an array of items'), {status: 400, code: 'BadLoadBody'}));
     }
     const r = await adapter.putItems(body);
-    sendJson(req, res, 200, {processed: r.processed});
+    sendJson(req, res, 200, buildMassResult(r));
   };
 
   const handleCloneAll = async (req, res, query) => {
@@ -250,8 +313,8 @@ export const createHandler = (adapter, options = {}) => {
     // exampleFromContext so consumers can derive scope from both query + body.
     const example = exampleFromContext(query, body);
     const params = await adapter._buildListParams(opts, false, example, index);
-    const r = await adapter.cloneListByParams(params, item => ({...item, ...overlay}));
-    sendJson(req, res, 200, {processed: r.processed});
+    const r = await adapter.cloneListByParams(params, item => ({...item, ...overlay}), parseMassOptions(query));
+    sendJson(req, res, 200, buildMassResult(r));
   };
 
   const handleMoveAll = async (req, res, query) => {
@@ -261,8 +324,8 @@ export const createHandler = (adapter, options = {}) => {
     const {index} = resolveSort(query);
     const example = exampleFromContext(query, body);
     const params = await adapter._buildListParams(opts, false, example, index);
-    const r = await adapter.moveListByParams(params, item => ({...item, ...overlay}));
-    sendJson(req, res, 200, {processed: r.processed});
+    const r = await adapter.moveListByParams(params, item => ({...item, ...overlay}), parseMassOptions(query));
+    sendJson(req, res, 200, buildMassResult(r));
   };
 
   // --- item-level handlers ---
@@ -327,15 +390,17 @@ export const createHandler = (adapter, options = {}) => {
           if (route.method === 'POST') return await handlePost(req, res);
           if (route.method === 'DELETE') return await handleDeleteAll(req, res, query);
           break;
-        case 'collectionMethod':
-          if (route.method === 'GET' && route.name === 'by-names') return await handleGetByNames(req, res, query);
-          if (route.method === 'DELETE' && route.name === 'by-names') return await handleDeleteByNames(req, res, query);
+        case 'collectionMethod': {
+          const byKeys = route.name === 'by-keys' || route.name === 'by-names';
+          if (route.method === 'GET' && byKeys) return await handleGetByNames(req, res, query);
+          if (route.method === 'DELETE' && byKeys) return await handleDeleteByNames(req, res, query);
           if (route.method === 'PUT' && route.name === 'load') return await handleLoad(req, res);
           if (route.method === 'PUT' && route.name === 'clone') return await handleCloneAll(req, res, query);
           if (route.method === 'PUT' && route.name === 'move') return await handleMoveAll(req, res, query);
-          if (route.method === 'PUT' && route.name === 'clone-by-names') return await handleCloneByNames(req, res, query);
-          if (route.method === 'PUT' && route.name === 'move-by-names') return await handleMoveByNames(req, res, query);
+          if (route.method === 'PUT' && (route.name === 'clone-by-keys' || route.name === 'clone-by-names')) return await handleCloneByNames(req, res, query);
+          if (route.method === 'PUT' && (route.name === 'move-by-keys' || route.name === 'move-by-names')) return await handleMoveByNames(req, res, query);
           break;
+        }
         case 'item': {
           const key = keyFromPath(route.key, adapter);
           if (route.method === 'GET') return await handleItemGet(req, res, key, query);

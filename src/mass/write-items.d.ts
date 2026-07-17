@@ -1,4 +1,5 @@
 import type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
+import type {RetryOptions} from '../batch/backoff.js';
 
 /**
  * Bulk-write items via chunked `BatchWriteItem`. Bulk-individual operation
@@ -10,6 +11,7 @@ import type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
  * @param items Items to write.
  * @param mapFn Optional transform applied to each item before writing.
  *   Returning a falsy value skips that item.
+ * @param retry Retry policy override for the underlying batch writes.
  * @returns Count of items DynamoDB accepted (excludes entries `mapFn`
  *   dropped with a falsy return).
  */
@@ -17,5 +19,6 @@ export function writeItems(
   client: DynamoDBDocumentClient,
   tableName: string,
   items: Record<string, unknown>[],
-  mapFn?: (item: Record<string, unknown>) => Record<string, unknown>
+  mapFn?: (item: Record<string, unknown>) => Record<string, unknown>,
+  retry?: RetryOptions
 ): Promise<number>;

@@ -23,6 +23,7 @@ export {readByKeys} from './read-by-keys.js';
 export {writeItems} from './write-items.js';
 export {mergeMapFn, type MapFn} from './map-fns.js';
 export {encodeCursor, decodeCursor, type CursorPayload} from './cursor.js';
+export {cursorList, type CursorListOptions, type CursorPage} from './cursor-list.js';
 
 /**
  * Common option bag accepted by resumable mass operations (copy / move /
@@ -94,6 +95,9 @@ export interface MassOpResult {
 }
 
 import type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
+import type {RetryOptions} from '../batch/backoff.js';
+
+export type {RetryOptions} from '../batch/backoff.js';
 
 /**
  * Read a single page from a `Query` or `Scan`, pass it to `fn`, and return
@@ -131,12 +135,14 @@ export function readListGetItems(
  * @param client The DynamoDB DocumentClient.
  * @param params DynamoDB `Query` / `Scan` input (must include key projection).
  * @param keyFn Extracts the key from each fetched item. Default: identity.
+ * @param retry Retry policy override for the underlying batch writes.
  * @returns Count of items DynamoDB removed (sum across every chunked `BatchWriteItem` call).
  */
 export function deleteList(
   client: DynamoDBDocumentClient,
   params: Record<string, unknown>,
-  keyFn?: (item: Record<string, unknown>) => Record<string, unknown>
+  keyFn?: (item: Record<string, unknown>) => Record<string, unknown>,
+  retry?: RetryOptions
 ): Promise<number>;
 
 /**
@@ -146,9 +152,10 @@ export function deleteList(
  * @param client The DynamoDB DocumentClient.
  * @param tableName Target table.
  * @param keys Keys to delete.
+ * @param retry Retry policy override for the underlying batch writes.
  * @returns Count of delete operations DynamoDB accepted.
  */
-export function deleteByKeys(client: DynamoDBDocumentClient, tableName: string, keys: Record<string, unknown>[]): Promise<number>;
+export function deleteByKeys(client: DynamoDBDocumentClient, tableName: string, keys: Record<string, unknown>[], retry?: RetryOptions): Promise<number>;
 
 /**
  * Copy items matching a `Query` / `Scan` back into the same table, optionally
@@ -157,12 +164,14 @@ export function deleteByKeys(client: DynamoDBDocumentClient, tableName: string, 
  * @param client The DynamoDB DocumentClient.
  * @param params DynamoDB `Query` / `Scan` input. The target table is taken from `params.TableName`.
  * @param mapFn Transform applied to each fetched item before writing the copy.
+ * @param retry Retry policy override for the underlying batch writes.
  * @returns Count of copies written to the target table.
  */
 export function copyList(
   client: DynamoDBDocumentClient,
   params: Record<string, unknown>,
-  mapFn?: (item: Record<string, unknown>) => Record<string, unknown>
+  mapFn?: (item: Record<string, unknown>) => Record<string, unknown>,
+  retry?: RetryOptions
 ): Promise<number>;
 
 /**
@@ -174,6 +183,7 @@ export function copyList(
  * @param params DynamoDB `Query` / `Scan` input.
  * @param mapFn Transform applied to each fetched item before writing.
  * @param keyFn Extracts the original key from each fetched item (for the delete leg).
+ * @param retry Retry policy override for the underlying batch writes.
  * @returns Sum of puts + deletes DynamoDB accepted — roughly double the item count
  *   when the move succeeds on every item.
  */
@@ -181,7 +191,8 @@ export function moveList(
   client: DynamoDBDocumentClient,
   params: Record<string, unknown>,
   mapFn?: (item: Record<string, unknown>) => Record<string, unknown>,
-  keyFn?: (item: Record<string, unknown>) => Record<string, unknown>
+  keyFn?: (item: Record<string, unknown>) => Record<string, unknown>,
+  retry?: RetryOptions
 ): Promise<number>;
 
 /**

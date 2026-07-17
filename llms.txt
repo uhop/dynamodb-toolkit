@@ -35,10 +35,10 @@ await adapter.delete({name: 'Alderaan'});
 
 - `dynamodb-toolkit` — `Adapter`, `Raw`, `raw()`, `stampCreatedAtISO`, `stampCreatedAtEpoch`, error classes (`ToolkitError`, `ConsistentReadOnGSIRejected`, `NoIndexForSortField`, `BadFilterField`, `BadFilterOp`, `KeyFieldChanged`, `CreatedAtFieldNotDeclared`, `CascadeNotDeclared`, `TableVerificationFailed`, `TransactionLimitExceededError`), bare helpers (`sleep`, `seq`, `random`), type re-exports.
 - `dynamodb-toolkit/expressions` — `buildUpdate`, `addProjection`, `buildSearch`, `buildFilterByExample`, `buildCondition`, `buildKeyCondition`, `cleanParams`, `cloneParams`.
-- `dynamodb-toolkit/batch` — `applyBatch`, `applyTransaction`, `explainTransactionCancellation`, `getBatch`, `getTransaction`, `backoff`, `TRANSACTION_LIMIT`.
-- `dynamodb-toolkit/mass` — `paginateList`, `iterateList`, `iterateItems`, `readList`, `readListGetItems`, `readByKeys`, `writeItems`, `deleteList`, `deleteByKeys`, `copyList`, `moveList`, `getTotal`, `encodeCursor`, `decodeCursor`, `mergeMapFn`, `MassOpOptions`/`MassOpResult` types. Deprecated aliases: `readListByKeys`, `readOrderedListByKeys`, `deleteListByKeys`, `writeList`.
+- `dynamodb-toolkit/batch` — `applyBatch`, `applyTransaction`, `explainTransactionCancellation`, `getBatch`, `getTransaction`, `backoff`, `TRANSACTION_LIMIT`, `RetryOptions` type.
+- `dynamodb-toolkit/mass` — `paginateList`, `cursorList`, `iterateList`, `iterateItems`, `readList`, `readListGetItems`, `readByKeys`, `writeItems`, `deleteList`, `deleteByKeys`, `copyList`, `moveList`, `getTotal`, `encodeCursor`, `decodeCursor`, `mergeMapFn`, `MassOpOptions`/`MassOpResult`/`CursorPage` types. Deprecated aliases: `readListByKeys`, `readOrderedListByKeys`, `deleteListByKeys`, `writeList`.
 - `dynamodb-toolkit/marshalling` — `marshallDateISO` / `unmarshallDateISO` (+ `dateISO` pair), `marshallDateEpoch` / `unmarshallDateEpoch` (+ `dateEpoch` pair), `marshallMap` / `unmarshallMap`, `marshallURL` / `unmarshallURL` (+ `url` pair).- `dynamodb-toolkit/paths` — `getPath`, `setPath`, `deletePath`, `applyPatch`, `normalizeFields`, `subsetObject`.
-- `dynamodb-toolkit/rest-core` — parsers (`parseFields`, `parseSort`, `parseFilter`, `parseSearch`, `parsePatch`, `parseNames`, `parsePaging`, `parseFlag`, `coerceStringQuery`), builders (`buildEnvelope`, `buildErrorBody`, `paginationLinks`, `buildListOptions`, `resolveSort`, `stripMount`, `validateWriteBody`), policy (`defaultPolicy`, `mapErrorStatus`, `mergePolicy`).
+- `dynamodb-toolkit/rest-core` — parsers (`parseFields`, `parseSort`, `parseFilter`, `parseSearch`, `parsePatch`, `parseNames`, `parsePaging`, `parseFlag`, `parseCursor`, `parseMassOptions`, `coerceStringQuery`), builders (`buildEnvelope`, `buildMassResult`, `buildErrorBody`, `paginationLinks`, `buildListOptions`, `resolveSort`, `stripMount`, `validateWriteBody`), policy (`defaultPolicy`, `mapErrorStatus`, `mergePolicy`).
 - `dynamodb-toolkit/handler` — `createHandler`, `matchRoute`, `readJsonBody`.
 - `dynamodb-toolkit/provisioning` — `planTable`, `ensureTable`, `verifyTable`, `diffTable`, descriptor helpers (`buildDescriptorSnapshot`, `compareDescriptor`, `readDescriptor`, `writeDescriptor`), lower-level primitives (`buildCreateTableInput`, `buildAddGsiInput`, `planAddOnly`, `describeTable`, `executePlan`, `extractDeclaration`).
 - `dynamodb-toolkit` CLI — `bin/dynamodb-toolkit.js` with `plan-table <module>` / `ensure-table <module>` / `verify-table <module>` subcommands. Shipped in the tarball.
@@ -63,6 +63,7 @@ await adapter.delete({name: 'Alderaan'});
 | `createdAtField` | `string` | Enables `options.asOf` on mass ops (`<createdAtField> <= :asOf`). Not auto-written — use `stampCreatedAtISO`/`stampCreatedAtEpoch` in `prepare`. Must start with `technicalPrefix`. |
 | `relationships` | `{structural?: boolean}` | Gates cascade primitives. `{structural: true}` treats composite `structuralKey` as the parent-child hierarchy. |
 | `descriptorKey` | `string` | Opt-in reserved-record key (e.g. `'__adapter__'`) for the provisioning descriptor snapshot. List ops auto-filter this row; opt-out via `{includeDescriptor: true}`. |
+| `retry` | `RetryOptions` | Default retry policy (`{backoff?: () => Iterable<number>, maxAttempts?}`) for chunked `BatchWriteItem` / `BatchGetItem` in bulk methods. Per-call `options.retry` overrides. Default: exponential + jitter, 50 ms → 20 s cap, 8 attempts. Transactions excluded (SDK adaptive retry). |
 | `projectionFieldMap` | `Record<string, string>` | Alias → real field for projections. |
 | `indirectIndices` | `Record<string, 1 \| true>` | Legacy form — synthesised into `indices` as `{type: 'gsi', indirect: true, projection: 'keys-only'}`. |
 | `hooks` | `AdapterHooks<TItem>` | Per-instance overrides; merges over defaults. Built-in prepare/revive steps compose with user hooks. |
@@ -106,10 +107,13 @@ Clauses that match a table/index pk/sk auto-promote to `KeyConditionExpression`;
 - `getList(options?, example?, index?)` → `{data, offset, limit, total?}`.
 - `getListByParams(params, options?)` → same envelope; skips `prepareListInput`.
 - `getListUnder(partialKey, options?)` → sugar for `getListByParams(buildKey(partialKey), options)`.
+- `getPage(options?, example?, index?)` → `{data, limit, cursor?}` — native `LastEvaluatedKey` paging; constant cost per page, no `total`. Pass `options.cursor` from the prior page; a filtered page may be short (even empty) and still carry a cursor.
+- `getPageByParams(params, options?)` → same page shape; skips `prepareListInput`.
 - `buildKey(values, {self?, partial?, indexName?}?, params?)` → builds `KeyConditionExpression`. Contiguous-from-start `values` keyed by `keyFields` names. Defaults to children-only `begins_with`; `{self: true}` includes self + descendants (no trailing separator); `{partial: 'Bui'}` narrows the next tier.
 - `typeOf(item)` → `string | number | undefined`. Priority: `typeDiscriminator` value → `typeLabels[depth-1]` → raw depth → undefined.
 - `findIndexForSort(field)` → index name matching `sk.name === field`. Prefers LSI over GSI. Throws `NoIndexForSortField` when nothing matches.
-- `applyFilter(params, clauses)` → mutates `params`. Compiles `FilterClause[]` into expression(s), auto-promoting index-compatible clauses.
+- `applyFilter(params, clauses)` → mutates `params`. Compiles `FilterClause[]` into expression(s), auto-promoting index-compatible clauses (one per key component; losers fall to `FilterExpression` and are listed on a non-enumerable `params.filterFallbacks` diagnostic).
+- `coerceFilterValue(field, value)` → value coerced to the field's declared type (`filterable` `{ops, type}` → keyFields / index keys → `'string'` pass-through). Public for custom filter paths.
 
 ### Writes — single
 - `post(item, {returnFailedItem?}?)` — create-only (`attribute_not_exists`). 409 on collision.
@@ -165,6 +169,7 @@ interface MassOpOptions {
   strategy?: 'native' | 'sequential';
   params?: Record<string, unknown>;
   includeDescriptor?: boolean;   // show the descriptor row in list ops
+  retry?: RetryOptions;          // batch retry override; defaults to adapter.retry
 }
 
 interface MassOpResult {
@@ -178,12 +183,13 @@ interface MassOpResult {
 
 ## Batch helpers (`dynamodb-toolkit/batch`)
 
-- `applyBatch(client, ...descriptors)` → `Promise<number>` — chunked `BatchWriteItem` (25/call), `UnprocessedItems` retry.
+- `applyBatch(client, ...descriptors)` → `Promise<number>` — chunked `BatchWriteItem` (25/call), `UnprocessedItems` retry. Accepts an `{options: {retry?: RetryOptions}}` sentinel at any position.
 - `applyTransaction(client, ...descriptors)` → `Promise<number>` — single `TransactWriteItems` (limit `TRANSACTION_LIMIT` = 100). Accepts `{options: {clientRequestToken?, returnConsumedCapacity?, returnItemCollectionMetrics?}}` sentinel at any position; later entries win on merge.
 - `explainTransactionCancellation(err, ...descriptors)` → `{failures, message} \| null` — maps `CancellationReasons` back to input descriptors. `failures[i]` has `{index, descriptor, code, message?, item?}` (`item` populated when the descriptor set `returnFailedItem: true`). Returns `null` for non-cancellation errors.
-- `getBatch(client, ...descriptors)` → `Promise<{table, item}[]>` — chunked `BatchGetItem` (100/call).
+- `getBatch(client, ...descriptors)` → `Promise<{table, item}[]>` — chunked `BatchGetItem` (100/call). Accepts the same `{options: {retry}}` sentinel.
 - `getTransaction(client, ...descriptors)` → `Promise<{table, item, adapter?}[]>` — single `TransactGetItems`.
 - `backoff(from = 50, to = 20_000, finite?)` — generator of exponential-jittered delays. Defaults to AWS "stop around one minute" guidance (8 attempts).
+- `RetryOptions` — `{backoff?: () => Iterable<number>, maxAttempts?: number}`. Also accepted as the trailing argument on `mass` helpers (`writeItems`, `readByKeys`, `deleteList`, `deleteByKeys`, `copyList`, `moveList`). A finite backoff running dry with work pending throws.
 
 ## REST handler
 
@@ -204,20 +210,24 @@ createServer(handler).listen(3000);
 | Method | URL | Maps to |
 | --- | --- | --- |
 | `GET` | `/` | `getList` + envelope `{data, offset, limit, total?, links?}` |
+| `GET` | `/?cursor[=token]` | `getPage` + envelope `{data, limit, cursor?}` — native cursor paging; bare `?cursor` = first page |
+| `GET` | `/?format=jsonl` | NDJSON lines (one item per line, no envelope; `total` skipped). In cursor mode the next-page token rides the `x-cursor` response header |
 | `GET` | `/:key` | `getByKey` (404 on miss) |
-| `GET` | `/-by-names?names=A,B` | `getByKeys` (length-preserving array; `null` at misses) |
+| `GET` | `/-by-keys?keys=A,B` | `getByKeys` (length-preserving array; `null` at misses) |
 | `POST` | `/` | `post` (204; 409 on existing) |
 | `PUT` | `/:key?force=true` | `put` (204; 409 without force on missing) |
 | `PATCH` | `/:key` | `patch` (body: `{field, _delete, _separator, _arrayOps}`) |
 | `DELETE` | `/:key` | `delete` (204, idempotent) |
-| `DELETE` | `/?<op>-field=…&search=…` | `deleteListByParams` (`MassOpResult`) |
-| `DELETE` | `/-by-names?names=…` | `deleteByKeys` (`{processed}`) |
+| `DELETE` | `/?<op>-field=…&search=…` | `deleteListByParams` (mass result body). Unscoped delete (no filter/search/example) is `400 UnscopedMassDelete` unless `?confirm=true` (policy `confirmMassDelete: false` disables the guard) |
+| `DELETE` | `/-by-keys?keys=…` | `deleteByKeys` (`{processed}`) |
 | `PUT` | `/-load` | `putItems` (body: array of items; `{processed}`) |
-| `PUT` | `/-clone` / `/-move` | `cloneListByParams` / `moveListByParams` (body: overlay; `MassOpResult`) |
-| `PUT` | `/-clone-by-names?names=…` / `/-move-by-names?names=…` | `cloneByKeys` / `moveByKeys` |
+| `PUT` | `/-clone` / `/-move` | `cloneListByParams` / `moveListByParams` (body: overlay; mass result body) |
+| `PUT` | `/-clone-by-keys?keys=…` / `/-move-by-keys?keys=…` | `cloneByKeys` / `moveByKeys` |
 | `PUT` | `/:key/-clone` / `/:key/-move` | single-item `clone` / `move` |
 
-`HEAD /:key` auto-promotes to `GET /:key` (body stripped). Method prefix `-` is configurable via `policy.methodPrefix`.
+`HEAD /:key` auto-promotes to `GET /:key` (body stripped). Method prefix `-` is configurable via `policy.methodPrefix`. The `-by-names` routes and `names` param remain as legacy aliases of `-by-keys` / `keys`.
+
+Mass routes (`DELETE /`, `PUT /-clone`, `PUT /-move`) accept `?max-items=N` (soft per-request cap, page-boundary enforced) and `?resume=<token>` (opaque cursor from a prior response). The mass result body is `{processed, skipped?, failed?, conflicts?, cursor?}` — optional keys appear only when non-empty, so the historical `{processed}` shape is unchanged for clean runs.
 
 ### Query parameters
 
@@ -225,9 +235,16 @@ createServer(handler).listen(3000);
 - `?search=tatooine` — free-form substring over `searchable` mirrors.
 - `?eq-field=value` / `?in-field=,a,b,c` / `?btw-year=-2020-2024` / `?ex-optional=` / `?nx-optional=` — structured filter grammar (Option W).
 - `?sort=name` / `?sort=-name` — ascending / descending; resolved via `sortableIndices`.
-- `?offset=N&limit=N` — pagination (clamped by `policy.maxOffset` / `policy.maxLimit`).
+- `?offset=N&limit=N` — offset pagination (clamped by `policy.maxOffset` / `policy.maxLimit`).
+- `?cursor[=token]` — cursor pagination on `GET /` (constant cost per page; no `total`, no links). Malformed tokens → `400 BadCursor`.
+- `?format=jsonl` — NDJSON list output on `GET /` (`json` is the default; anything else → `400 BadFormat`).
+- `?keys=A,B` — key list for the `-by-keys` routes (`names` is the legacy alias).
+- `?max-items=N` / `?resume=<token>` — resumable mass ops on the mass routes.
+- `?confirm=yes|true|1|on` — explicit opt-in for an unscoped `DELETE /`.
 - `?consistent=yes|true|1|on` — strong consistency.
 - `?force=yes|true|1|on` — overwrite on `put`/`clone`/`move`.
+
+Wire casing: multi-word query params are kebab-case (`max-items`); response envelope keys are camelCase.
 
 ### DoS mitigations
 

@@ -157,9 +157,14 @@ export const withLambdaHandler = async (handler, fn, kind = 'v2') => {
   return fn(client);
 };
 
+// Read a Lambda result's body as text, handling `isBase64Encoded`.
+export const readTextResult = result => {
+  if (!result.body) return '';
+  return result.isBase64Encoded ? Buffer.from(result.body, 'base64').toString('utf-8') : result.body;
+};
+
 // Parse a Lambda result's body as JSON, handling `isBase64Encoded`.
 export const readJsonResult = result => {
-  if (!result.body) return null;
-  const text = result.isBase64Encoded ? Buffer.from(result.body, 'base64').toString('utf-8') : result.body;
+  const text = readTextResult(result);
   return text ? JSON.parse(text) : null;
 };

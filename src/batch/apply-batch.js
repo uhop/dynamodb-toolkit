@@ -5,17 +5,28 @@ import {batchWrite} from './batch-write.js';
 
 const BATCH_WRITE_LIMIT = 25;
 
+const consume = (entry, items, options) => {
+  if (!entry) return options;
+  if (entry.action) {
+    items.push(entry);
+    return options;
+  }
+  if (entry.options) return {...options, ...entry.options};
+  return options;
+};
+
 const flatten = requests => {
   const items = [];
+  let options = null;
   for (const r of requests) {
     if (!r) continue;
     if (Array.isArray(r)) {
-      for (const item of r) item && items.push(item);
+      for (const entry of r) options = consume(entry, items, options);
     } else {
-      items.push(r);
+      options = consume(r, items, options);
     }
   }
-  return items;
+  return {items, options};
 };
 
 const toBatchRequest = item => {
@@ -30,7 +41,8 @@ const toBatchRequest = item => {
 };
 
 export const applyBatch = async (client, ...requests) => {
-  const items = flatten(requests);
+  const {items, options} = flatten(requests);
+  const retry = options?.retry;
   let total = 0;
 
   for (let i = 0; i < items.length; i += BATCH_WRITE_LIMIT) {
@@ -44,7 +56,7 @@ export const applyBatch = async (client, ...requests) => {
       ++added;
     }
     if (added) {
-      await batchWrite(client, batch);
+      await batchWrite(client, batch, retry);
       total += added;
     }
   }

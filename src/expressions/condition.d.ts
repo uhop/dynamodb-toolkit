@@ -10,7 +10,9 @@ export type ConditionClause =
   | {path: string; op: 'exists' | 'notExists'}
   /** DynamoDB function: `begins_with(path, value)` / `contains(path, value)`. */
   | {path: string; op: 'beginsWith' | 'contains'; value: unknown}
-  /** Inclusion: `path IN (values...)`. */
+  /** Inclusion: `path IN (value...)`. */
+  | {path: string; op: 'in'; value: unknown[]}
+  /** Inclusion, legacy spelling. @deprecated Use `value` — the polymorphic knob shared with filter clauses. */
   | {path: string; op: 'in'; values: unknown[]}
   /** Boolean combinator — children joined with `AND` / `OR`. */
   | {op: 'and' | 'or'; clauses: ConditionClause[]}

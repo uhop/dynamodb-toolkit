@@ -3154,6 +3154,7 @@ test('applyFilter: eq on partition key auto-promotes to KeyConditionExpression',
   const p = adapter.applyFilter({}, [{field: 'state', op: 'eq', value: 'TX'}]);
   t.matchString(p.KeyConditionExpression, /#ff0 = :ffv0/);
   t.equal(p.FilterExpression, undefined, 'pk goes to KC, not FE');
+  t.equal(p.filterFallbacks, undefined, 'no fallback signal on clean promotion');
 });
 
 test('applyFilter: beg on structural-key sort-key auto-promotes', t => {
@@ -3202,6 +3203,8 @@ test('applyFilter: second sort-key clause falls back to FilterExpression', t => 
   t.matchString(p.KeyConditionExpression, /#ff0 > :ffv0/);
   t.ok(p.FilterExpression, 'second sk clause falls to FE (KCE allows one per component)');
   t.matchString(p.FilterExpression, /#ff1 < :ffv1/);
+  t.deepEqual(p.filterFallbacks, [{field: '-sk', op: 'lt'}], 'fallback surfaced on params');
+  t.notOk(Object.keys(p).includes('filterFallbacks'), 'diagnostic is non-enumerable');
 });
 
 test('applyFilter: second pk clause falls back to FilterExpression', t => {
@@ -3218,6 +3221,7 @@ test('applyFilter: second pk clause falls back to FilterExpression', t => {
   ]);
   t.ok(p.KeyConditionExpression, 'first pk clause promoted');
   t.ok(p.FilterExpression, 'duplicate pk clause falls to FE');
+  t.deepEqual(p.filterFallbacks, [{field: 'state', op: 'eq'}], 'fallback surfaced on params');
 });
 
 test('applyFilter: btw requires exactly 2 values', t => {
@@ -3278,6 +3282,79 @@ test('applyFilter: bad number coercion throws', t => {
     filterable: {id: ['eq']}
   });
   t.throws(() => adapter.applyFilter({}, [{field: 'id', op: 'eq', value: 'abc'}]));
+});
+
+test('coerceFilterValue: public declared-type coercion', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    filterable: {year: {ops: ['eq'], type: 'number'}}
+  });
+  t.equal(adapter.coerceFilterValue('year', '2024'), 2024, 'declared number field coerced');
+  t.equal(adapter.coerceFilterValue('name', '2024'), '2024', 'string pk passes through');
+  t.equal(adapter.coerceFilterValue('unknown', 'x'), 'x', 'undeclared field defaults to pass-through');
+  t.throws(() => adapter.coerceFilterValue('year', 'abc'), 'NaN rejected');
+});
+
+test('Adapter: getPageByParams — cursor paging with revive', async t => {
+  const inputs = [];
+  const client = makeMockClient(async cmd => {
+    inputs.push(cmd.input);
+    return {Items: [{name: 'a'}, {name: 'b'}], Count: 2, LastEvaluatedKey: {name: 'b'}};
+  });
+  const adapter = new Adapter({client, table: 'T', keyFields: ['name']});
+  const page = await adapter.getPageByParams({TableName: 'T'}, {limit: 2});
+  t.deepEqual(page.data, [{name: 'a'}, {name: 'b'}]);
+  t.equal(page.limit, 2);
+  t.ok(page.cursor, 'cursor present when more data may exist');
+
+  const page2 = await adapter.getPageByParams({TableName: 'T'}, {limit: 2, cursor: page.cursor});
+  t.deepEqual(inputs[1].ExclusiveStartKey, {name: 'b'}, 'resume starts after the cursor');
+  t.equal(page2.data.length, 2);
+});
+
+test('Adapter: getPage — builds params via the list pipeline', async t => {
+  const client = makeMockClient(async () => ({Items: [{name: 'a'}], Count: 1}));
+  const adapter = new Adapter({client, table: 'T', keyFields: ['name']});
+  const page = await adapter.getPage({limit: 10});
+  t.deepEqual(page.data, [{name: 'a'}]);
+  t.notOk(page.cursor, 'exhausted listing has no cursor');
+});
+
+test('Adapter: constructor retry policy reaches batch operations', async t => {
+  let calls = 0;
+  const client = makeMockClient(async () => {
+    ++calls;
+    return {UnprocessedItems: {T: [{PutRequest: {Item: {name: 'stuck'}}}]}};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    retry: {maxAttempts: 1, backoff: () => [0, 0]}
+  });
+
+  let threw = null;
+  try {
+    await adapter.putItems([{name: 'a'}]);
+  } catch (error) {
+    threw = error;
+  }
+  t.ok(threw, 'adapter-level retry honored');
+  t.matchString(threw.message, /exceeded 1 attempts/);
+  t.equal(calls, 1, 'single attempt as configured');
+
+  calls = 0;
+  threw = null;
+  try {
+    await adapter.putItems([{name: 'a'}], {retry: {maxAttempts: 2, backoff: () => [0, 0, 0]}});
+  } catch (error) {
+    threw = error;
+  }
+  t.matchString(threw.message, /exceeded 2 attempts/);
+  t.equal(calls, 2, 'per-call retry overrides adapter default');
 });
 
 test('applyFilter: multiple clauses AND-combined', t => {

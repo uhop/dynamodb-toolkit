@@ -63,6 +63,58 @@ test('applyBatch: retries UnprocessedItems', async t => {
   t.ok(callCount >= 2, 'retried at least once');
 });
 
+test('applyBatch: {options: {retry}} caps attempts', async t => {
+  let calls = 0;
+  const client = makeMockClient(async () => {
+    ++calls;
+    return {UnprocessedItems: {T: [{PutRequest: {Item: {id: 'stuck'}}}]}};
+  });
+  let threw = null;
+  try {
+    await applyBatch(client, [{action: 'put', params: {TableName: 'T', Item: {id: '1'}}}], {
+      options: {retry: {maxAttempts: 2, backoff: () => [0, 0, 0]}}
+    });
+  } catch (error) {
+    threw = error;
+  }
+  t.ok(threw, 'persistent UnprocessedItems throws');
+  t.matchString(threw.message, /exceeded 2 attempts/);
+  t.equal(calls, 2, 'stopped after maxAttempts sends');
+});
+
+test('applyBatch: custom finite backoff running dry throws', async t => {
+  const client = makeMockClient(async () => ({UnprocessedItems: {T: [{PutRequest: {Item: {id: 'stuck'}}}]}}));
+  let threw = null;
+  try {
+    await applyBatch(client, [{action: 'put', params: {TableName: 'T', Item: {id: '1'}}}], {
+      options: {retry: {backoff: () => [0], maxAttempts: 100}}
+    });
+  } catch (error) {
+    threw = error;
+  }
+  t.ok(threw, 'dry delay schedule with pending work throws');
+  t.matchString(threw.message, /delays exhausted/);
+});
+
+test('getBatch: {options: {retry}} caps attempts', async t => {
+  let calls = 0;
+  const client = makeMockClient(async () => {
+    ++calls;
+    return {Responses: {}, UnprocessedKeys: {T: {Keys: [{id: '1'}]}}};
+  });
+  let threw = null;
+  try {
+    await getBatch(client, [{action: 'get', params: {TableName: 'T', Key: {id: '1'}}}], {
+      options: {retry: {maxAttempts: 3, backoff: () => [0, 0, 0, 0]}}
+    });
+  } catch (error) {
+    threw = error;
+  }
+  t.ok(threw, 'persistent UnprocessedKeys throws');
+  t.matchString(threw.message, /exceeded 3 attempts/);
+  t.equal(calls, 3, 'stopped after maxAttempts sends');
+});
+
 test('applyBatch: skips null requests', async t => {
   const client = makeMockClient(async () => ({UnprocessedItems: {}}));
   const total = await applyBatch(client, null, [{action: 'put', params: {TableName: 'T', Item: {id: '1'}}}], null);

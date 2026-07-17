@@ -59,7 +59,24 @@ export interface RestPolicy {
    * into astronomical skip-page SDK calls.
    */
   maxOffset: number;
+  /**
+   * Guard the delete-all footgun. When `true` (default), `DELETE /` with no
+   * scoping — no filter, no search, and an empty `exampleFromContext` — is
+   * rejected with `400 UnscopedMassDelete` unless the request carries
+   * `?confirm=true`. Set `false` to restore the unguarded pre-3.8 behavior.
+   */
+  confirmMassDelete: boolean;
 }
+
+/**
+ * Partial policy accepted by {@link mergePolicy} and the adapters' `policy`
+ * option — `envelope` / `statusCodes` overrides are themselves partial and
+ * merge key-by-key over the defaults.
+ */
+export type RestPolicyOverrides = Omit<Partial<RestPolicy>, 'envelope' | 'statusCodes'> & {
+  envelope?: EnvelopeKeys;
+  statusCodes?: Partial<RestStatusCodes>;
+};
 
 /** The default REST policy. Inspect for the baseline values. */
 export const defaultPolicy: RestPolicy;
@@ -85,4 +102,4 @@ export function mapErrorStatus(err: unknown, statusCodes?: RestStatusCodes): num
  * @param overrides Partial policy to overlay.
  * @returns A fully-populated policy — pass directly to `createHandler`'s `policy` option.
  */
-export function mergePolicy(overrides?: Partial<RestPolicy>): RestPolicy;
+export function mergePolicy(overrides?: RestPolicyOverrides): RestPolicy;

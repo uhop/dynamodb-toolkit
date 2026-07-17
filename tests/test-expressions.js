@@ -228,6 +228,11 @@ test('buildCondition: in', t => {
   t.matchString(result.ConditionExpression, /IN \(:cdv0, :cdv1, :cdv2\)/);
 });
 
+test('buildCondition: in accepts the polymorphic `value` spelling', t => {
+  const result = buildCondition([{path: 'status', op: 'in', value: ['a', 'b', 'c']}]);
+  t.matchString(result.ConditionExpression, /IN \(:cdv0, :cdv1, :cdv2\)/);
+});
+
 test('buildCondition: and/or/not composites', t => {
   const result = buildCondition([
     {

@@ -25,8 +25,14 @@ export const makeMockAdapter = (overrides = {}) => {
     async post(item) {
       push({fn: 'post', item});
     },
-    async deleteListByParams(params) {
-      push({fn: 'deleteListByParams', params});
+    async getPage(opts, example, index) {
+      push({fn: 'getPage', opts, example, index});
+      const out = {data: [{name: 'earth'}, {name: 'mars'}], limit: opts.limit};
+      if (!opts.cursor) out.cursor = 'next-token';
+      return out;
+    },
+    async deleteListByParams(params, opts) {
+      push({fn: 'deleteListByParams', params, opts});
       return {processed: 5};
     },
     async _buildListParams(opts, project, example, index) {
@@ -45,12 +51,12 @@ export const makeMockAdapter = (overrides = {}) => {
       push({fn: 'putItems', items});
       return {processed: items.length};
     },
-    async cloneListByParams(params, mapFn) {
-      push({fn: 'cloneListByParams', params, mapFn});
+    async cloneListByParams(params, mapFn, opts) {
+      push({fn: 'cloneListByParams', params, mapFn, opts});
       return {processed: 3};
     },
-    async moveListByParams(params, mapFn) {
-      push({fn: 'moveListByParams', params, mapFn});
+    async moveListByParams(params, mapFn, opts) {
+      push({fn: 'moveListByParams', params, mapFn, opts});
       return {processed: 3};
     },
     async cloneByKeys(keys, mapFn) {

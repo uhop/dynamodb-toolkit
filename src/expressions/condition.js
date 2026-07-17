@@ -41,7 +41,8 @@ const buildClause = (clause, names, values, counter, vCounter) => {
       return 'contains(' + path + ', ' + v + ')';
     }
     case 'in': {
-      const aliases = clause.values.map(val => {
+      // values: legacy alias (pre-3.8) — `value` is the polymorphic knob
+      const aliases = (clause.value ?? clause.values).map(val => {
         const v = ':cdv' + vCounter.n++;
         values[v] = val;
         return v;

@@ -28,14 +28,17 @@ const B64 = {
   }
 };
 
+// v: envelope schema version — bump when the payload shape changes; undefined = pre-3.8 legacy
 export const encodeCursor = payload => {
   if (!payload || typeof payload !== 'object') throw new TypeError('encodeCursor: payload must be an object');
-  return B64.encode(payload);
+  return B64.encode({v: 1, ...payload});
 };
 
 // Debug / test helper — NOT a stable public API. Callers that rely on the
 // inner shape will break without notice when mass ops gain new phases.
 export const decodeCursor = cursor => {
   if (typeof cursor !== 'string' || !cursor) throw new TypeError('decodeCursor: cursor must be a non-empty string');
-  return JSON.parse(B64.decode(cursor));
+  const {v, ...payload} = JSON.parse(B64.decode(cursor));
+  if (v !== undefined && v !== 1) throw new TypeError('decodeCursor: unsupported cursor version: ' + v);
+  return payload;
 };

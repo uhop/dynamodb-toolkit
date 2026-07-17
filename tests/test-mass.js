@@ -12,7 +12,8 @@ import {
   getTotal,
   mergeMapFn,
   encodeCursor,
-  decodeCursor
+  decodeCursor,
+  cursorList
 } from 'dynamodb-toolkit/mass';
 import {runPaged} from 'dynamodb-toolkit/mass/run-paged.js';
 import {makeMockClient} from './helpers/mock-client.js';
@@ -343,6 +344,94 @@ test('decodeCursor: throws on malformed input', t => {
     threw = true;
   }
   t.ok(threw, 'malformed cursor rejected');
+});
+
+const rawCursor = payload => btoa(JSON.stringify(payload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+test('encodeCursor: embeds schema version in the envelope', t => {
+  const cursor = encodeCursor({LastEvaluatedKey: {id: '1'}});
+  const padded = cursor.replace(/-/g, '+').replace(/_/g, '/') + '=='.slice(0, (4 - (cursor.length % 4)) % 4);
+  t.equal(JSON.parse(atob(padded)).v, 1, 'envelope carries v: 1');
+});
+
+test('decodeCursor: accepts a legacy versionless cursor', t => {
+  const legacy = rawCursor({LastEvaluatedKey: {id: '1'}});
+  t.deepEqual(decodeCursor(legacy), {LastEvaluatedKey: {id: '1'}}, 'pre-3.8 cursor decodes');
+});
+
+test('decodeCursor: rejects an unsupported cursor version', t => {
+  const future = rawCursor({v: 2, LastEvaluatedKey: {id: '1'}});
+  t.throws(() => decodeCursor(future), 'future version rejected');
+});
+
+// cursorList
+
+test('cursorList: single page without LEK — no cursor', async t => {
+  const inputs = [];
+  const client = makeMockClient(async cmd => {
+    inputs.push(cmd.input);
+    return {Items: [{id: 1}, {id: 2}], Count: 2, ScannedCount: 2};
+  });
+  const result = await cursorList(client, {TableName: 'T'}, {limit: 5});
+  t.deepEqual(result.data, [{id: 1}, {id: 2}]);
+  t.equal(result.limit, 5);
+  t.notOk(result.cursor, 'exhausted listing has no cursor');
+  t.equal(inputs.length, 1);
+  t.equal(inputs[0].Limit, 5, 'Limit = remaining capacity');
+});
+
+test('cursorList: limit reached with LEK — cursor emitted and resumable', async t => {
+  const inputs = [];
+  const client = makeMockClient(async cmd => {
+    inputs.push(cmd.input);
+    return {Items: [{id: 1}, {id: 2}], Count: 2, LastEvaluatedKey: {id: 2}};
+  });
+  const page1 = await cursorList(client, {TableName: 'T'}, {limit: 2});
+  t.equal(page1.data.length, 2);
+  t.ok(page1.cursor, 'cursor present');
+  t.deepEqual(decodeCursor(page1.cursor), {LastEvaluatedKey: {id: 2}});
+
+  await cursorList(client, {TableName: 'T'}, {limit: 2, cursor: page1.cursor});
+  t.deepEqual(inputs[1].ExclusiveStartKey, {id: 2}, 'resume starts after the cursor');
+});
+
+test('cursorList: filtered short pages accumulate without overshoot', async t => {
+  const inputs = [];
+  let call = 0;
+  const client = makeMockClient(async cmd => {
+    // snapshot: cursorList reuses (and mutates) one params object across pages
+    inputs.push({...cmd.input});
+    if (++call === 1) return {Items: [{id: 1}], Count: 1, LastEvaluatedKey: {id: 10}};
+    return {Items: [{id: 2}, {id: 3}], Count: 2};
+  });
+  const result = await cursorList(client, {TableName: 'T'}, {limit: 3});
+  t.deepEqual(
+    result.data.map(x => x.id),
+    [1, 2, 3]
+  );
+  t.notOk(result.cursor, 'no cursor when the final page had no LEK');
+  t.deepEqual(
+    inputs.map(i => i.Limit),
+    [3, 2],
+    'Limit shrinks to remaining capacity'
+  );
+});
+
+test('cursorList: empty filtered page with LEK keeps paging', async t => {
+  let call = 0;
+  const client = makeMockClient(async () => {
+    if (++call === 1) return {Items: [], Count: 0, LastEvaluatedKey: {id: 5}};
+    return {Items: [{id: 6}], Count: 1};
+  });
+  const result = await cursorList(client, {TableName: 'T'}, {limit: 2});
+  t.deepEqual(result.data, [{id: 6}]);
+  t.equal(call, 2, 'paged past the empty filtered page');
+});
+
+test('cursorList: limit clamped to maxLimit', async t => {
+  const client = makeMockClient(async () => ({Items: [], Count: 0}));
+  const result = await cursorList(client, {TableName: 'T'}, {limit: 500});
+  t.equal(result.limit, 100, 'default maxLimit is 100');
 });
 
 // runPaged

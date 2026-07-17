@@ -10,6 +10,7 @@ export {copyList} from './copy-list.js';
 export {moveList} from './move-list.js';
 export {getTotal} from './get-total.js';
 export {encodeCursor, decodeCursor} from './cursor.js';
+export {cursorList} from './cursor-list.js';
 
 // Deprecated aliases — removed in a future minor (3.3.0 or 4.0.0).
 // Prior names conflated "List" (DB-produced) with "ByKeys" (caller-supplied);

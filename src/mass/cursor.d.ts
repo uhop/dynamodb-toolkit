@@ -19,6 +19,8 @@ export interface CursorPayload {
 /**
  * Encode a cursor payload to an opaque base64url string.
  *
+ * The encoded envelope carries a schema version (`v: 1`) alongside the
+ * payload, so a future payload-shape change can be detected on decode.
  * Throws `TypeError` if `payload` is not an object. Callers should treat
  * the returned string as opaque and pass it back in via the `resumeToken`
  * option on a subsequent mass-op call.
@@ -27,6 +29,10 @@ export function encodeCursor(payload: CursorPayload): string;
 
 /**
  * Decode an opaque cursor string back to its structured payload.
+ *
+ * Validates the envelope's schema version: version `1` and versionless
+ * (pre-3.8 legacy) cursors decode, anything else throws `TypeError`.
+ * The version field itself is stripped from the returned payload.
  *
  * Debug / test helper only — the inner shape is not a stable public
  * contract and may change in minor releases. Throws `TypeError` on empty

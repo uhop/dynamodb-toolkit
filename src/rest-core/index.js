@@ -9,9 +9,12 @@ export {parsePatch} from './parsers/parse-patch.js';
 export {parseNames} from './parsers/parse-names.js';
 export {parsePaging} from './parsers/parse-paging.js';
 export {parseFlag} from './parsers/parse-flag.js';
+export {parseCursor} from './parsers/parse-cursor.js';
+export {parseMassOptions} from './parsers/parse-mass-options.js';
 export {coerceStringQuery} from './parsers/coerce-string-query.js';
 
 export {buildEnvelope} from './builders/build-envelope.js';
+export {buildMassResult} from './builders/build-mass-result.js';
 export {buildErrorBody} from './builders/build-error-body.js';
 export {paginationLinks} from './builders/pagination-links.js';
 export {buildListOptions} from './builders/build-list-options.js';

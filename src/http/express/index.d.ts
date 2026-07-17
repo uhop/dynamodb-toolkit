@@ -1,7 +1,7 @@
 import type {Request, RequestHandler} from 'express';
 
 import type {Adapter} from '../../index.js';
-import type {RestPolicy} from '../../rest-core/index.js';
+import type {RestPolicyOverrides} from '../../rest-core/index.js';
 
 /**
  * Context passed to {@link ExpressAdapterOptions.exampleFromContext}. Mirrors
@@ -27,7 +27,7 @@ export interface ExpressExampleContext<TItem extends Record<string, unknown> = R
 /** Options for {@link createExpressAdapter}. */
 export interface ExpressAdapterOptions<TItem extends Record<string, unknown> = Record<string, unknown>> {
   /** Partial overrides for the REST policy (merged with the default). */
-  policy?: Partial<RestPolicy>;
+  policy?: RestPolicyOverrides;
   /**
    * Map from sort-field name to the GSI index that provides that ordering.
    * `?sort=name` becomes `{index: sortableIndices.name, descending: false}`.

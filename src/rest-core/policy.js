@@ -13,6 +13,7 @@ export const defaultPolicy = {
     total: 'total',
     offset: 'offset',
     limit: 'limit',
+    cursor: 'cursor',
     links: 'links'
   },
   statusCodes: {
@@ -27,7 +28,8 @@ export const defaultPolicy = {
   needTotal: true,
   defaultLimit: 10,
   maxLimit: 100,
-  maxOffset: 100_000
+  maxOffset: 100_000,
+  confirmMassDelete: true
 };
 
 // Map an SDK error to a status code per policy. Falls back to internal (500).

@@ -1,10 +1,17 @@
 // @ts-self-types="./random.d.ts"
 // Random string generator for unique suffixes.
 
+const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
+
 export const random = (length = 8) => {
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, b => b.toString(36).padStart(2, '0'))
-    .join('')
-    .slice(0, length);
+  let result = '';
+  while (result.length < length) {
+    const bytes = new Uint8Array(length - result.length);
+    crypto.getRandomValues(bytes);
+    for (const b of bytes) {
+      // rejection sampling: 252 = 7×36, higher bytes would bias the modulo
+      if (b < 252) result += ALPHABET[b % 36];
+    }
+  }
+  return result;
 };

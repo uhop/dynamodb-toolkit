@@ -7,11 +7,12 @@ import {applyBatch} from '../batch/apply-batch.js';
 
 const identity = x => x;
 
-export const writeItems = async (client, tableName, items, mapFn = identity) =>
+export const writeItems = async (client, tableName, items, mapFn = identity, retry) =>
   applyBatch(
     client,
     items
       .map(mapFn)
       .filter(item => item)
-      .map(item => ({action: 'put', params: {TableName: tableName, Item: item}}))
+      .map(item => ({action: 'put', params: {TableName: tableName, Item: item}})),
+    retry && {options: {retry}}
   );

@@ -1,5 +1,5 @@
 import type {Adapter} from '../../index.js';
-import type {RestPolicy} from '../../rest-core/index.js';
+import type {RestPolicyOverrides} from '../../rest-core/index.js';
 
 /** Return value from {@link FetchAdapterOptions.onMiss}. */
 export type OnMissResult = Response | null | Promise<Response | null>;
@@ -32,7 +32,7 @@ export interface FetchExampleContext<TItem extends Record<string, unknown> = Rec
 /** Options for {@link createFetchAdapter}. */
 export interface FetchAdapterOptions<TItem extends Record<string, unknown> = Record<string, unknown>> {
   /** Partial overrides for the REST policy (merged with the default). */
-  policy?: Partial<RestPolicy>;
+  policy?: RestPolicyOverrides;
   /**
    * Map from sort-field name to the GSI index that provides that ordering.
    * `?sort=name` becomes `{index: sortableIndices.name, descending: false}`.

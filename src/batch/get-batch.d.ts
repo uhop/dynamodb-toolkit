@@ -1,4 +1,5 @@
 import type {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
+import type {RetryOptions} from './backoff.js';
 
 /** A read descriptor consumed by {@link getBatch}. */
 export interface BatchGetDescriptor {
@@ -16,6 +17,14 @@ export interface BatchGetResult {
   item: Record<string, unknown>;
 }
 
+/** Options sentinel accepted among {@link getBatch} requests — mirrors `applyBatch`'s. */
+export interface BatchGetOptionsDescriptor {
+  options: {
+    /** Retry policy for this call. Default: `backoff()` schedule, 8 attempts. */
+    retry?: RetryOptions;
+  };
+}
+
 /**
  * Chunk and execute `BatchGetItem` calls (limit 100 per call) with
  * `UnprocessedKeys` retry and exponential backoff. Items are returned in
@@ -25,8 +34,11 @@ export interface BatchGetResult {
  * The AWS SDK does **not** resubmit `UnprocessedKeys` — this wrapper does.
  *
  * @param client The DynamoDB DocumentClient.
- * @param requests Descriptors, arrays of descriptors, and/or `null` holes.
+ * @param requests Descriptors, arrays of descriptors, `{options}` sentinels, and/or `null` holes.
  * @returns The fetched items, each tagged with its source table. Order is arbitrary —
  *   misses are simply absent, so the result may be shorter than the request list.
  */
-export function getBatch(client: DynamoDBDocumentClient, ...requests: (BatchGetDescriptor | BatchGetDescriptor[] | null)[]): Promise<BatchGetResult[]>;
+export function getBatch(
+  client: DynamoDBDocumentClient,
+  ...requests: (BatchGetDescriptor | BatchGetOptionsDescriptor | (BatchGetDescriptor | BatchGetOptionsDescriptor)[] | null | undefined | false)[]
+): Promise<BatchGetResult[]>;
