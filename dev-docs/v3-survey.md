@@ -4,7 +4,7 @@
 > **Date:** 2026-04-15.
 > **Companion design references:**
 >
-> - The REST surface in `helpers/KoaAdapter.js` was designed against Eugene Lazutkin's _Web Applications: the modern API design_ (`~/Open/articles/design/web-apps-client-server-api-design.md`, ©2012–2018). The article defines **functional requirements** for a sane REST API, not a fixed naming scheme. §4 below distills those requirements and lists the helper functions the toolkit should provide so that implementing concrete endpoints (with project-specific names, codes, and envelopes) is trivial — and in many cases automatable.
+> - The REST surface in `helpers/KoaAdapter.js` was designed against Eugene Lazutkin's _Web Applications: the modern API design_ (`~/Open/articles/archive/web-apps-client-server-api-design.md`, ©2012–2018). The article defines **functional requirements** for a sane REST API, not a fixed naming scheme. §4 below distills those requirements and lists the helper functions the toolkit should provide so that implementing concrete endpoints (with project-specific names, codes, and envelopes) is trivial — and in many cases automatable.
 
 ---
 
@@ -207,7 +207,7 @@ Batching with backoff:
 
 Toolkit's REST design:
 
-- Eugene Lazutkin, _Web Applications: the modern API design_ — `~/Open/articles/design/web-apps-client-server-api-design.md` (©2012–2018). Source for KoaAdapter conventions; see §7 for the cross-check.
+- Eugene Lazutkin, _Web Applications: the modern API design_ — `~/Open/articles/archive/web-apps-client-server-api-design.md` (©2012–2018). Source for KoaAdapter conventions; see §7 for the cross-check. A 2026 revision, _Web Applications: Designing a Modern REST API_, supersedes it at `~/Open/articles/design/web-apps-client-server-api-design.md`; the conventions below were drawn from the archived original.
 
 ---
 
@@ -314,7 +314,7 @@ Open questions: extract to `@dynamodb-toolkit/koa`? Add Express/Hono wrappers vi
 - Rebuild `wiki/` after the API stabilizes. Most pages still apply conceptually; signatures change.
 - Add a v2-toolkit → v3-toolkit migration guide.
 - Add an SDK v2 → SDK v3 cheat sheet for consumers.
-- Cross-link the article (`web-apps-client-server-api-design.md`) from the KoaAdapter overview as the rationale for REST conventions.
+- Cross-link the article from the KoaAdapter overview as the rationale for REST conventions. The conventions came from the archived original (`~/Open/articles/archive/web-apps-client-server-api-design.md`); decide at link time whether to cite it or the 2026 revision that supersedes it (`~/Open/articles/design/web-apps-client-server-api-design.md`), since the two now share a basename.
 
 ### 6.10 Observability and ops
 
