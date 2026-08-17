@@ -241,7 +241,7 @@ Not decisions — items the design doc must rule on, with the verdict from §2 /
 
 ### 6.3 Type system (in `.d.ts` sidecars)
 
-Types live in hand-written `.d.ts` files alongside each `.js` module — no `.ts` sources, no compiler (see [[js-plus-dts-no-typescript]]).
+Types live in hand-written `.d.ts` files alongside each `.js` module — no `.ts` sources, no compiler (JS with hand-written `.d.ts`, no TypeScript).
 
 - Generic `Adapter<TItem, TKey>` parameterized by item/key types.
 - Patch type: `Patch<TItem>` allowing dotted-path keys + the magic delete/separator keys. Investigate accurate typing of nested paths (e.g., `Path<TItem>` recursive type).
@@ -335,7 +335,7 @@ These are the questions the design doc will answer, listed here so the survey do
 6. **REST defaults vs. policy knobs.** The toolkit ships configurable defaults for: meta-prefix (`_`), DB-prefix (`-`), pagination envelope keys (`items` etc.), status code map, error envelope shape, method-prefix character (`-`). Decision: which defaults match Eugene's house style, and which are left at the article's defaults? Specifically, review the `500`-on-catch-all behavior in `tests/server.js` — map known error families to specific codes (`409`/`422`/`429`/`503`) before falling back to `500`.
 7. **`generic*` variants — keep separately, or fold into a `{strategy: 'native'|'sequential'}` option?**
 8. **Move `KoaAdapter` to its own package?** Define a framework-agnostic core with Koa/Express/Hono wrappers? Or stay Koa-only?
-9. **Type-declaration ergonomics — typed `Patch<T>` paths, branded `Raw<T>`?** How far to push the type system in the `.d.ts` sidecars (TS is declarations-only here, per [[js-plus-dts-no-typescript]])?
+9. **Type-declaration ergonomics — typed `Patch<T>` paths, branded `Raw<T>`?** How far to push the type system in the `.d.ts` sidecars (TS is declarations-only here — JS with hand-written `.d.ts`, no compiler)?
 10. **Test runner choice — `tape-six` vs `node:test` vs `vitest`?**
 11. **Wiki vs in-repo `docs/` vs both?**
 12. **Implement `_array` patch operations now or defer?**

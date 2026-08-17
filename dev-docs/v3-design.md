@@ -568,7 +568,7 @@ The toolkit follows the project-wide runtime matrix Eugene applies across all re
 
 **Supported runtimes (2026-04-15):** every non-EOL Node (20, 22, 24, 25), latest Bun, latest Deno. `engines.node` reads `">=20"` and is updated when the floor moves.
 
-**CI matrix for this project:** `ubuntu-latest`, **latest Node only**. Rationale: pure JS, no native code, no OS-sensitive paths — there is no reason to extend to multiple Node versions or OS runners. DynamoDB Local via Docker adds a Docker requirement but not an OS matrix. See [[js-runtime-matrix]] for the cross-project CI policy and per-project decision guidelines.
+**CI matrix for this project:** `ubuntu-latest`, **latest Node only**. Rationale: pure JS, no native code, no OS-sensitive paths — there is no reason to extend to multiple Node versions or OS runners. DynamoDB Local via Docker adds a Docker requirement but not an OS matrix. See the JS-runtime-matrix convention for the cross-project CI policy and per-project decision guidelines.
 
 **Rules for production code under `src/`:**
 
@@ -590,7 +590,7 @@ The current test setup — create a real AWS DynamoDB table by hand, run Postman
 
 ### 9.1 Test runner
 
-**`tape-six`**. Sibling-project parity ([[projects/stream-json]], [[projects/stream-chain]], etc.); written by Eugene, so using it here is also a battle-test for tape-six itself and a source of bug/feature feedback. One `devDependencies` entry; accepted.
+**`tape-six`**. Sibling-project parity (`stream-json`, `stream-chain`, etc.); written by Eugene, so using it here is also a battle-test for tape-six itself and a source of bug/feature feedback. One `devDependencies` entry; accepted.
 
 ### 9.2 Zero other dev dependencies
 

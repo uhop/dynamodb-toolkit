@@ -510,7 +510,7 @@ The cars-AND-boats wrinkle surfaces the real question: **one Adapter per vehicle
 
 Post-3.6.0 — after all hierarchical implementation phases have shipped and stabilized. Before 0.3.0 adapter releases (so we can catch ergonomics issues before they propagate to adapter consumers).
 
-Tracked in [[projects/dynamodb-toolkit/queue]] as a post-implementation task.
+Tracked in the project queue as a post-implementation task.
 
 ---
 

@@ -1510,8 +1510,8 @@ registered marshallers wherever they match.
 
 ### Projection ergonomics
 
-All resolved 2026-04-21 (second session). Detailed rationale in
-[[projects/dynamodb-toolkit/decisions]] §"Projection ergonomics — Q34–Q37".
+All resolved 2026-04-21 (second session). Detailed rationale in the project
+decisions notes, §"Projection ergonomics — Q34–Q37".
 
 34. **Strong-consistency on GSI Query** — _resolved._ **Refuse up front with
     `ConsistentReadOnGSIRejected`.** DynamoDB rejects `ConsistentRead: true`
