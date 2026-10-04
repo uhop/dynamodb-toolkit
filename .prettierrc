@@ -3,5 +3,11 @@
   "singleQuote": true,
   "bracketSpacing": false,
   "arrowParens": "avoid",
-  "trailingComma": "none"
+  "trailingComma": "none",
+  "overrides": [
+    {
+      "files": "wiki/**/*.md",
+      "options": {"embeddedLanguageFormatting": "off"}
+    }
+  ]
 }

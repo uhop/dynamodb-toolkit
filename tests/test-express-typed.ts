@@ -76,7 +76,8 @@ test('typed: composite keyFromPath yields the right key shape', t => {
   const adapter = new Adapter<TenantedPlanet, TenantedKey>({
     client: makeClient(async () => ({})),
     table: 'MultiTenantPlanets',
-    keyFields: ['pk', 'sk']
+    keyFields: ['pk', 'sk'],
+    structuralKey: {name: '-sk'}
   });
 
   const mw = createExpressAdapter(adapter, {

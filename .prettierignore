@@ -1,12 +1,2 @@
-# v2 code — reference only, removed in Phase 6
-Adapter.js
-index.js
-utils/
-helpers/
-tests/server.js
-tests/routes.js
-tests/Unit test dynamodb-toolkit.postman_collection.json
-wiki/
-
-# prettier 3.9.x de-indents the nested list under ordered item 32 (3.8.x clean) — remove when fixed upstream
+# prettier 3.9.x de-indents the nested list under ordered item 32 (3.8.x clean; still broken in 3.9.9) — remove when fixed upstream
 dev-docs/hierarchical-use-case.md

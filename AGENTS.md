@@ -18,18 +18,18 @@ If you cloned without `--recursive`, run `git submodule update --init` to popula
 
 ## Commands
 
-| Command                             | What it does                                                                                           |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `npm install`                       | Install dependencies                                                                                   |
-| `npm test`                          | Run unit + integration suite via tape-six on Node (no Docker required)                                 |
-| `npm run test:e2e`                  | Run end-to-end suite against DynamoDB Local (requires Docker)                                          |
-| `npm run test:deno`                 | Manual — same suite under Deno (excluding `.cjs` tests)                                                |
-| `npm run test:bun`                  | Manual — same suite under Bun (excluding `.cjs` tests)                                                 |
-| `npm run ts-test`                   | Manual — run TypeScript test files (`tests/test-*.*ts`) via tape-six's native `.ts` support (Node 22+) |
-| `npm run ts-check`                  | Strict `tsc --noEmit` over `.ts` / `.d.ts` files                                                       |
-| `npm run js-check`                  | `tsc --project tsconfig.check.json` — JS lint via type-checker (catches unused vars, undeclared refs)  |
-| `npm run lint` / `npm run lint:fix` | Prettier check / fix                                                                                   |
-| `npx dynamodb-toolkit <subcommand>` | CLI wrapper over the `/provisioning` helpers: `plan-table` / `ensure-table` / `verify-table`           |
+| Command                             | What it does                                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `npm install`                       | Install dependencies                                                                                  |
+| `npm test`                          | Run unit + integration suite via tape-six on Node (no Docker required)                                |
+| `npm run test:e2e`                  | Run end-to-end suite against DynamoDB Local (requires Docker)                                         |
+| `npm run test:deno`                 | Manual — same suite under Deno (excluding `.cjs` tests)                                               |
+| `npm run test:bun`                  | Manual — same suite under Bun (excluding `.cjs` tests)                                                |
+| `npm run ts-test`                   | Run TypeScript test files (`tests/test-*.*ts`) via tape-six's native `.ts` support (Node 22+)         |
+| `npm run ts-check`                  | Strict `tsc --noEmit` over `.ts` / `.d.ts` files                                                      |
+| `npm run js-check`                  | `tsc --project tsconfig.check.json` — JS lint via type-checker (catches unused vars, undeclared refs) |
+| `npm run lint` / `npm run lint:fix` | Prettier check / fix                                                                                  |
+| `npx dynamodb-toolkit <subcommand>` | CLI wrapper over the `/provisioning` helpers: `plan-table` / `ensure-table` / `verify-table`          |
 
 There is no separate build step. The published tarball ships `src/` + `bin/` as-is.
 
@@ -194,7 +194,8 @@ Pass via the constructor `options.hooks` or override the corresponding methods o
 
 - **Zero runtime dependencies.** Anything in `package.json` `dependencies` is wrong. The SDK is a `peerDependencies` entry; `tape-six` / `prettier` / `typescript` / `@types/node` / `@aws-sdk/*` (for local dev) are `devDependencies`.
 - **Do not modify `wiki/`** unless explicitly asked — it's a separate git submodule. When asked, work on a feature branch inside the submodule; Eugene commits primary-branch history manually.
-- **Do not self-commit to master / main** unless explicitly asked. Stage + report; Eugene commits.- **Do not introduce a build step, transpiler, or bundler.** The package ships source as-is.
+- **Do not self-commit to master / main** unless explicitly asked. Stage + report; Eugene commits.
+- **Do not introduce a build step, transpiler, or bundler.** The package ships source as-is.
 - **Do not import from `aws-sdk` (v2) anywhere.** v3 is built exclusively on `@aws-sdk/*`.
 - **Do not import `node:*` modules at runtime in `src/`.** Type-only imports in `.d.ts` are fine. Tests and `bin/` may use `node:*` freely.
 - **Run the full check matrix before claiming work is ready.** `npm run lint && npm run ts-check && npm run js-check && npm test && npm run test:bun && npm run test:deno` + `npm run ts-test`.

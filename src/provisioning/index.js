@@ -8,12 +8,5 @@
 
 export {planTable, ensureTable, buildCreateTableInput, buildAddGsiInput, planAddOnly, describeTable, executePlan} from './ensure-table.js';
 export {verifyTable, diffTable} from './verify-table.js';
-export {
-  DESCRIPTOR_VERSION,
-  buildDescriptorSnapshot,
-  compareDescriptor,
-  descriptorRecordKey,
-  readDescriptor,
-  writeDescriptor
-} from './descriptor.js';
+export {DESCRIPTOR_VERSION, buildDescriptorSnapshot, compareDescriptor, descriptorRecordKey, readDescriptor, writeDescriptor} from './descriptor.js';
 export {extractDeclaration} from './declaration.js';

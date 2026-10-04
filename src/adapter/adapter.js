@@ -26,7 +26,15 @@ import {runPaged} from '../mass/run-paged.js';
 
 import {defaultHooks, restrictKey} from './hooks.js';
 import {dispatchWrite} from './transaction-upgrade.js';
-import {ConsistentReadOnGSIRejected, NoIndexForSortField, BadFilterField, BadFilterOp, KeyFieldChanged, CreatedAtFieldNotDeclared, CascadeNotDeclared} from '../errors.js';
+import {
+  ConsistentReadOnGSIRejected,
+  NoIndexForSortField,
+  BadFilterField,
+  BadFilterOp,
+  KeyFieldChanged,
+  CreatedAtFieldNotDeclared,
+  CascadeNotDeclared
+} from '../errors.js';
 
 const MOVE_CHUNK = 12;
 
@@ -108,9 +116,7 @@ const normalizeIndex = (name, def) => {
   } else {
     // lsi — inherits base table's partition key; only alternate sort is declared.
     if (def.pk !== undefined) {
-      throw new Error(
-        `options.indices['${name}'] (lsi) does not accept pk — LSIs inherit the base table's partition key`
-      );
+      throw new Error(`options.indices['${name}'] (lsi) does not accept pk — LSIs inherit the base table's partition key`);
     }
     if (def.sk === undefined) {
       throw new Error(`options.indices['${name}'] (lsi) requires sk`);
@@ -160,9 +166,7 @@ const normalizeKeyFieldSpec = (entry, index, composite) => {
   // width is required for {type: 'number'} in composite keys — zero-padding
   // preserves lexicographic sort on the joined string key.
   if (composite && type === 'number' && field.width === undefined) {
-    throw new Error(
-      `options.keyFields[${index}] ({name: '${field.name}', type: 'number'}) requires 'width' in a composite keyFields`
-    );
+    throw new Error(`options.keyFields[${index}] ({name: '${field.name}', type: 'number'}) requires 'width' in a composite keyFields`);
   }
   return field;
 };
@@ -202,7 +206,7 @@ export class Adapter {
           throw new Error('options.structuralKey.separator must be a string');
         }
       } else {
-        throw new Error("options.structuralKey must be a string (shorthand for name) or {name: string, separator?: string}");
+        throw new Error('options.structuralKey must be a string (shorthand for name) or {name: string, separator?: string}');
       }
       this.structuralKey = {name, separator: sep === undefined ? '|' : sep};
     } else if (composite) {
@@ -216,9 +220,7 @@ export class Adapter {
         throw new Error('options.typeLabels must be an array of strings');
       }
       if (options.typeLabels.length !== this.keyFields.length) {
-        throw new Error(
-          `options.typeLabels length (${options.typeLabels.length}) must match keyFields length (${this.keyFields.length})`
-        );
+        throw new Error(`options.typeLabels length (${options.typeLabels.length}) must match keyFields length (${this.keyFields.length})`);
       }
       this.typeLabels = options.typeLabels.slice();
     }
@@ -233,11 +235,7 @@ export class Adapter {
           throw new Error('options.typeDiscriminator (string shorthand) must be non-empty');
         }
         discName = options.typeDiscriminator;
-      } else if (
-        options.typeDiscriminator &&
-        typeof options.typeDiscriminator === 'object' &&
-        typeof options.typeDiscriminator.name === 'string'
-      ) {
+      } else if (options.typeDiscriminator && typeof options.typeDiscriminator === 'object' && typeof options.typeDiscriminator.name === 'string') {
         discName = options.typeDiscriminator.name;
       } else {
         throw new Error('options.typeDiscriminator must be a string (shorthand for name) or {name: string}');
@@ -358,9 +356,7 @@ export class Adapter {
         }
         for (const op of ops) {
           if (typeof op !== 'string' || !ALL_FILTER_OPS.has(op)) {
-            throw new Error(
-              `options.filterable['${field}'] contains invalid op '${op}'. Allowed: ${[...ALL_FILTER_OPS].join(', ')}`
-            );
+            throw new Error(`options.filterable['${field}'] contains invalid op '${op}'. Allowed: ${[...ALL_FILTER_OPS].join(', ')}`);
           }
         }
         if (type !== undefined && type !== 'string' && type !== 'number' && type !== 'binary') {
@@ -413,9 +409,7 @@ export class Adapter {
       }
       if (options.relationships.structural === true) {
         if (this.keyFields.length < 2 || !this.structuralKey) {
-          throw new Error(
-            'options.relationships.structural requires composite keyFields (length > 1) with a declared structuralKey'
-          );
+          throw new Error('options.relationships.structural requires composite keyFields (length > 1) with a declared structuralKey');
         }
       }
       this.relationships = {structural: Boolean(options.relationships.structural)};
@@ -427,24 +421,16 @@ export class Adapter {
     if (this.technicalPrefix) {
       const prefix = this.technicalPrefix;
       if (this.structuralKey && !this.structuralKey.name.startsWith(prefix)) {
-        throw new Error(
-          `options.structuralKey.name '${this.structuralKey.name}' must start with options.technicalPrefix '${prefix}'`
-        );
+        throw new Error(`options.structuralKey.name '${this.structuralKey.name}' must start with options.technicalPrefix '${prefix}'`);
       }
       if (Object.keys(this.searchable).length && !this.searchablePrefix.startsWith(prefix)) {
-        throw new Error(
-          `options.searchablePrefix '${this.searchablePrefix}' must start with options.technicalPrefix '${prefix}'`
-        );
+        throw new Error(`options.searchablePrefix '${this.searchablePrefix}' must start with options.technicalPrefix '${prefix}'`);
       }
       if (this.versionField && !this.versionField.startsWith(prefix)) {
-        throw new Error(
-          `options.versionField '${this.versionField}' must start with options.technicalPrefix '${prefix}'`
-        );
+        throw new Error(`options.versionField '${this.versionField}' must start with options.technicalPrefix '${prefix}'`);
       }
       if (this.createdAtField && !this.createdAtField.startsWith(prefix)) {
-        throw new Error(
-          `options.createdAtField '${this.createdAtField}' must start with options.technicalPrefix '${prefix}'`
-        );
+        throw new Error(`options.createdAtField '${this.createdAtField}' must start with options.technicalPrefix '${prefix}'`);
       }
     } else {
       if (this.versionField) {
@@ -462,9 +448,7 @@ export class Adapter {
     // Used by `_restrictKey` when extracting DB keys from items, and by
     // mass-op projections that need the primary-key attributes for deletes
     // and moves.
-    this.primaryKeyAttrs = this.structuralKey
-      ? [this.keyFields[0].name, this.structuralKey.name]
-      : this.keyFields.map(f => f.name);
+    this.primaryKeyAttrs = this.structuralKey ? [this.keyFields[0].name, this.structuralKey.name] : this.keyFields.map(f => f.name);
 
     // Hook composition: wrap the user's prepare / revive / prepareKey hooks
     // with built-in steps that run before the user hook. The inner built-in
@@ -642,9 +626,7 @@ export class Adapter {
       if (!item) return item;
       for (const f of fields) {
         if (item[f] !== src[f]) {
-          throw new Error(
-            `swapPrefix: item does not match srcPrefix — expected '${f}' === ${JSON.stringify(src[f])}, got ${JSON.stringify(item[f])}`
-          );
+          throw new Error(`swapPrefix: item does not match srcPrefix — expected '${f}' === ${JSON.stringify(src[f])}, got ${JSON.stringify(item[f])}`);
         }
       }
       return {...item, ...dst};
@@ -698,9 +680,7 @@ export class Adapter {
         continue;
       }
       if (gapSeen) {
-        throw new Error(
-          `buildKey: values are non-contiguous — '${field.name}' present but a preceding keyField is missing`
-        );
+        throw new Error(`buildKey: values are non-contiguous — '${field.name}' present but a preceding keyField is missing`);
       }
       components.push(this._formatKeyComponent(field, v));
     }
@@ -734,10 +714,7 @@ export class Adapter {
         throw new Error('buildKey: options.partial must be a non-empty string');
       }
       // Partial prefix match at the next tier: `base | partial`.
-      return buildKeyCondition(
-        {name: this.structuralKey.name, value: base + sep + partial, kind: 'prefix', pkName, pkValue},
-        params
-      );
+      return buildKeyCondition({name: this.structuralKey.name, value: base + sep + partial, kind: 'prefix', pkName, pkValue}, params);
     }
 
     if (self) {
@@ -745,17 +722,11 @@ export class Adapter {
       // separator). Matches the row at `_sk = base` AND every `_sk`
       // starting with `base|`. Correct iff sibling values at the last
       // supplied tier are not prefixes of each other.
-      return buildKeyCondition(
-        {name: this.structuralKey.name, value: base, kind: 'prefix', pkName, pkValue},
-        params
-      );
+      return buildKeyCondition({name: this.structuralKey.name, value: base, kind: 'prefix', pkName, pkValue}, params);
     }
 
     // Default: children only. begins_with on `base|` (trailing separator).
-    return buildKeyCondition(
-      {name: this.structuralKey.name, value: base + sep, kind: 'prefix', pkName, pkValue},
-      params
-    );
+    return buildKeyCondition({name: this.structuralKey.name, value: base + sep, kind: 'prefix', pkName, pkValue}, params);
   }
 
   // --- internal helpers ---
@@ -830,9 +801,7 @@ export class Adapter {
     }
     params.ExpressionAttributeNames = names;
 
-    params.ConditionExpression = params.ConditionExpression
-      ? `(${condition}) AND (${params.ConditionExpression})`
-      : condition;
+    params.ConditionExpression = params.ConditionExpression ? `(${condition}) AND (${params.ConditionExpression})` : condition;
     return params;
   }
 
@@ -1052,15 +1021,11 @@ export class Adapter {
 
     if (kcParts.length) {
       const expr = kcParts.join(' AND ');
-      params.KeyConditionExpression = params.KeyConditionExpression
-        ? '(' + params.KeyConditionExpression + ') AND (' + expr + ')'
-        : expr;
+      params.KeyConditionExpression = params.KeyConditionExpression ? '(' + params.KeyConditionExpression + ') AND (' + expr + ')' : expr;
     }
     if (feParts.length) {
       const expr = feParts.join(' AND ');
-      params.FilterExpression = params.FilterExpression
-        ? '(' + params.FilterExpression + ') AND (' + expr + ')'
-        : expr;
+      params.FilterExpression = params.FilterExpression ? '(' + params.FilterExpression + ') AND (' + expr + ')' : expr;
     }
     alloc.commit();
     // Diagnostic only — non-enumerable so it never reaches the wire or survives cloneParams.
@@ -2116,9 +2081,7 @@ export class Adapter {
     if (item === undefined) return undefined;
     const cloned = mapFn ? mapFn(item) : item;
 
-    const writeBatch = options?.force
-      ? await this.makePut(cloned, {force: true, params: options?.params})
-      : await this.makePost(cloned);
+    const writeBatch = options?.force ? await this.makePut(cloned, {force: true, params: options?.params}) : await this.makePost(cloned);
     const writeChecks = await this.hooks.checkConsistency(writeBatch);
     const deleteBatch = await this.makeDelete(key, {params: options?.params});
     const deleteChecks = await this.hooks.checkConsistency(deleteBatch);

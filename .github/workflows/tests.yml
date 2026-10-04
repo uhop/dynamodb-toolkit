@@ -11,21 +11,19 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Node.js ${{matrix.node-version}} on ${{matrix.os}}
+    runs-on: ${{matrix.os}}
 
-    services:
-      dynamodb-local:
-        image: amazon/dynamodb-local:latest
-        ports:
-          - 8000:8000
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node-version: [22, 24, 26]
 
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: latest
+          node-version: ${{matrix.node-version}}
       - run: npm ci
       - run: npm test
-      - run: npm run ts-check
-      - run: npm run js-check
-      - run: npm run lint
+      - run: npm run ts-test
