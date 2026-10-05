@@ -58,10 +58,12 @@ export interface IndexKeySpec {
  * - `'keys-only'` — just the primary + index keys.
  * - `string[]` — `INCLUDE`-style list of extra attributes to project.
  *
- * `sparse` declares sparse-index-by-absence behaviour: when `true`, items
- * without the index key fields are omitted from the index. Pass
- * `{onlyWhen: (item) => boolean}` for a per-item predicate (e.g. "only
- * include rows of a certain type"). Default `false`.
+ * `sparse` declares sparse-index-by-absence behaviour: when `true`, the
+ * built-in `prepare` drops an index key attribute that is `undefined` or
+ * `null` on a full write, so the item is left out of the index instead of
+ * failing the write (DynamoDB rejects a NULL index key). Patches are left
+ * alone. Default `false`. A per-item rule ("only rows of a certain type")
+ * belongs in a `prepare` hook that sets or omits the index key.
  *
  * `indirect: true` declares the index as "keys-only + second-hop BatchGet":
  * the toolkit's `getListByParams` against this index reads keys, then
@@ -87,7 +89,7 @@ export interface IndexSpec {
   /** Attribute projection — default `'all'`. */
   projection?: 'all' | 'keys-only' | string[];
   /** Sparse-index-by-absence; default `false`. */
-  sparse?: boolean | {onlyWhen: (item: unknown) => boolean};
+  sparse?: boolean;
   /** Two-hop routing: reads do a BatchGet against the base table after Query/Get on the index. */
   indirect?: boolean;
 }
@@ -590,6 +592,12 @@ export class Adapter<TItem extends Record<string, unknown>, TKey = Partial<TItem
    * projections that need to extract primary keys from scanned items.
    */
   primaryKeyAttrs: string[];
+  /**
+   * Key attribute names of the `sparse: true` indices — computed at
+   * construction. The built-in `prepare` drops each one that is `undefined`
+   * or `null` on a full write.
+   */
+  sparseKeyAttrs: string[];
   /**
    * Canonical typed descriptors — partition key first, optional sort key
    * second. Always normalized to `{field, type}` (plus `width` when present

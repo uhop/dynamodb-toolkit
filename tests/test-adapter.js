@@ -2591,35 +2591,76 @@ test('Adapter: indices — rejects invalid projection', t => {
   );
 });
 
-test('Adapter: indices — sparse true/false/object', t => {
+test('Adapter: indices — sparse true/false', t => {
   const client = makeMockClient(async () => ({}));
   const adapter = new Adapter({
     client,
     table: 'T',
     keyFields: ['name'],
     indices: {
-      a: {type: 'gsi', pk: 'a', sparse: true},
+      a: {type: 'gsi', pk: 'a', sk: 'a2', sparse: true},
       b: {type: 'gsi', pk: 'b'},
-      c: {type: 'gsi', pk: 'c', sparse: {onlyWhen: item => !!item.active}}
+      c: {type: 'gsi', pk: 'c', sparse: false}
     }
   });
   t.equal(adapter.indices['a'].sparse, true);
   t.equal(adapter.indices['b'].sparse, false);
-  t.equal(typeof adapter.indices['c'].sparse.onlyWhen, 'function');
+  t.equal(adapter.indices['c'].sparse, false);
+  t.deepEqual(adapter.sparseKeyAttrs, ['a', 'a2']);
 });
 
-test('Adapter: indices — rejects invalid sparse', t => {
+test('Adapter: indices — a truthy sparse means true, the retracted {onlyWhen} form included', t => {
   const client = makeMockClient(async () => ({}));
-  t.throws(
-    () =>
-      new Adapter({
-        client,
-        table: 'T',
-        keyFields: ['name'],
-        indices: {x: {type: 'gsi', pk: 'a', sparse: 'yes'}}
-      }),
-    'string sparse'
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      x: {type: 'gsi', pk: 'x', sparse: {onlyWhen: () => false}},
+      y: {type: 'gsi', pk: 'y', sparse: 'yes'},
+      z: {type: 'gsi', pk: 'z', sparse: 0}
+    }
+  });
+  t.equal(adapter.indices['x'].sparse, true, '{onlyWhen} constructs as sparse: true');
+  t.equal(adapter.indices['y'].sparse, true, 'truthy string');
+  t.equal(adapter.indices['z'].sparse, false, 'falsy number');
+  t.deepEqual(adapter.sparseKeyAttrs, ['x', 'y']);
+});
+
+test('built-in prepare: sparse: true drops undefined and null index keys on full writes', t => {
+  const client = makeMockClient(async () => ({}));
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {
+      'by-status': {type: 'gsi', pk: 'status', sk: 'updatedAt', sparse: true},
+      'by-owner': {type: 'gsi', pk: 'owner'}
+    }
+  });
+  t.deepEqual(
+    adapter.hooks.prepare({name: 'a', status: null, updatedAt: undefined, owner: null}),
+    {name: 'a', owner: null},
+    'sparse keys dropped, a non-sparse index key untouched'
   );
+  t.deepEqual(adapter.hooks.prepare({name: 'b', status: 'open', updatedAt: 5}), {name: 'b', status: 'open', updatedAt: 5}, 'present keys kept');
+  t.deepEqual(adapter.hooks.prepare({status: null}, true), {status: null}, 'patches left alone');
+});
+
+test('post: sparse: true leaves a null index key out of the PutCommand item', async t => {
+  const sent = [];
+  const client = makeMockClient(async cmd => {
+    sent.push(cmd);
+    return {};
+  });
+  const adapter = new Adapter({
+    client,
+    table: 'T',
+    keyFields: ['name'],
+    indices: {'by-status': {type: 'gsi', pk: 'status', sparse: true}}
+  });
+  await adapter.post({name: 'Hoth', status: null});
+  t.deepEqual(sent[0].input.Item, {name: 'Hoth'});
 });
 
 test('Adapter: indices — indirect flag', t => {

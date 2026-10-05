@@ -17,7 +17,7 @@ export interface DescriptorSnapshot {
       pk?: {name: string; type: string};
       sk?: {name: string; type: string};
       projection: 'all' | 'keys-only' | string[];
-      sparse: boolean | {onlyWhen: '<function>'};
+      sparse: boolean;
       indirect: boolean;
     }
   >;

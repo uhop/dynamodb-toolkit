@@ -50,7 +50,7 @@ export const buildDescriptorSnapshot = decl => ({
         ...(idx.pk ? {pk: {name: idx.pk.name, type: idx.pk.type}} : {}),
         ...(idx.sk ? {sk: {name: idx.sk.name, type: idx.sk.type}} : {}),
         projection: Array.isArray(idx.projection) ? idx.projection.slice() : idx.projection,
-        sparse: typeof idx.sparse === 'object' ? {onlyWhen: '<function>'} : idx.sparse,
+        sparse: idx.sparse === true,
         indirect: idx.indirect === true
       }
     ])

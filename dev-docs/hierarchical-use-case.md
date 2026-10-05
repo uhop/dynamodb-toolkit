@@ -500,8 +500,8 @@ new Adapter({
       pk: 'status', // shorthand = { name: 'status', type: 'string' }
       sk: {name: 'createdAt', type: 'number'},
       projection: 'all', // 'keys-only' | 'all' | ['field1', 'field2'] (INCLUDE)
-      sparse: true, // true = omit index fields when their value is undefined
-      //  { onlyWhen: (item) => boolean } for per-type sparse
+      sparse: true, // true = omit index fields when their value is undefined or null
+      //  { onlyWhen } for per-type sparse: retracted 2026-10-04, see § 17
       indirect: false // true = keys-only projection + second-hop BatchGet on read
     },
     'by-name': {
@@ -998,7 +998,6 @@ does not catch, wrap, or rename.
 
 - `prepare` / `revive` / `validateItem` / `checkConsistency` hooks.
 - `mapFn` on clone / move / edit.
-- `sparse.onlyWhen` predicates.
 - `exampleFromContext` adapter callback.
 - Custom marshaller functions passed to container marshallers like
   `marshallMap(map, valueTransform)`.
@@ -1154,6 +1153,14 @@ above.
     `false` (skip populating) or silent `true` (populate) both hide bugs
     and are rejected. See §"User-supplied callbacks throw; toolkit does
     not wrap" for the general rule this applies.
+
+    **Update 2026-10-04:** neither form was implemented until then.
+    `sparse: true` now ships as a built-in `prepare` step that drops an
+    index key attribute that is `undefined` or `null` on a full write
+    (DynamoDB rejects a NULL index key); patches skip. The `{ onlyWhen }`
+    form is retracted: a truthy `sparse`, that object included, means
+    `true`, and a per-type predicate belongs in the user's `prepare` hook,
+    so D5 has nothing left to govern here.
 
 18. **Sort-parameter → GSI inference** — _resolved (corrected 2026-04-21 second
     session)._ Automatic from the index declaration: `?sort=<field>` (or

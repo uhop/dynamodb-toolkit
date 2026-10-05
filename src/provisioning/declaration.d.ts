@@ -18,7 +18,7 @@ export interface ProvisioningDeclaration {
       pk?: {name: string; type: 'string' | 'number' | 'binary'};
       sk?: {name: string; type: 'string' | 'number' | 'binary'};
       projection: 'all' | 'keys-only' | string[];
-      sparse?: boolean | {onlyWhen: (item: Record<string, unknown>) => boolean};
+      sparse?: boolean;
       indirect?: boolean;
     }
   >;

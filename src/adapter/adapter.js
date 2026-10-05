@@ -132,15 +132,9 @@ const normalizeIndex = (name, def) => {
     throw new Error(`options.indices['${name}'].projection must be 'all' | 'keys-only' | non-empty string[]`);
   }
   out.projection = Array.isArray(projection) ? projection.slice() : projection;
-  if (def.sparse === undefined || def.sparse === false) {
-    out.sparse = false;
-  } else if (def.sparse === true) {
-    out.sparse = true;
-  } else if (def.sparse && typeof def.sparse === 'object' && typeof def.sparse.onlyWhen === 'function') {
-    out.sparse = {onlyWhen: def.sparse.onlyWhen};
-  } else {
-    throw new Error(`options.indices['${name}'].sparse must be boolean or {onlyWhen: (item) => boolean}`);
-  }
+  // Truthy means sparse, so a declaration of the retracted `{onlyWhen}` form
+  // still constructs and behaves as `sparse: true`.
+  out.sparse = Boolean(def.sparse);
   out.indirect = def.indirect === true;
   return out;
 };
@@ -450,6 +444,18 @@ export class Adapter {
     // and moves.
     this.primaryKeyAttrs = this.structuralKey ? [this.keyFields[0].name, this.structuralKey.name] : this.keyFields.map(f => f.name);
 
+    // Key attributes of `sparse: true` indices, dropped by the built-in
+    // prepare when undefined or null: DynamoDB rejects a NULL index key.
+    this.sparseKeyAttrs = [
+      ...new Set(
+        Object.values(this.indices)
+          .filter(idx => idx.sparse)
+          .flatMap(idx => [idx.pk, idx.sk])
+          .filter(key => key)
+          .map(key => key.name)
+      )
+    ];
+
     // Hook composition: wrap the user's prepare / revive / prepareKey hooks
     // with built-in steps that run before the user hook. The inner built-in
     // step checks its own conditions — if `technicalPrefix`, `structuralKey`,
@@ -480,7 +486,8 @@ export class Adapter {
     // Fast path: nothing declared, nothing to do — byte-for-byte identical
     // behaviour to v3.1.2.
     const hasSearchable = Object.keys(this.searchable).length > 0;
-    if (!this.technicalPrefix && !this.structuralKey && !hasSearchable && !this.typeField) return item;
+    const hasSparse = this.sparseKeyAttrs.length > 0;
+    if (!this.technicalPrefix && !this.structuralKey && !hasSearchable && !this.typeField && !hasSparse) return item;
 
     // 1. Reject incoming user fields that start with technicalPrefix.
     //    Exceptions: `versionField` and `createdAtField` are allowed —
@@ -534,6 +541,16 @@ export class Adapter {
       // keeps the input stable in case future typeOf logic depends on it.
       const label = this.typeOf(out);
       if (label !== undefined) out[this.typeField] = label;
+    }
+
+    // 5. Sparse-index keys — full writes only; an undefined or null key
+    //    attribute is dropped so the item stays out of the index instead of
+    //    failing the write. Runs after step 4 so an index keyed on typeField
+    //    sees the stamped label.
+    if (!isPatch) {
+      for (const attr of this.sparseKeyAttrs) {
+        if (out[attr] === undefined || out[attr] === null) delete out[attr];
+      }
     }
 
     return out;

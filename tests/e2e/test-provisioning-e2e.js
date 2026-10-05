@@ -3,7 +3,7 @@
 
 import test, {beforeAll, afterAll} from 'tape-six';
 import {DynamoDBClient, DeleteTableCommand} from '@aws-sdk/client-dynamodb';
-import {DynamoDBDocumentClient} from '@aws-sdk/lib-dynamodb';
+import {DynamoDBDocumentClient, ScanCommand} from '@aws-sdk/lib-dynamodb';
 
 import {Adapter, TableVerificationFailed} from 'dynamodb-toolkit';
 import {planTable, ensureTable, verifyTable, readDescriptor, writeDescriptor} from 'dynamodb-toolkit/provisioning';
@@ -91,6 +91,32 @@ test('e2e provisioning: ensureTable creates a fresh table with GSI', async t => 
   // Re-run ensure → no-op plan.
   const rerun = await planTable(adapter);
   t.equal(rerun.steps.length, 0, 'no-op on second ensure');
+});
+
+test('e2e provisioning: sparse: true keeps an item with a null index key out of the GSI', async t => {
+  if (skipIfNoDocker(t)) return;
+  const tableName = uniqueTable('prov');
+  const index = {type: 'gsi', pk: {name: 'status', type: 'string'}, sk: {name: 'createdAt', type: 'string'}, projection: 'all'};
+  const adapter = makeAdapter(tableName, {indices: {'by-status-date': {...index, sparse: true}}});
+  await ensureTable(adapter);
+
+  await adapter.post({state: 'TX', rentalName: 'Dallas', status: null, createdAt: '2026-10-04'});
+  await adapter.post({state: 'TX', rentalName: 'Austin', status: 'open', createdAt: '2026-10-04'});
+  const indexed = await ctx.docClient.send(new ScanCommand({TableName: tableName, IndexName: 'by-status-date'}));
+  t.deepEqual(
+    indexed.Items.map(item => item.rentalName),
+    ['Austin'],
+    'only the item with a status is indexed'
+  );
+
+  const plain = makeAdapter(tableName, {indices: {'by-status-date': index}});
+  let error;
+  try {
+    await plain.post({state: 'TX', rentalName: 'Houston', status: null, createdAt: '2026-10-04'});
+  } catch (e) {
+    error = e;
+  }
+  t.equal(error?.name, 'ValidationException', 'without sparse, DynamoDB rejects a NULL index key');
 });
 
 test('e2e provisioning: verifyTable ok on freshly ensured table', async t => {

@@ -51,7 +51,7 @@ await adapter.delete({name: 'Alderaan'});
 | `table` | `string` | **Required.** Base table name. |
 | `keyFields` | `(string \| KeyFieldSpec)[]` | **Required.** Partition key first, optional sort key second. Bare strings → `{name, type: 'string'}`. `{type: 'number'}` requires `width` in a composite. Normalised to `Required<KeyFieldSpec>[]` on the instance. |
 | `structuralKey` | `string \| {name, separator?}` | Required when `keyFields.length > 1`. Names the joined-composite field. Separator default `'\|'`. |
-| `indices` | `Record<string, IndexSpec>` | Single map of GSIs/LSIs, discriminated by `type: 'gsi' \| 'lsi'`. Per entry: `pk` / `sk` (GSI pk required; LSI sk required and no pk), `projection` (`'all'` default, `'keys-only'`, or `string[]` INCLUDE list), `sparse` (`true` or `{onlyWhen}` predicate), `indirect` (two-hop read). |
+| `indices` | `Record<string, IndexSpec>` | Single map of GSIs/LSIs, discriminated by `type: 'gsi' \| 'lsi'`. Per entry: `pk` / `sk` (GSI pk required; LSI sk required and no pk), `projection` (`'all'` default, `'keys-only'`, or `string[]` INCLUDE list), `sparse` (`true`: the built-in prepare drops an `undefined` or `null` index key on full writes; any truthy value counts as `true`), `indirect` (two-hop read). |
 | `typeLabels` | `string[]` | Labels paired 1:1 with `keyFields`. `typeOf(item)` returns `typeLabels[depth-1]` when set. |
 | `typeDiscriminator` | `string \| {name}` | Explicit type field; its value on an item overrides depth-based `typeOf`. |
 | `typeField` | `string` | When set, the built-in prepare step writes `typeOf(item)` at this field on every full write unless already set. Typically same as `typeDiscriminator`. Enables Pattern-1 sparse-GSI-by-type. |
@@ -70,7 +70,7 @@ await adapter.delete({name: 'Alderaan'});
 
 ### Hooks
 
-- `prepare(item, isPatch?)` — pre-write transform. Built-in step adds structural key, searchable mirrors, sparse-index markers, `typeField`, version init. User override runs last. Patches skip structural-key recomputation.
+- `prepare(item, isPatch?)` — pre-write transform. Built-in step adds structural key, searchable mirrors, and `typeField`, and drops `undefined` or `null` key attributes of `sparse: true` indices (`versionField` init happens in `post`). User override runs last. Patches skip structural-key recomputation.
 - `prepareKey(key, index?)` — identity default; the Adapter restricts to `keyFields`/index key schema afterwards.
 - `prepareListInput(example, index?)` — supplies `KeyConditionExpression` / `IndexName` for list ops.
 - `updateInput(input, {name, force?})` — last-chance mutation of the built SDK Command input.

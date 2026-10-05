@@ -40,7 +40,7 @@ Biggest release of the workstream. Makes hierarchical adapters declarative inste
   - `technicalPrefix?: string` (opt-in; default unset)
   - `keyFields: Array<string | {name, type?: 'string' | 'number' | 'binary', width?: number}>` — string shorthand = `{name, type: 'string'}`; `width` required on `{type: 'number'}` in composite keys
   - `structuralKey?: string | {name: string, separator?: string}` — required when `keyFields.length > 1`; string shorthand expands to `{name, separator: '|'}`; separator defaults to `'|'`
-  - `indices?: Record<string, {type: 'gsi' | 'lsi', pk?, sk, projection?: 'all' | 'keys-only' | string[], sparse?: boolean | {onlyWhen: (item) => boolean}, indirect?: boolean}>`
+  - `indices?: Record<string, {type: 'gsi' | 'lsi', pk?, sk, projection?: 'all' | 'keys-only' | string[], sparse?: boolean | {onlyWhen: (item) => boolean}, indirect?: boolean}>` (the `{onlyWhen}` form was never implemented and was retracted 2026-10-04)
   - `typeLabels?: string[]` — paired 1:1 with `keyFields` (length validated at construction)
   - `typeDiscriminator?: string | {name: string}` — wins over depth-based detection when the field is present on the item; string shorthand expands to `{name}`
   - `filterable?: Record<string, Array<'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'in' | 'btw' | 'beg' | 'ct' | 'ex' | 'nx'>>` — allowlist for `f-` filter grammar
@@ -61,7 +61,7 @@ Biggest release of the workstream. Makes hierarchical adapters declarative inste
   - **Built-in prepare**: reject incoming fields starting with `technicalPrefix` (input validation); compute `structuralKey` field from `keyFields` per the contiguous-from-start rule (with number zero-padding); write `searchable` mirrors; write sparse-GSI marker fields per `indices[*].sparse` predicates.
   - **Built-in revive**: strip every field starting with `technicalPrefix`.
 - [x] **`technicalPrefix` unset → built-in steps are no-ops.** Existing adapters without the declaration are byte-for-byte identical.
-- [x] **Sparse predicate throw policy**: errors from `onlyWhen` propagate unchanged (per the standing "user callbacks throw" rule). No toolkit wrap.
+- [x] **Sparse predicate throw policy** (moot: `onlyWhen` was never implemented and was retracted 2026-10-04): errors from `onlyWhen` propagate unchanged (per the standing "user callbacks throw" rule). No toolkit wrap.
 
 ### A1' helpers (§"Read-side key-condition helpers")
 
@@ -395,7 +395,7 @@ Standing rules that apply to every phase's implementation:
 
 ### User-supplied callbacks throw; toolkit does not wrap
 
-Applies across every caller-supplied extension point: `prepare` / `revive` / `validateItem` / `checkConsistency` hooks, `mapFn` on clone/move/edit, `sparse.onlyWhen` predicates, `exampleFromContext` callbacks, `valueTransform` in container marshallers. No `try/catch`-and-rethrow that renames or annotates caller errors. Caller's error class, message, and stack surface unchanged.
+Applies across every caller-supplied extension point: `prepare` / `revive` / `validateItem` / `checkConsistency` hooks, `mapFn` on clone/move/edit, `exampleFromContext` callbacks, `valueTransform` in container marshallers. No `try/catch`-and-rethrow that renames or annotates caller errors. Caller's error class, message, and stack surface unchanged.
 
 Toolkit-named errors apply to constraints the toolkit detects itself; see the enumerated list at the top of this document.
 

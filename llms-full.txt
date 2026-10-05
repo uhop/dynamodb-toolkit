@@ -78,16 +78,15 @@ const adapter = new Adapter({
 
 ### 1.2 Built-in prepare / revive steps
 
-When `technicalPrefix` is declared, the constructor installs a built-in prepare step that runs **before** the user's `prepare` hook. On every non-patch write it:
+When any of `technicalPrefix`, `structuralKey`, `searchable`, `typeField`, or a `sparse: true` index is declared, the constructor installs a built-in prepare step that runs **before** the user's `prepare` hook. On a full write it:
 
-1. Validates no user field starts with `technicalPrefix`.
+1. Validates no user field starts with `technicalPrefix` (`versionField` and `createdAtField` excepted).
 2. Composes the **structural key** (contiguous-from-start `keyFields` joined by `separator`, zero-padded per `width` on `{type: 'number'}` components).
-3. Writes `searchable` mirror columns (`searchablePrefix + field` → lowercased value).
-4. Writes sparse-index marker fields per each `indices[*].sparse` predicate.
-5. Writes `typeField = typeOf(item)` when `typeField` is declared and the field isn't already set by the user.
-6. Inits `versionField` to `1` when declared and the item doesn't carry one (post-only).
+3. Writes `searchable` mirror columns (`searchablePrefix + field` → lowercased value) for each field the body carries.
+4. Writes `typeField = typeOf(item)` when `typeField` is declared and the field isn't already set by the user.
+5. Drops each key attribute of a `sparse: true` index that is `undefined` or `null`, so the item stays out of the index instead of failing the write (DynamoDB rejects a NULL index key). Any truthy `sparse` counts as `true`; the `{onlyWhen}` predicate form was never implemented and is retracted, so a per-item rule belongs in the user's `prepare` hook.
 
-On patches, only #1 + the partial structural-key recomputation (when the patch touches a keyField component) run; mirrors/markers/typeField are left to the user if they need partial-update reshaping.
+On patches, only #1 and #3 run; the structural key, `typeField`, and sparse-index keys are left to the caller. `versionField` init (`1` on `post`) lives in the CRUD methods, not in this step.
 
 The built-in revive step strips every field starting with `technicalPrefix` — except `versionField` and `createdAtField`, which round-trip through the client so callers can do read-modify-write cycles without re-sending. User `revive` hooks run last.
 
