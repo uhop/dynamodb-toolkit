@@ -394,6 +394,7 @@ Each recipe opens with the SQL-equivalent question, shows the minimal declaratio
 - [List records of a tier](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-List-records-of-a-tier) — `SELECT * WHERE kind = 'state'`. Sparse GSI on auto-populated `typeField`; one GSI covers every tier.
 - [List records of a tier within a partition](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-List-records-of-a-tier-within-a-partition) — `SELECT * WHERE state = 'TX' AND kind = 'facility'`. Sparse LSI sharing the base pk; cheapest when listing is always partition-scoped.
 - [Per-tier sparse GSI markers](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-Per-tier-sparse-GSI-markers) — one GSI per tier with a per-tier marker attribute. Finer projection / write-cost control; sharded-marker variant for hot-partition risk.
+- [List a tier by an attribute only it carries](https://github.com/uhop/dynamodb-toolkit/wiki/Recipe：-List-a-tier-by-an-attribute-only-it-carries) — a GSI keyed on an attribute one tier alone carries: no marker, no hook, no backfill, no index writes from other tiers. Test that no other tier gains the attribute.
 
 ### Subtree operations
 

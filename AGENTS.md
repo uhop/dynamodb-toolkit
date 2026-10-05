@@ -193,7 +193,7 @@ Pass via the constructor `options.hooks` or override the corresponding methods o
 ## Critical rules
 
 - **Zero runtime dependencies.** Anything in `package.json` `dependencies` is wrong. The SDK is a `peerDependencies` entry; `tape-six` / `prettier` / `typescript` / `@types/node` / `@aws-sdk/*` (for local dev) are `devDependencies`.
-- **Do not modify `wiki/`** unless explicitly asked — it's a separate git submodule. When asked, work on a feature branch inside the submodule; Eugene commits primary-branch history manually.
+- **Do not modify `wiki/`** unless explicitly asked — it's a separate git submodule. When asked, edit it on `master` (run `git -C wiki switch master` first when the submodule is on a detached HEAD); no feature branches. Eugene commits.
 - **Do not self-commit to master / main** unless explicitly asked. Stage + report; Eugene commits.
 - **Do not introduce a build step, transpiler, or bundler.** The package ships source as-is.
 - **Do not import from `aws-sdk` (v2) anywhere.** v3 is built exclusively on `@aws-sdk/*`.
