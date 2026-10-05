@@ -44,7 +44,7 @@ Input reaches the toolkit at three levels of trust:
 Two classes are in scope:
 
 - **Disproportionate cost from a request.** Request input that makes the toolkit spend memory,
-  work, or DynamoDB calls that the configured caps do not bound. An unbounded `?offset=` and an
+  work, or DynamoDB calls beyond its documented cost model and the configured caps. An unbounded `?offset=` and an
   unbounded request body were fixed on these grounds.
 - **A contract violation from a request or a stored item.** Request input or stored data that
   makes a documented component do what the adapter or its policy does not allow: write outside
@@ -59,6 +59,13 @@ helpers directly and reports that _n_ operations take _n_ units of time, or _n_ 
 measures work the caller chose to do. A report needs an attacker model: who supplies the input,
 through which documented entry point, under what policy, and what the attacker gains that the
 caller did not already have.
+
+**Offset pagination's cost.** Offset pagination (`getList`, `?offset=`) reads the items it skips,
+keeps reading pages until `limit` items match a filter, and by default counts the rest of the range
+for the total, so one request with a selective filter can read most of a table. That is the
+documented cost model, described on the wiki's [Pagination](https://github.com/uhop/dynamodb-toolkit/wiki/Pagination)
+page. Cursor pagination (`getPage`, `?cursor`) reads about `limit` items per page and is the
+alternative for any listing a client can filter or page freely.
 
 **Access control.** The toolkit authenticates and authorizes nobody. A mounted REST handler serves
 whatever its adapter exposes, and restricting who reaches it, or scoping each request through
@@ -78,12 +85,20 @@ deliberately.
 
 ## Scoring
 
-The base score for this package uses **`AV:L`**. `dynamodb-toolkit` binds no network stack: it
-opens no listening socket, and its HTTP modules receive requests your server, framework, or Lambda
-runtime has already accepted. Whether a crafted request arrived over a network is a property of
-your deployment, which CVSS expresses through the consumer's environmental metrics rather than the
-base vector. Advisories here are scored that way, and a report submitted with `AV:N` is rescored
-rather than rejected.
+The attack vector in the base score follows how the vulnerable component is reached:
+
+- **`AV:N` for the HTTP layer.** The REST handler, the framework adapters (`express`, `koa`,
+  `fetch`, `lambda`), and the `rest-core` parsers exist to process requests from your service's
+  clients, which can arrive from the open network. A vulnerability an attacker reaches by sending
+  such a request, including one in a shared helper the REST layer calls, is scored `AV:N`.
+- **`AV:L` for everything else.** The `Adapter` called from your code, the expression builders,
+  the batch and mass helpers, marshalling, provisioning, and the CLI bind no network stack and take
+  their input from your code. Whether that input arrived over a network is a property of your
+  deployment, which CVSS expresses through the consumer's environmental metrics rather than the
+  base vector.
+
+Advisories here are scored that way, and a report submitted with `AV:N` for a component outside the
+HTTP layer is rescored rather than rejected.
 
 ## Hardening already shipped
 
