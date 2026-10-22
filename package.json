@@ -98,7 +98,7 @@
     "express": "^5.2.1",
     "koa": "^3.2.1",
     "prettier": "^3.9.5",
-    "tape-six": "^1.15.0",
+    "tape-six": "^1.18.1",
     "typescript": "^7.0.2"
   },
   "files": [
